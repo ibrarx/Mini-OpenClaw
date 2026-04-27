@@ -7,7 +7,11 @@ and common test helpers.
 
 from pathlib import Path
 
+import aiosqlite
 import pytest
+import pytest_asyncio
+
+from apps.api.database import create_tables, get_connection
 
 
 @pytest.fixture
@@ -37,3 +41,18 @@ def populated_workspace(tmp_workspace: Path) -> Path:
     sub.mkdir()
     (sub / "nested.txt").write_text("nested content\n")
     return tmp_workspace
+
+
+@pytest_asyncio.fixture
+async def test_db(tmp_db_path: Path) -> aiosqlite.Connection:
+    """Create a test database with all tables and yield a connection.
+
+    The database is created fresh for each test function. The connection
+    is closed after the test completes.
+    """
+    await create_tables(tmp_db_path)
+    conn = await get_connection(tmp_db_path)
+    try:
+        yield conn
+    finally:
+        await conn.close()

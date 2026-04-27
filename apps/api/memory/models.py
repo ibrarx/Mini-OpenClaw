@@ -19,6 +19,7 @@ class MemorySearchRequest(BaseModel):
     query: str
     memory_type: MemoryType | None = None
     limit: int = Field(default=10, ge=1, le=50)
+    workspace_id: str = "default"
 
 
 class MemoryQuery(BaseModel):
@@ -28,3 +29,12 @@ class MemoryQuery(BaseModel):
     memory_type: MemoryType | None = None
     query: str | None = None
     limit: int = Field(default=10, ge=1, le=50)
+
+
+class MemoryStatsResponse(BaseModel):
+    """GET /api/memory/stats response body."""
+
+    total: int = 0
+    facts: int = 0
+    episodes: int = 0
+    summaries: int = 0
