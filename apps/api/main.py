@@ -16,6 +16,8 @@ from .config import get_settings
 from .database import create_tables
 from .routes.health import router as health_router
 from .routes.tools import router as tools_router
+from .routes.chat import router as chat_router
+from .routes.runs import router as runs_router
 
 settings = get_settings()
 
@@ -69,3 +71,5 @@ app.add_middleware(
 # Register routes
 app.include_router(health_router, prefix="/api")
 app.include_router(tools_router, prefix="/api")
+app.include_router(chat_router, prefix="/api")
+app.include_router(runs_router, prefix="/api")
