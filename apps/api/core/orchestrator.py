@@ -125,11 +125,25 @@ class Orchestrator:
         final = self._build_final_response(all_results)
         return await self._complete_run(run_id, session_id, workspace_id, message, plan, final, now)
 
-    async def approve_step(self, run_id: str, step_id: str, approved: bool) -> Run:
-        """Process approval and resume execution."""
+    async def approve_step(self, run_id: str, step_id: str, approved: bool, db: aiosqlite.Connection | None = None) -> Run:
+        """Process approval and resume execution.
+
+        Args:
+            run_id: The run to approve.
+            step_id: The step to approve.
+            approved: True to approve, False to reject.
+            db: Fresh database connection (the original one from chat is closed).
+        """
         run = self._runs.get(run_id)
         if not run or not run.plan:
             raise ValueError(f"Run not found or no plan: {run_id}")
+
+        # Use the fresh db connection if provided (the original is closed)
+        if db is not None:
+            self._db = db
+            self._audit = AuditLogger(db)
+            if self._executor._audit is not None:
+                self._executor._audit = self._audit
 
         target = None
         for s in run.plan.steps:

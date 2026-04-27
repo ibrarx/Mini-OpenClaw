@@ -69,7 +69,7 @@ async def approve_step(run_id: str, body: ApprovalRequest, db: aiosqlite.Connect
     # Check if orchestrator has this run in-memory (still awaiting)
     if orch and run_id in orch._runs:
         try:
-            run = await orch.approve_step(run_id, body.step_id, body.approved)
+            run = await orch.approve_step(run_id, body.step_id, body.approved, db=db)
             # Re-fetch from DB for consistent response
             return await get_run(run_id, db)
         except ValueError as exc:
