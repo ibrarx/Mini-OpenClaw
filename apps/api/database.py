@@ -122,3 +122,25 @@ async def create_tables(db_path: Path) -> None:
         logger.info("Database tables created successfully")
     finally:
         await conn.close()
+
+
+async def get_db() -> aiosqlite.Connection:
+    """FastAPI dependency that yields an async SQLite connection.
+
+    Usage in routes::
+
+        @router.get("/example")
+        async def example(db: aiosqlite.Connection = Depends(get_db)):
+            ...
+
+    The connection is opened at the start of the request and closed
+    when the request finishes, even if an error occurs.
+    """
+    from .config import get_settings
+
+    settings = get_settings()
+    conn = await get_connection(settings.resolved_database)
+    try:
+        yield conn  # type: ignore[misc]
+    finally:
+        await conn.close()

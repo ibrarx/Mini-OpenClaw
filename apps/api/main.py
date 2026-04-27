@@ -14,7 +14,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .database import create_tables
+from .routes.chat import router as chat_router
 from .routes.health import router as health_router
+from .routes.memory import router as memory_router
+from .routes.runs import router as runs_router
+from .routes.tools import router as tools_router, set_registry
+from .skills.registry import SkillRegistry
 
 settings = get_settings()
 
@@ -39,6 +44,12 @@ async def lifespan(app: FastAPI):
     # Create database tables
     await create_tables(settings.resolved_database)
     logger.info("Database ready: %s", settings.resolved_database)
+
+    # Discover and register tools
+    registry = SkillRegistry()
+    registry.discover()
+    set_registry(registry)
+    logger.info("Registered %d tools: %s", len(registry.get_tool_names()), registry.get_tool_names())
 
     yield
 
@@ -67,3 +78,7 @@ app.add_middleware(
 
 # Register routes
 app.include_router(health_router, prefix="/api")
+app.include_router(chat_router, prefix="/api")
+app.include_router(runs_router, prefix="/api")
+app.include_router(memory_router, prefix="/api")
+app.include_router(tools_router, prefix="/api")
