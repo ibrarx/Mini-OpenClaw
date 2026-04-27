@@ -5,7 +5,7 @@ install:
 	cd apps/web && npm install
 
 dev:
-	cd apps/api && python -m uvicorn main:app --reload --port 8000 &
+	python -m uvicorn apps.api.main:app --reload --port 8000 &
 	cd apps/web && npm run dev
 
 test:

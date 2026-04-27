@@ -12,9 +12,9 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from apps.api.config import get_settings
-from apps.api.database import create_tables
-from apps.api.routes.health import router as health_router
+from .config import get_settings
+from .database import create_tables
+from .routes.health import router as health_router
 
 settings = get_settings()
 

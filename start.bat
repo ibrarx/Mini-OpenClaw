@@ -27,7 +27,7 @@ cd ..\..
 echo.
 echo === Starting Mini-OpenClaw ===
 echo Starting backend on http://localhost:8000 ...
-start "Mini-OpenClaw Backend" cmd /c "cd apps\api && python -m uvicorn main:app --reload --port 8000"
+start "Mini-OpenClaw Backend" cmd /c "python -m uvicorn apps.api.main:app --reload --port 8000"
 
 echo Starting frontend on http://localhost:5173 ...
 start "Mini-OpenClaw Frontend" cmd /c "cd apps\web && npm run dev"

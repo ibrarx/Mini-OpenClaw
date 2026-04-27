@@ -62,10 +62,9 @@ Navigate to [http://localhost:5173](http://localhost:5173) in your browser.
 If the startup scripts don't work for your environment:
 
 ```bash
-# Terminal 1 — Backend
+# Terminal 1 — Backend (run from project root)
 pip install -r requirements.txt
-cd apps/api
-python -m uvicorn main:app --reload --port 8000
+python -m uvicorn apps.api.main:app --reload --port 8000
 
 # Terminal 2 — Frontend
 cd apps/web
