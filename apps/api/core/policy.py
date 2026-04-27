@@ -77,9 +77,13 @@ class PolicyEngine:
         """Validate an allowlisted shell command."""
         if command not in _ALLOWED_COMMANDS:
             return PolicyDecision(allowed=False, classification="forbidden", reason=f"Command not in allowlist: {command}")
-        pattern = _WIN_DANGEROUS if IS_WINDOWS else _UNIX_DANGEROUS
+        # Check BOTH Unix and Windows metacharacters on all platforms.
+        # Unix metacharacters are dangerous in PowerShell too, and
+        # Windows metacharacters are dangerous under WSL.
         for arg in args:
-            if pattern.search(arg):
+            if _UNIX_DANGEROUS.search(arg):
+                return PolicyDecision(allowed=False, classification="forbidden", reason=f"Dangerous metacharacter in argument: {arg!r}")
+            if _WIN_DANGEROUS.search(arg):
                 return PolicyDecision(allowed=False, classification="forbidden", reason=f"Dangerous metacharacter in argument: {arg!r}")
         # Validate path args against workspace
         for arg in args:
