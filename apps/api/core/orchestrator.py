@@ -144,8 +144,10 @@ class Orchestrator:
 
         # 5. Direct answer / clarification — no tools needed
         if plan.task_type in (TaskType.DIRECT_ANSWER, TaskType.CLARIFICATION_NEEDED):
-            run = await self._complete_run(run_id, session_id, workspace_id, message, plan, plan.reasoning, now)
-            await self._store_episode(run, workspace_id)
+            final = plan.direct_response or plan.reasoning
+            run = await self._complete_run(run_id, session_id, workspace_id, message, plan, final, now)
+            await self._store_assistant_message(session_id, run_id, final)
+            await self._store_episode(workspace_id, run_id, message, final, plan)
             return run
 
         # ── Execute steps ──
@@ -212,14 +214,7 @@ class Orchestrator:
         # 7. Finalise
         final = self._build_final_response(all_results)
         run = await self._complete_run(run_id, session_id, workspace_id, message, plan, final, now)
-        await self._store_episode(run, workspace_id)
-        return run
-
-        # Store episode in memory
-        await self._store_episode(
-            workspace_id, run_id, message, final, plan
-        )
-
+        await self._store_episode(workspace_id, run_id, message, final, plan)
         return run
 
     # ------------------------------------------------------------------
@@ -340,56 +335,12 @@ class Orchestrator:
         run.status = RunStatus.COMPLETED
         run.final_response = self._build_final_response(all_results)
         await self._update_run_db(run_id, run.status.value, run.plan, run.final_response, _now())
-        await self._store_episode(run, run.workspace_id)
+        await self._store_episode(run.workspace_id, run_id, run.user_message, run.final_response, run.plan)
         return run
 
     # ------------------------------------------------------------------
     # Memory integration
     # ------------------------------------------------------------------
-
-    async def _store_episode(self, run: Run, workspace_id: str) -> None:
-        """Store a completed run as an episodic memory item.
-
-        Args:
-            run: The completed run.
-            workspace_id: Logical workspace scope.
-        """
-        if run.status not in (RunStatus.COMPLETED, RunStatus.FAILED):
-            return
-
-        try:
-            manager = MemoryManager(self._db)
-            # Build episode content
-            tools_used = []
-            if run.plan and run.plan.steps:
-                tools_used = [s.tool for s in run.plan.steps if s.status == StepStatus.COMPLETED]
-
-            content = f"User asked: {run.user_message}"
-            if tools_used:
-                content += f"\nTools used: {', '.join(tools_used)}"
-            if run.final_response:
-                # Truncate long responses for memory
-                resp = run.final_response[:300]
-                content += f"\nResult: {resp}"
-
-            summary = f"{run.user_message[:100]}"
-            if tools_used:
-                summary += f" (used {', '.join(tools_used)})"
-
-            await manager.store_episode(
-                content=content,
-                summary=summary,
-                source=f"run:{run.run_id}",
-                workspace_id=workspace_id,
-                run_id=run.run_id,
-            )
-            await self._audit.log_event(
-                "memory_written",
-                run_id=run.run_id,
-                details={"memory_type": "episode", "summary": summary[:200]},
-            )
-        except Exception as exc:
-            logger.warning("Failed to store episode memory: %s", exc)
 
     # ------------------------------------------------------------------
     # Step execution
