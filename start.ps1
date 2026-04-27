@@ -1,32 +1,37 @@
-# Mini-OpenClaw Windows Startup Script (PowerShell)
-# This installs dependencies and starts both backend and frontend.
+# Mini-OpenClaw Windows startup script (PowerShell)
 
-Write-Host "=== Mini-OpenClaw Setup ===" -ForegroundColor Cyan
+Write-Host "Starting Mini-OpenClaw..." -ForegroundColor Cyan
 
-Write-Host "`nInstalling Python dependencies..."
-pip install -r requirements.txt
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: Failed to install Python dependencies." -ForegroundColor Red
+# Check prerequisites
+try { python --version | Out-Null } catch {
+    Write-Host "ERROR: Python not found. Install Python 3.11+ from python.org" -ForegroundColor Red
+    exit 1
+}
+try { node --version | Out-Null } catch {
+    Write-Host "ERROR: Node.js not found. Install Node.js 18+ from nodejs.org" -ForegroundColor Red
     exit 1
 }
 
-Write-Host "`nInstalling Node dependencies..."
+# Install dependencies
+Write-Host "Installing Python dependencies..." -ForegroundColor Yellow
+pip install -r requirements.txt --quiet
+
+Write-Host "Installing Node dependencies..." -ForegroundColor Yellow
 Push-Location apps/web
-npm install
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: Failed to install Node dependencies." -ForegroundColor Red
-    Pop-Location
-    exit 1
-}
+npm install --silent
 Pop-Location
 
-Write-Host "`n=== Starting Mini-OpenClaw ===" -ForegroundColor Cyan
-Write-Host "Starting backend on http://localhost:8000 ..."
+# Seed demo data
+Write-Host "Seeding demo workspace..." -ForegroundColor Yellow
+python scripts/seed_demo.py
+
+# Start backend
+Write-Host "Starting backend on http://localhost:8000..." -ForegroundColor Green
 Start-Process -NoNewWindow powershell -ArgumentList "-Command", "python -m uvicorn apps.api.main:app --reload --port 8000"
 
-Write-Host "Starting frontend on http://localhost:5173 ..."
-Start-Process -NoNewWindow powershell -ArgumentList "-Command", "cd apps/web; npm run dev"
+Start-Sleep -Seconds 3
 
-Write-Host "`nBoth servers starting. Open http://localhost:5173 in your browser." -ForegroundColor Green
-Write-Host "Press Ctrl+C to stop."
-Read-Host "Press Enter to exit"
+# Start frontend
+Write-Host "Starting frontend on http://localhost:5173..." -ForegroundColor Green
+Push-Location apps/web
+npm run dev

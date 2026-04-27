@@ -1,5 +1,38 @@
-"""
-skills/read_file — Stub for T03.
+"""skills/read_file — Read a text file inside the workspace."""
+from __future__ import annotations
+from pathlib import Path
+from typing import Any
+from apps.api.models.run import RiskLevel
+from apps.api.models.tool_manifest import ToolManifest
+from apps.api.skills.base import BaseTool, ToolContext
 
-See 03-tool-contracts.md for interface specification.
-"""
+class ReadFileTool(BaseTool):
+    def manifest(self) -> ToolManifest:
+        return ToolManifest(name="read_file", description="Read a text file inside the workspace.",
+                            risk_level=RiskLevel.SAFE, approval_required=False,
+                            input_schema={"type":"object","properties":{"path":{"type":"string"},
+                            "offset":{"type":"integer","minimum":0},
+                            "limit":{"type":"integer","minimum":1,"maximum":5000}},"required":["path"]})
+
+    async def execute(self, args: dict[str, Any], context: ToolContext) -> Any:
+        started = self._now()
+        workspace = Path(context.workspace_root).resolve()
+        target = (workspace / args["path"]).resolve()
+        try:
+            target.relative_to(workspace)
+        except ValueError:
+            return self._error(args, f"Path outside workspace: {target}", started)
+        if not target.exists():
+            return self._error(args, f"File not found: {args['path']}", started)
+        if not target.is_file():
+            return self._error(args, f"Not a file: {args['path']}", started)
+        try:
+            text = target.read_text(encoding="utf-8", errors="replace")
+        except PermissionError:
+            return self._error(args, f"Permission denied: {args['path']}", started)
+        offset = args.get("offset", 0)
+        limit = args.get("limit", 5000)
+        lines = text.splitlines()
+        sliced = lines[offset:offset + limit]
+        return self._success(args, {"path": args["path"], "content": "\n".join(sliced),
+                                     "total_lines": len(lines), "truncated": len(lines) > offset + limit}, started)

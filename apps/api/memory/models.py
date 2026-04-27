@@ -1,5 +1,3 @@
-"""
-memory/models — Stub for T05.
-
-See 04-memory-model.md for schema and design.
-"""
+"""memory/models — Re-exports from main models."""
+from apps.api.models.memory_item import MemoryItem, MemoryType
+__all__ = ["MemoryItem", "MemoryType"]

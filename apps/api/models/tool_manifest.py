@@ -1,5 +1,13 @@
-"""
-models/tool_manifest — Stub for T02.
+"""models/tool_manifest — Pydantic model for tool registration manifests."""
+from __future__ import annotations
+from typing import Any
+from pydantic import BaseModel, Field
+from apps.api.models.run import RiskLevel
 
-See 01-architecture.md and 05-api-spec.md for data model design.
-"""
+class ToolManifest(BaseModel):
+    name: str
+    description: str
+    risk_level: RiskLevel = RiskLevel.SAFE
+    approval_required: bool = False
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+    output_schema: dict[str, Any] = Field(default_factory=dict)

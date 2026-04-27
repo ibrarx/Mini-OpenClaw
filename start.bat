@@ -1,38 +1,43 @@
 @echo off
-REM Mini-OpenClaw Windows Startup Script (CMD)
-REM This installs dependencies and starts both backend and frontend.
-
-echo === Mini-OpenClaw Setup ===
-
+echo Starting Mini-OpenClaw...
 echo.
-echo Installing Python dependencies...
-pip install -r requirements.txt
-if %ERRORLEVEL% neq 0 (
-    echo ERROR: Failed to install Python dependencies.
-    pause
+
+REM Check for Python
+python --version >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: Python not found. Install Python 3.11+ from python.org
     exit /b 1
 )
 
-echo.
+REM Check for Node
+node --version >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: Node.js not found. Install Node.js 18+ from nodejs.org
+    exit /b 1
+)
+
+REM Install Python dependencies
+echo Installing Python dependencies...
+pip install -r requirements.txt --quiet
+
+REM Install Node dependencies
 echo Installing Node dependencies...
 cd apps\web
-call npm install
-if %ERRORLEVEL% neq 0 (
-    echo ERROR: Failed to install Node dependencies.
-    pause
-    exit /b 1
-)
+call npm install --silent
 cd ..\..
 
-echo.
-echo === Starting Mini-OpenClaw ===
-echo Starting backend on http://localhost:8000 ...
+REM Seed demo data
+echo Seeding demo workspace...
+python scripts\seed_demo.py
+
+REM Start backend in background
+echo Starting backend on http://localhost:8000...
 start "Mini-OpenClaw Backend" cmd /c "python -m uvicorn apps.api.main:app --reload --port 8000"
 
-echo Starting frontend on http://localhost:5173 ...
-start "Mini-OpenClaw Frontend" cmd /c "cd apps\web && npm run dev"
+REM Wait a moment for backend
+timeout /t 3 >nul
 
-echo.
-echo Both servers starting. Open http://localhost:5173 in your browser.
-echo Close this window or press Ctrl+C to stop.
-pause
+REM Start frontend
+echo Starting frontend on http://localhost:5173...
+cd apps\web
+call npm run dev
