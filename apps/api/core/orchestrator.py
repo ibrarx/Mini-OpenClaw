@@ -14,6 +14,7 @@ from ..core.events import EventEmitter
 from ..core.executor import Executor
 from ..core.planner import Planner, PlannerError
 from ..core.policy import PolicyEngine
+from ..memory.manager import MemoryManager
 from ..memory.retrieval import MemoryRetrieval
 from ..models.run import Plan, Run, RunStatus, TaskType
 from ..models.step import RunStep, StepStatus
@@ -50,6 +51,16 @@ class Orchestrator:
         session_id: str,
         workspace_id: str = "default",
     ) -> Run:
+        """Process a user message through the full agent pipeline.
+
+        Args:
+            message: The user's natural language input.
+            session_id: Active session identifier.
+            workspace_id: Logical workspace scope.
+
+        Returns:
+            The created Run object with plan and status.
+        """
         run_id = f"run_{uuid.uuid4().hex[:12]}"
         now = _now()
 
@@ -61,17 +72,18 @@ class Orchestrator:
         await self._audit.log_event("run_created", run_id=run_id, details={"message": message})
         await self._events.emit("run_created", {"run_id": run_id})
 
-        # Fetch memory context
+        # ── Fetch memory context ──
         memory_context = ""
         try:
             retrieval = MemoryRetrieval(self._db)
-            items = await retrieval.search(query=message, workspace_id=workspace_id, limit=5)
-            if items:
-                memory_context = "\n".join(f"- [{i.memory_type}] {i.content}" for i in items)
+            memory_context = await retrieval.get_context_for_planner(
+                message=message,
+                workspace_id=workspace_id,
+            )
         except Exception as exc:
             logger.warning("Memory retrieval failed: %s", exc)
 
-        # Ask planner
+        # ── Ask planner ──
         try:
             plan = await self._planner.create_plan(
                 message=message,
@@ -85,9 +97,11 @@ class Orchestrator:
 
         # Direct answer — no tools needed
         if plan.task_type in (TaskType.DIRECT_ANSWER, TaskType.CLARIFICATION_NEEDED):
-            return await self._complete_run(run_id, session_id, workspace_id, message, plan, plan.reasoning, now)
+            run = await self._complete_run(run_id, session_id, workspace_id, message, plan, plan.reasoning, now)
+            await self._store_episode(run, workspace_id)
+            return run
 
-        # Execute steps
+        # ── Execute steps ──
         run = Run(run_id=run_id, session_id=session_id, workspace_id=workspace_id,
                   status=RunStatus.RUNNING, user_message=message, plan=plan, created_at=now, updated_at=now)
         self._runs[run_id] = run
@@ -108,7 +122,6 @@ class Orchestrator:
 
             if decision.classification == "approval_required":
                 step.status = StepStatus.AWAITING_APPROVAL
-                # Save step to DB and pause
                 await self._save_step(run_id, step, len(all_results))
                 await self._save_approval_request(run_id, step)
                 run.status = RunStatus.AWAITING_APPROVAL
@@ -123,7 +136,9 @@ class Orchestrator:
                 all_results.append(result)
 
         final = self._build_final_response(all_results)
-        return await self._complete_run(run_id, session_id, workspace_id, message, plan, final, now)
+        run = await self._complete_run(run_id, session_id, workspace_id, message, plan, final, now)
+        await self._store_episode(run, workspace_id)
+        return run
 
     async def approve_step(self, run_id: str, step_id: str, approved: bool, db: aiosqlite.Connection | None = None) -> Run:
         """Process approval and resume execution.
@@ -138,7 +153,7 @@ class Orchestrator:
         if not run or not run.plan:
             raise ValueError(f"Run not found or no plan: {run_id}")
 
-        # Use the fresh db connection if provided (the original is closed)
+        # Use the fresh db connection if provided
         if db is not None:
             self._db = db
             self._audit = AuditLogger(db)
@@ -153,7 +168,6 @@ class Orchestrator:
             raise ValueError(f"Step {step_id} not awaiting approval")
 
         await self._audit.log_event("approval_decision", run_id=run_id, step_id=step_id, details={"approved": approved})
-        # Record in approvals table
         now = _now()
         await self._db.execute(
             "INSERT INTO approvals (id,run_id,step_id,payload,approved,decided_at,created_at) VALUES (?,?,?,?,?,?,?)",
@@ -198,7 +212,60 @@ class Orchestrator:
         run.status = RunStatus.COMPLETED
         run.final_response = self._build_final_response(all_results)
         await self._update_run_db(run_id, run.status.value, run.plan, run.final_response, _now())
+        await self._store_episode(run, run.workspace_id)
         return run
+
+    # ------------------------------------------------------------------
+    # Memory integration
+    # ------------------------------------------------------------------
+
+    async def _store_episode(self, run: Run, workspace_id: str) -> None:
+        """Store a completed run as an episodic memory item.
+
+        Args:
+            run: The completed run.
+            workspace_id: Logical workspace scope.
+        """
+        if run.status not in (RunStatus.COMPLETED, RunStatus.FAILED):
+            return
+
+        try:
+            manager = MemoryManager(self._db)
+            # Build episode content
+            tools_used = []
+            if run.plan and run.plan.steps:
+                tools_used = [s.tool for s in run.plan.steps if s.status == StepStatus.COMPLETED]
+
+            content = f"User asked: {run.user_message}"
+            if tools_used:
+                content += f"\nTools used: {', '.join(tools_used)}"
+            if run.final_response:
+                # Truncate long responses for memory
+                resp = run.final_response[:300]
+                content += f"\nResult: {resp}"
+
+            summary = f"{run.user_message[:100]}"
+            if tools_used:
+                summary += f" (used {', '.join(tools_used)})"
+
+            await manager.store_episode(
+                content=content,
+                summary=summary,
+                source=f"run:{run.run_id}",
+                workspace_id=workspace_id,
+                run_id=run.run_id,
+            )
+            await self._audit.log_event(
+                "memory_written",
+                run_id=run.run_id,
+                details={"memory_type": "episode", "summary": summary[:200]},
+            )
+        except Exception as exc:
+            logger.warning("Failed to store episode memory: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Step execution
+    # ------------------------------------------------------------------
 
     async def _execute_step(self, step: RunStep, context: dict, run_id: str) -> dict | None:
         step.status = StepStatus.RUNNING; step.started_at = _now()
@@ -247,6 +314,10 @@ class Orchestrator:
             else:
                 parts.append(f"{tool}: {json.dumps(output)[:200]}")
         return "\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # Database helpers
+    # ------------------------------------------------------------------
 
     async def _fail_run(self, run_id, session_id, workspace_id, message, error, now) -> Run:
         await self._db.execute("UPDATE runs SET status=?, final_response=?, updated_at=? WHERE id=?",

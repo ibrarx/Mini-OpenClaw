@@ -1,7 +1,8 @@
 """
-Memory endpoints: list, search, export.
+Memory endpoints: list, search, export, stats, delete.
 
-Provides read access to the memory store and keyword search.
+Provides read access to the memory store, keyword search,
+JSON export for evaluators, and item management.
 """
 
 from __future__ import annotations
@@ -11,9 +12,10 @@ import logging
 from typing import Any
 
 import aiosqlite
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..database import get_db
+from ..memory.manager import MemoryManager
 from ..memory.models import MemorySearchRequest
 from ..memory.retrieval import MemoryRetrieval
 from ..models.memory_item import MemoryItem, MemoryType
@@ -62,6 +64,7 @@ async def search_memory(
 
     items = await retrieval.search(
         query=body.query,
+        workspace_id=body.workspace_id,
         memory_type=body.memory_type,
         limit=body.limit,
     )
@@ -71,17 +74,68 @@ async def search_memory(
 
 @router.get("/memory/export")
 async def export_memory(
+    workspace_id: str = Query(default="default"),
     db: aiosqlite.Connection = Depends(get_db),
 ) -> dict[str, Any]:
     """Export all memory as formatted JSON for evaluator inspection."""
     retrieval = MemoryRetrieval(db)
 
-    facts = await retrieval.list_items(memory_type=MemoryType.FACT, limit=1000)
-    episodes = await retrieval.list_items(memory_type=MemoryType.EPISODE, limit=1000)
-    summaries = await retrieval.list_items(memory_type=MemoryType.SUMMARY, limit=1000)
+    facts = await retrieval.list_items(
+        workspace_id=workspace_id,
+        memory_type=MemoryType.FACT,
+        limit=1000,
+    )
+    episodes = await retrieval.list_items(
+        workspace_id=workspace_id,
+        memory_type=MemoryType.EPISODE,
+        limit=1000,
+    )
+    summaries = await retrieval.list_items(
+        workspace_id=workspace_id,
+        memory_type=MemoryType.SUMMARY,
+        limit=1000,
+    )
+
+    # Also export audit events
+    audit_rows = await db.execute_fetchall(
+        "SELECT * FROM audit_events ORDER BY created_at DESC LIMIT 500"
+    )
+    audit_events = []
+    for row in audit_rows:
+        event = dict(row)
+        if event.get("data"):
+            try:
+                event["data"] = json.loads(event["data"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        audit_events.append(event)
 
     return {
         "facts": [i.model_dump() for i in facts],
         "episodes": [i.model_dump() for i in episodes],
         "summaries": [i.model_dump() for i in summaries],
+        "audit_events": audit_events,
     }
+
+
+@router.get("/memory/stats")
+async def memory_stats(
+    workspace_id: str = Query(default="default"),
+    db: aiosqlite.Connection = Depends(get_db),
+) -> dict[str, int]:
+    """Return memory item counts by type."""
+    manager = MemoryManager(db)
+    return await manager.get_stats(workspace_id)
+
+
+@router.delete("/memory/{item_id}")
+async def delete_memory_item(
+    item_id: str,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> dict[str, Any]:
+    """Delete a memory item by id."""
+    manager = MemoryManager(db)
+    deleted = await manager.delete_item(item_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Memory item not found")
+    return {"deleted": True, "item_id": item_id}
