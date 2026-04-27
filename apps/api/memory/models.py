@@ -1,5 +1,9 @@
 """
-memory/models — Stub for T05.
+Memory subsystem Pydantic models.
 
-See 04-memory-model.md for schema and design.
+Re-exports from the central models package for convenience.
 """
+
+from ..models.memory_item import MemoryItem, MemoryQuery, MemoryType, MemoryVisibility
+
+__all__ = ["MemoryItem", "MemoryQuery", "MemoryType", "MemoryVisibility"]
