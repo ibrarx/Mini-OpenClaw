@@ -1,5 +1,13 @@
-// MemoryPage — stub for T06.
+/**
+ * MemoryPage — displays the memory browser.
+ */
+
+import MemoryBrowser from "../components/MemoryBrowser";
 
 export default function MemoryPage() {
-  return <div>MemoryPage</div>;
+  return (
+    <div className="h-full overflow-y-auto">
+      <MemoryBrowser />
+    </div>
+  );
 }
