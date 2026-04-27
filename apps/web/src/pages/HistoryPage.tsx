@@ -1,5 +1,17 @@
-// HistoryPage — stub for T06.
+/**
+ * HistoryPage — displays run history for the current session.
+ */
 
-export default function HistoryPage() {
-  return <div>HistoryPage</div>;
+import RunHistory from "../components/RunHistory";
+
+interface HistoryPageProps {
+  sessionId: string;
+}
+
+export default function HistoryPage({ sessionId }: HistoryPageProps) {
+  return (
+    <div className="h-full overflow-y-auto">
+      <RunHistory sessionId={sessionId} />
+    </div>
+  );
 }
