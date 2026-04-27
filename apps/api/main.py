@@ -4,25 +4,24 @@ Mini-OpenClaw FastAPI application entry point.
 Creates the app, configures CORS and logging, registers routes,
 discovers tools, and initialises the database on startup.
 """
-
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from apps.api.config import get_settings
-from apps.api.database import create_tables
-from apps.api.routes.health import router as health_router
-from apps.api.routes.chat import router as chat_router
-from apps.api.routes.runs import router as runs_router
-from apps.api.routes.memory import router as memory_router
-from apps.api.routes.tools import router as tools_router
-from apps.api.skills.registry import skill_registry
+from .config import get_settings
+from .database import create_tables
+from .skills.registry import skill_registry
+from .core.orchestrator import Orchestrator
+from .routes.health import router as health_router
+from .routes.chat import router as chat_router
+from .routes.runs import router as runs_router
+from .routes.memory import router as memory_router
+from .routes.tools import router as tools_router
 
 settings = get_settings()
 
-# Configure logging
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -46,10 +45,11 @@ async def lifespan(app: FastAPI):
 
     # Discover and register tools
     skill_registry.discover()
-    logger.info("Tools registered: %d", skill_registry.tool_count)
 
-    if not settings.anthropic_api_key:
-        logger.warning("ANTHROPIC_API_KEY not set — planner will not work")
+    # Create orchestrator and attach to app state
+    orchestrator = Orchestrator(settings, skill_registry)
+    app.state.orchestrator = orchestrator
+    logger.info("Orchestrator ready with %d tools", skill_registry.tool_count)
 
     yield
 
@@ -63,7 +63,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow the Vite dev server
+# CORS - allow the Vite dev server
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

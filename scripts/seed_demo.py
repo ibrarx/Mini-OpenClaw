@@ -18,48 +18,38 @@ from apps.api.memory.manager import MemoryManager
 async def main() -> None:
     settings = get_settings()
     workspace = settings.resolved_workspace
-    db_path = settings.resolved_database
-
-    # Create workspace
     workspace.mkdir(parents=True, exist_ok=True)
-    print(f"Workspace: {workspace}")
 
-    # Create DB tables
-    await create_tables(db_path)
-    print(f"Database: {db_path}")
+    # Create sample files
+    (workspace / "README.md").write_text(
+        "# Demo Project\n\nThis is a demo workspace for Mini-OpenClaw evaluation.\n\n"
+        "## Features\n- Task routing\n- Memory system\n- Safe execution\n",
+        encoding="utf-8")
+    (workspace / "notes.txt").write_text(
+        "TODO: Review the architecture document\n"
+        "TODO: Test memory search\n"
+        "DONE: Set up workspace\n", encoding="utf-8")
+    (workspace / "config.json").write_text(
+        '{"project": "mini-openclaw", "version": "0.1.0", "debug": true}',
+        encoding="utf-8")
 
-    # Seed workspace files
-    readme = workspace / "README.md"
-    if not readme.exists():
-        readme.write_text("# Demo Workspace\n\nThis is a demo workspace for Mini-OpenClaw.\n\n"
-                          "## Files\n- notes.txt: Project notes\n- data/: Data directory\n",
-                          encoding="utf-8")
-        print("Created README.md")
+    src_dir = workspace / "src"
+    src_dir.mkdir(exist_ok=True)
+    (src_dir / "main.py").write_text(
+        "# Main application entry point\nprint(\"Hello from Mini-OpenClaw!\")\n",
+        encoding="utf-8")
 
-    notes = workspace / "notes.txt"
-    if not notes.exists():
-        notes.write_text("Project notes:\n- TODO: Set up testing framework\n"
-                         "- TODO: Review security model\n- DONE: Initial architecture\n",
-                         encoding="utf-8")
-        print("Created notes.txt")
-
-    data_dir = workspace / "data"
-    data_dir.mkdir(exist_ok=True)
-    sample = data_dir / "sample.csv"
-    if not sample.exists():
-        sample.write_text("name,value,category\nalpha,42,A\nbeta,17,B\ngamma,99,A\n",
-                          encoding="utf-8")
-        print("Created data/sample.csv")
+    print(f"Created demo files in {workspace}")
 
     # Seed memory
-    mm = MemoryManager(db_path)
-    await mm.store_fact(content="Demo workspace is a test project for evaluation.",
-                        source="seed_demo", confidence=0.9)
-    await mm.store_fact(content="User prefers concise responses.",
-                        source="seed_demo", confidence=0.7)
-    print("Seeded 2 memory facts")
-
-    print("\nDemo setup complete! Start the server with: make dev")
+    await create_tables(settings.resolved_database)
+    mm = MemoryManager(settings.resolved_database)
+    await mm.store_fact("The demo workspace contains a README, notes, config, and src/main.py",
+                         source="seed_demo", confidence=0.9)
+    await mm.store_fact("The project is called Mini-OpenClaw",
+                         source="seed_demo", confidence=1.0)
+    print("Seeded memory with demo facts")
+    print("Demo setup complete!")
 
 
 if __name__ == "__main__":
