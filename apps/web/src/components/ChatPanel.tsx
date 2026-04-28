@@ -23,6 +23,7 @@ export default function ChatPanel({ sessionId, onRunUpdate }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [decidedSteps, setDecidedSteps] = useState<Set<string>>(new Set());
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -55,6 +56,7 @@ export default function ChatPanel({ sessionId, onRunUpdate }: ChatPanelProps) {
       }
 
       setActiveRunId(null);
+      setDecidedSteps(new Set());
     }
   }, [run]);
 
@@ -90,6 +92,7 @@ export default function ChatPanel({ sessionId, onRunUpdate }: ChatPanelProps) {
     addMessage("user", text);
     setInput("");
     setSubmitting(true);
+    setDecidedSteps(new Set());
 
     try {
       const { run_id } = await submitChat(sessionId, text);
@@ -110,6 +113,7 @@ export default function ChatPanel({ sessionId, onRunUpdate }: ChatPanelProps) {
     async (runId: string, stepId: string) => {
       try {
         await approveStep(runId, stepId);
+        setDecidedSteps((prev) => new Set(prev).add(stepId));
         addMessage("system", `Step approved`);
         refresh();
       } catch (err) {
@@ -126,6 +130,7 @@ export default function ChatPanel({ sessionId, onRunUpdate }: ChatPanelProps) {
     async (runId: string, stepId: string) => {
       try {
         await rejectStep(runId, stepId);
+        setDecidedSteps((prev) => new Set(prev).add(stepId));
         addMessage("system", `Step rejected`);
         refresh();
       } catch (err) {
@@ -179,9 +184,9 @@ export default function ChatPanel({ sessionId, onRunUpdate }: ChatPanelProps) {
               </div>
             )}
 
-            {/* Approval cards */}
+            {/* Approval cards — exclude steps that have already been decided locally */}
             {run.plan?.steps
-              .filter((s) => s.status === "awaiting_approval")
+              .filter((s) => s.status === "awaiting_approval" && !decidedSteps.has(s.step_id))
               .map((step) => (
                 <div key={step.step_id} className="ml-9">
                   <ApprovalCard
@@ -203,12 +208,15 @@ export default function ChatPanel({ sessionId, onRunUpdate }: ChatPanelProps) {
               ))}
 
             {/* Active status indicator */}
-            {["planning", "running"].includes(run.status) && (
+            {(["planning", "running"].includes(run.status) || decidedSteps.size > 0) &&
+              !["completed", "failed", "cancelled"].includes(run.status) && (
               <div className="ml-9 flex items-center gap-2 text-xs text-gray-400">
                 <Loader2 size={14} className="animate-spin text-blue-400" />
                 <span>
                   {run.status === "planning"
                     ? "Creating plan..."
+                    : decidedSteps.size > 0
+                    ? "Executing approved step..."
                     : "Executing..."}
                 </span>
               </div>

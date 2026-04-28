@@ -1,22 +1,12 @@
 """Memory endpoints: list, search, delete, export."""
+import logging
+
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Request
+
 from apps.api.config import get_settings
 from apps.api.memory.manager import MemoryManager
 from apps.api.memory.retrieval import MemoryRetrieval
-
-import json
-import logging
-from typing import Any
-
-import aiosqlite
-from fastapi import APIRouter, Depends, HTTPException, Query
-
-from ..database import get_db
-from ..memory.manager import MemoryManager
-from ..memory.models import MemorySearchRequest
-from ..memory.retrieval import MemoryRetrieval
-from ..models.memory_item import MemoryItem, MemoryType
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["memory"])

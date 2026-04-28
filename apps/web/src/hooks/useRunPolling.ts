@@ -1,6 +1,7 @@
 /**
  * Poll GET /api/runs/{run_id} while a run is active.
  * Stops when status becomes completed, failed, or cancelled.
+ * Tolerates transient fetch failures — only shows error after 3 consecutive failures.
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -14,11 +15,13 @@ const ACTIVE_STATUSES: Set<RunStatus> = new Set([
 ]);
 
 const POLL_INTERVAL_MS = 1500;
+const ERROR_THRESHOLD = 3;
 
 export function useRunPolling(runId: string | null) {
   const [run, setRun] = useState<Run | null>(null);
   const [error, setError] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const failCountRef = useRef(0);
 
   const stopPolling = useCallback(() => {
     if (timerRef.current) {
@@ -32,13 +35,18 @@ export function useRunPolling(runId: string | null) {
       const data = await getRun(id);
       setRun(data);
       setError(null);
+      failCountRef.current = 0;
 
       // Stop polling if the run reached a terminal state
       if (!ACTIVE_STATUSES.has(data.status)) {
         stopPolling();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch run");
+      failCountRef.current += 1;
+      // Only show error after several consecutive failures
+      if (failCountRef.current >= ERROR_THRESHOLD) {
+        setError(err instanceof Error ? err.message : "Failed to fetch run");
+      }
     }
   }, [stopPolling]);
 
@@ -46,6 +54,7 @@ export function useRunPolling(runId: string | null) {
     if (!runId) {
       setRun(null);
       setError(null);
+      failCountRef.current = 0;
       stopPolling();
       return;
     }

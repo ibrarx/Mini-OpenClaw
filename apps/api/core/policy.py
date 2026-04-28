@@ -25,6 +25,12 @@ class PolicyEngine:
         return self._workspace
 
     def validate_path(self, path: str, *, write: bool = False) -> PolicyDecision:
+        if not path or not path.strip():
+            return PolicyDecision(allowed=False, classification="forbidden", reason="Empty path")
+        # Block tilde expansion attempts
+        if path.startswith("~"):
+            return PolicyDecision(allowed=False, classification="forbidden",
+                                  reason="Home directory expansion not allowed")
         try:
             target = (self._workspace / path).resolve()
         except (ValueError, OSError) as exc:
@@ -40,6 +46,9 @@ class PolicyEngine:
         return PolicyDecision(allowed=True, classification="safe", reason="Path within workspace")
 
     def validate_shell(self, command: str, args: list[str]) -> PolicyDecision:
+        if not command or not command.strip():
+            return PolicyDecision(allowed=False, classification="forbidden",
+                                  reason="Empty command")
         if command not in self._shell_allowlist:
             return PolicyDecision(allowed=False, classification="forbidden",
                                   reason=f"Command '{command}' not in allowlist")
@@ -50,9 +59,10 @@ class PolicyEngine:
         if _REDIRECT.search(all_args):
             return PolicyDecision(allowed=False, classification="forbidden",
                                   reason=f"Redirect operators detected: {all_args}")
-        if IS_WINDOWS and _WIN_METACHAR.search(all_args):
+        # Check Windows metacharacters on all platforms for consistency
+        if _WIN_METACHAR.search(all_args):
             return PolicyDecision(allowed=False, classification="forbidden",
-                                  reason=f"Windows metacharacters detected: {all_args}")
+                                  reason=f"Dangerous metacharacters detected: {all_args}")
         for arg in args:
             if ".." in arg:
                 return PolicyDecision(allowed=False, classification="forbidden",

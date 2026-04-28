@@ -27,7 +27,7 @@ python scripts/seed_demo.py
 
 # Start backend
 Write-Host "Starting backend on http://localhost:8000..." -ForegroundColor Green
-Start-Process -NoNewWindow powershell -ArgumentList "-Command", "python -m uvicorn apps.api.main:app --reload --port 8000"
+Start-Process -NoNewWindow powershell -ArgumentList "-Command", "python -m uvicorn apps.api.main:app --reload --port 8000 --reload-dir apps --reload-dir scripts"
 
 Start-Sleep -Seconds 3
 

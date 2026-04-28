@@ -26,6 +26,13 @@ class ReadFileTool(BaseTool):
             return self._error(args, f"File not found: {args['path']}", started)
         if not target.is_file():
             return self._error(args, f"Not a file: {args['path']}", started)
+        # Binary file detection: check first 8 KB for null bytes
+        try:
+            raw = target.read_bytes()[:8192]
+        except PermissionError:
+            return self._error(args, f"Permission denied: {args['path']}", started)
+        if b"\x00" in raw:
+            return self._error(args, f"Binary file detected: {args['path']}", started)
         try:
             text = target.read_text(encoding="utf-8", errors="replace")
         except PermissionError:

@@ -1,7 +1,7 @@
 """
 Shared pytest fixtures for Mini-OpenClaw tests.
 
-Provides temporary workspace directories, test database connections,
+Provides temporary workspace directories, test database paths,
 and common test helpers.
 """
 
@@ -12,6 +12,7 @@ import pytest
 import pytest_asyncio
 
 from apps.api.database import create_tables, get_connection
+from apps.api.skills.base import ToolContext
 
 
 @pytest.fixture
@@ -43,16 +44,12 @@ def populated_workspace(tmp_workspace: Path) -> Path:
     return tmp_workspace
 
 
-@pytest_asyncio.fixture
-async def test_db(tmp_db_path: Path) -> aiosqlite.Connection:
-    """Create a test database with all tables and yield a connection.
+def make_tool_context(workspace: Path, db_path: Path | None = None) -> ToolContext:
+    """Create a ToolContext for testing."""
+    return ToolContext(
+        workspace_root=str(workspace),
+        run_id="test_run",
+        step_id="test_step",
+        db_path=str(db_path) if db_path else "",
+    )
 
-    The database is created fresh for each test function. The connection
-    is closed after the test completes.
-    """
-    await create_tables(tmp_db_path)
-    conn = await get_connection(tmp_db_path)
-    try:
-        yield conn
-    finally:
-        await conn.close()
