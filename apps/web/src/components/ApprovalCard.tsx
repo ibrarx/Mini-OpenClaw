@@ -1,10 +1,11 @@
 /**
  * ApprovalCard — prominent card for steps awaiting user approval.
  * Shows tool name, full arguments, risk level, and approve/reject buttons.
+ * Disables itself after a decision is made to prevent double-clicks.
  */
 
 import { useState } from "react";
-import { ShieldAlert, Check, X } from "lucide-react";
+import { ShieldAlert, Check, X, Loader2 } from "lucide-react";
 import { RiskBadge } from "./PlanPreview";
 import type { PlanStep } from "../api/types";
 
@@ -22,26 +23,53 @@ export default function ApprovalCard({
   onReject,
 }: ApprovalCardProps) {
   const [loading, setLoading] = useState<"approve" | "reject" | null>(null);
+  const [decided, setDecided] = useState<"approved" | "rejected" | null>(null);
 
   const handleApprove = async () => {
+    if (decided) return; // already decided
     setLoading("approve");
     try {
       await onApprove(runId, step.step_id);
-    } finally {
+      setDecided("approved");
+    } catch {
       setLoading(null);
     }
   };
 
   const handleReject = async () => {
+    if (decided) return; // already decided
     setLoading("reject");
     try {
       await onReject(runId, step.step_id);
-    } finally {
+      setDecided("rejected");
+    } catch {
       setLoading(null);
     }
   };
 
-  const disabled = loading !== null;
+  const disabled = loading !== null || decided !== null;
+
+  // After decision, show a compact confirmation instead of the full card
+  if (decided) {
+    return (
+      <div className="rounded-lg border border-gray-700/40 bg-gray-800/30 px-3.5 py-2.5 flex items-center gap-2">
+        {decided === "approved" ? (
+          <>
+            <Check size={14} className="text-emerald-400" />
+            <span className="text-sm text-emerald-300">
+              Step approved — executing...
+            </span>
+            <Loader2 size={14} className="animate-spin text-gray-500 ml-auto" />
+          </>
+        ) : (
+          <>
+            <X size={14} className="text-red-400" />
+            <span className="text-sm text-red-300">Step rejected</span>
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="animate-slide-up rounded-lg border-2 border-amber-500/30 bg-amber-500/5 overflow-hidden">
