@@ -74,10 +74,15 @@ class Orchestrator:
                 workspace_info=f"Workspace root: {self._workspace}")
             steps = []
             for i, sd in enumerate(plan_dict.get("steps", [])):
+                raw_risk = sd.get("risk_level", "safe")
+                try:
+                    risk = RiskLevel(raw_risk)
+                except ValueError:
+                    risk = RiskLevel.SAFE
                 steps.append(PlanStep(
                     step_id=sd.get("step_id", f"step_{i+1}"),
                     tool=sd.get("tool", ""), args=sd.get("args", {}),
-                    risk_level=RiskLevel(sd.get("risk_level", "safe")),
+                    risk_level=risk,
                     status=StepStatus.PENDING, reasoning=sd.get("reasoning")))
             run.plan = Plan(
                 task_type=plan_dict.get("task_type", "direct_answer"),
@@ -186,15 +191,18 @@ class Orchestrator:
     async def _wait_for_approval(self, run_id: str, step_id: str, timeout: float = 300) -> bool:
         start = asyncio.get_event_loop().time()
         while (asyncio.get_event_loop().time() - start) < timeout:
-            conn = await get_connection(self._db_path)
             try:
-                rows = await conn.execute_fetchall(
-                    "SELECT approved FROM approvals WHERE run_id=? AND step_id=? AND approved IS NOT NULL",
-                    (run_id, step_id))
-                if rows:
-                    return bool(rows[0]["approved"])
-            finally:
-                await conn.close()
+                conn = await get_connection(self._db_path)
+                try:
+                    rows = await conn.execute_fetchall(
+                        "SELECT approved FROM approvals WHERE run_id=? AND step_id=? AND approved IS NOT NULL",
+                        (run_id, step_id))
+                    if rows:
+                        return bool(rows[0]["approved"])
+                finally:
+                    await conn.close()
+            except Exception as exc:
+                logger.warning("Approval poll error (will retry): %s", exc)
             await asyncio.sleep(1.0)
         return False
 
