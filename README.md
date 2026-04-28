@@ -64,13 +64,15 @@ If the startup scripts don't work for your environment:
 ```bash
 # Terminal 1 — Backend (run from project root)
 pip install -r requirements.txt
-python -m uvicorn apps.api.main:app --reload --port 8000
+python -m uvicorn apps.api.main:app --reload --port 8000 --reload-dir apps --reload-dir scripts --reload-exclude "workspace/*" --reload-exclude "*.db"
 
 # Terminal 2 — Frontend
 cd apps/web
 npm install
 npm run dev
 ```
+
+> **Important:** The `--reload-exclude` flags prevent uvicorn from restarting when the agent creates files in the workspace. Without them, every file the agent writes triggers a server reload and kills the running task.
 
 ## Project Structure
 
