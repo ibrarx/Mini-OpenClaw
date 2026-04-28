@@ -32,7 +32,7 @@ python scripts\seed_demo.py
 
 REM Start backend in background
 echo Starting backend on http://localhost:8000...
-start "Mini-OpenClaw Backend" cmd /c "python -m uvicorn apps.api.main:app --reload --port 8000 --reload-dir apps --reload-dir scripts --reload-exclude workspace/* --reload-exclude *.db --reload-exclude *.db-journal --reload-exclude exports/*"
+start "Mini-OpenClaw Backend" cmd /c "python -m uvicorn apps.api.main:app --reload --port 8000 --reload-dir apps --reload-dir scripts"
 
 REM Wait a moment for backend
 timeout /t 3 >nul
