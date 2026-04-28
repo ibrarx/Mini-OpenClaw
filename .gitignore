@@ -27,6 +27,9 @@ apps/web/.vite/
 # Exports
 exports/
 
+# Workspace (agent working directory)
+workspace/
+
 # IDE
 .vscode/
 .idea/
