@@ -7,7 +7,7 @@ rejection, multi-step plans, policy-blocked tools, memory round-trip.
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -74,7 +74,7 @@ class TestDirectAnswer:
 
         # Mock the planner's Claude client
         orch._planner._client = MagicMock()
-        orch._planner._client.messages.create = MagicMock(
+        orch._planner._client.messages.create = AsyncMock(
             return_value=_mock_planner_response({
                 "task_type": "direct_answer",
                 "confidence": 0.95,
@@ -113,7 +113,7 @@ class TestSafeToolExecution:
 
         # Plan: use list_files
         orch._planner._client = MagicMock()
-        orch._planner._client.messages.create = MagicMock(
+        orch._planner._client.messages.create = AsyncMock(
             side_effect=[
                 _mock_planner_response({
                     "task_type": "tool_needed",
@@ -161,7 +161,7 @@ class TestApprovalFlow:
         orch = Orchestrator(settings, registry)
 
         orch._planner._client = MagicMock()
-        orch._planner._client.messages.create = MagicMock(
+        orch._planner._client.messages.create = AsyncMock(
             return_value=_mock_planner_response({
                 "task_type": "tool_needed",
                 "confidence": 0.9,
@@ -194,7 +194,7 @@ class TestApprovalFlow:
         orch = Orchestrator(settings, registry)
 
         orch._planner._client = MagicMock()
-        orch._planner._client.messages.create = MagicMock(
+        orch._planner._client.messages.create = AsyncMock(
             side_effect=[
                 _mock_planner_response({
                     "task_type": "tool_needed",
@@ -247,7 +247,7 @@ class TestApprovalFlow:
         orch = Orchestrator(settings, registry)
 
         orch._planner._client = MagicMock()
-        orch._planner._client.messages.create = MagicMock(
+        orch._planner._client.messages.create = AsyncMock(
             return_value=_mock_planner_response({
                 "task_type": "tool_needed",
                 "confidence": 0.9,
