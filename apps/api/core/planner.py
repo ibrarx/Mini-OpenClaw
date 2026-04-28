@@ -65,9 +65,12 @@ class Planner:
         if self._client is None:
             return None
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            functools.partial(self._client.messages.create, **kwargs),
+        return await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                functools.partial(self._client.messages.create, **kwargs),
+            ),
+            timeout=60.0,
         )
 
     async def create_plan(self, user_message: str, memory_context: str = "No relevant memories.",

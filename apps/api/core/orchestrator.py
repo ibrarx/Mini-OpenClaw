@@ -55,8 +55,18 @@ class Orchestrator:
         await self._audit.log("run_created", run_id=run_id,
                                data={"message": message, "session_id": session_id})
         event_emitter.emit(run_id, "run_created")
-        asyncio.create_task(self._process_run(run))
+        task = asyncio.create_task(self._process_run(run))
+        task.add_done_callback(self._task_done)
         return run
+
+    @staticmethod
+    def _task_done(task: asyncio.Task) -> None:
+        """Log unhandled exceptions from background run tasks."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            logger.error("Background run task failed: %s", exc, exc_info=exc)
 
     async def _process_run(self, run: Run) -> None:
         try:
@@ -153,6 +163,7 @@ class Orchestrator:
                                        step_id=step.step_id, data={"tool": step.tool})
                 event_emitter.emit(run.run_id, "approval_requested")
                 approved = await self._wait_for_approval(run.run_id, step.step_id)
+                logger.info("Run %s step %s: approval=%s", run.run_id, step.step_id, approved)
                 if not approved:
                     step.status = StepStatus.FAILED
                     step.result = ToolResult(tool_name=step.tool, status="error",
@@ -168,6 +179,7 @@ class Orchestrator:
             context = ToolContext(workspace_root=str(self._workspace), run_id=run.run_id,
                                    step_id=step.step_id, db_path=str(self._db_path))
             result = await self._executor.execute_tool(step.tool, step.args, context)
+            logger.info("Run %s step %s: tool=%s status=%s", run.run_id, step.step_id, step.tool, result.status)
             step.result = result
             step.status = StepStatus.COMPLETED if result.status == "success" else StepStatus.FAILED
             await self._save_run(run)
@@ -175,14 +187,23 @@ class Orchestrator:
                                   "output": result.output, "error": result.error})
         try:
             if self._planner and tool_results:
-                run.final_response = await self._planner.generate_summary(
-                    run.user_message, tool_results)
+                logger.info("Run %s: generating summary...", run.run_id)
+                run.final_response = await asyncio.wait_for(
+                    self._planner.generate_summary(run.user_message, tool_results),
+                    timeout=30.0,
+                )
+                logger.info("Run %s: summary generated", run.run_id)
             else:
                 run.final_response = "Task completed."
-        except Exception:
+        except asyncio.TimeoutError:
+            logger.warning("Run %s: summary timed out after 30s", run.run_id)
+            run.final_response = "Task completed. (Summary generation timed out.)"
+        except Exception as exc:
+            logger.warning("Run %s: summary failed: %s", run.run_id, exc)
             run.final_response = "Task completed. Check tool traces for details."
         all_ok = all(s.status == StepStatus.COMPLETED for s in run.plan.steps)
         run.status = RunStatus.COMPLETED if all_ok else RunStatus.FAILED
+        logger.info("Run %s: final status=%s", run.run_id, run.status.value)
         await self._save_run(run)
         if run.final_response:
             await self._store_message(run.session_id, "assistant", run.final_response, run.run_id)
@@ -226,7 +247,91 @@ class Orchestrator:
             await conn.close()
         await self._audit.log("approval_decided", run_id=run_id, step_id=step_id,
                                data={"approved": approved})
+        logger.info("Approval for run %s step %s: approved=%s", run_id, step_id, approved)
+
+        # Resume execution if approved — handles case where background task
+        # died (e.g. uvicorn --reload) and nobody is polling the approvals table.
+        if approved:
+            run = await self.get_run(run_id)
+            if run and run.status == RunStatus.AWAITING_APPROVAL:
+                logger.info("Resuming execution for run %s after approval", run_id)
+                task = asyncio.create_task(self._resume_after_approval(run, step_id))
+                task.add_done_callback(self._task_done)
+
         return await self.get_run(run_id)
+
+    async def _resume_after_approval(self, run: Run, approved_step_id: str) -> None:
+        """Resume a run after approval, executing the approved step and any remaining steps.
+
+        This handles the case where the original background task died (e.g. due
+        to uvicorn --reload) and the _wait_for_approval loop is no longer running.
+        """
+        try:
+            if not run.plan:
+                return
+            # Find the approved step and remaining steps
+            tool_results: list[dict[str, Any]] = []
+            found_approved = False
+            for step in run.plan.steps:
+                if step.step_id == approved_step_id:
+                    found_approved = True
+                if not found_approved:
+                    # Already completed steps — collect their results
+                    if step.result and step.result.status == "success":
+                        tool_results.append({"tool": step.tool, "status": step.result.status,
+                                              "output": step.result.output, "error": step.result.error})
+                    continue
+                if step.status in (StepStatus.COMPLETED, StepStatus.FAILED):
+                    continue
+                # Execute this step
+                tool = self._registry.get(step.tool)
+                if tool is None:
+                    step.status = StepStatus.FAILED
+                    step.result = ToolResult(tool_name=step.tool, status="error",
+                                              input=step.args, error=f"Unknown tool: {step.tool}")
+                    await self._save_run(run)
+                    continue
+                step.status = StepStatus.RUNNING
+                run.status = RunStatus.RUNNING
+                await self._save_run(run)
+                context = ToolContext(workspace_root=str(self._workspace), run_id=run.run_id,
+                                       step_id=step.step_id, db_path=str(self._db_path))
+                result = await self._executor.execute_tool(step.tool, step.args, context)
+                logger.info("Resume run %s step %s: tool=%s status=%s",
+                             run.run_id, step.step_id, step.tool, result.status)
+                step.result = result
+                step.status = StepStatus.COMPLETED if result.status == "success" else StepStatus.FAILED
+                await self._save_run(run)
+                tool_results.append({"tool": step.tool, "status": result.status,
+                                      "output": result.output, "error": result.error})
+
+            # Generate summary
+            try:
+                if self._planner and tool_results:
+                    run.final_response = await asyncio.wait_for(
+                        self._planner.generate_summary(run.user_message, tool_results),
+                        timeout=30.0,
+                    )
+                else:
+                    run.final_response = "Task completed."
+            except asyncio.TimeoutError:
+                run.final_response = "Task completed. (Summary generation timed out.)"
+            except Exception:
+                run.final_response = "Task completed. Check tool traces for details."
+
+            all_ok = all(s.status == StepStatus.COMPLETED for s in run.plan.steps)
+            run.status = RunStatus.COMPLETED if all_ok else RunStatus.FAILED
+            logger.info("Resume run %s: final status=%s", run.run_id, run.status.value)
+            await self._save_run(run)
+            if run.final_response:
+                await self._store_message(run.session_id, "assistant", run.final_response, run.run_id)
+            event_emitter.emit(run.run_id, "run_completed")
+        except Exception as exc:
+            logger.error("Resume run %s failed: %s", run.run_id, exc, exc_info=True)
+            run.status = RunStatus.FAILED
+            run.final_response = f"Internal error: {exc}"
+            await self._save_run(run)
+            event_emitter.emit(run.run_id, "run_failed")
 
     async def _save_run(self, run: Run) -> None:
         run.updated_at = datetime.now(timezone.utc).isoformat()
