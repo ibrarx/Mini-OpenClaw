@@ -1,57 +1,38 @@
-"""read_file tool — read a text file inside the workspace."""
+"""skills/read_file — Read a text file inside the workspace."""
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
-from ..models.step import RiskLevel, ToolResult
-from ..models.tool_manifest import ToolManifest
-from .base import BaseTool, _now_iso
-
-MAX_FILE_SIZE = 100 * 1024
+from apps.api.models.run import RiskLevel
+from apps.api.models.tool_manifest import ToolManifest
+from apps.api.skills.base import BaseTool, ToolContext
 
 class ReadFileTool(BaseTool):
-    """Read text file content with optional offset and limit."""
+    def manifest(self) -> ToolManifest:
+        return ToolManifest(name="read_file", description="Read a text file inside the workspace.",
+                            risk_level=RiskLevel.SAFE, approval_required=False,
+                            input_schema={"type":"object","properties":{"path":{"type":"string"},
+                            "offset":{"type":"integer","minimum":0},
+                            "limit":{"type":"integer","minimum":1,"maximum":5000}},"required":["path"]})
 
-    @classmethod
-    def get_manifest(cls) -> ToolManifest:
-        return ToolManifest(
-            name="read_file", description="Read a text file inside the workspace.",
-            risk_level=RiskLevel.SAFE, approval_required=False,
-            read_scope="workspace",
-            input_schema={"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":5000}},"required":["path"],"additionalProperties":False},
-            output_schema={"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"size":{"type":"integer"}}},
-            failure_modes=["file_not_found","permission_denied","binary_file","file_too_large"],
-        )
-
-    async def execute(self, args: dict[str, Any], context: dict[str, Any]) -> ToolResult:
-        started_at = _now_iso()
-        path_str = args.get("path", ""); offset = args.get("offset", 0); limit = args.get("limit", 5000)
-        workspace = Path(context["workspace_root"]).resolve()
-        target = Path(path_str)
-        if not target.is_absolute():
-            target = (workspace / target).resolve()
-        else:
-            target = target.resolve()
+    async def execute(self, args: dict[str, Any], context: ToolContext) -> Any:
+        started = self._now()
+        workspace = Path(context.workspace_root).resolve()
+        target = (workspace / args["path"]).resolve()
         try:
             target.relative_to(workspace)
         except ValueError:
-            return self._error(args, f"Path outside workspace: {target}", started_at)
+            return self._error(args, f"Path outside workspace: {target}", started)
         if not target.exists():
-            return self._error(args, f"File not found: {target}", started_at)
+            return self._error(args, f"File not found: {args['path']}", started)
         if not target.is_file():
-            return self._error(args, f"Not a file: {target}", started_at)
-        file_size = target.stat().st_size
-        if file_size > MAX_FILE_SIZE:
-            return self._error(args, f"File too large: {file_size} bytes (max {MAX_FILE_SIZE})", started_at)
+            return self._error(args, f"Not a file: {args['path']}", started)
         try:
-            raw = target.read_bytes()
-            if b"\x00" in raw[:8192]:
-                return self._error(args, "Binary file detected — cannot read as text", started_at)
-            text = raw.decode("utf-8", errors="replace")
-        except PermissionError as exc:
-            return self._error(args, f"Permission denied: {exc}", started_at)
-        except OSError as exc:
-            return self._error(args, f"Read error: {exc}", started_at)
-        lines = text.splitlines(keepends=True)
-        total_lines = len(lines); selected = lines[offset:offset+limit]; content = "".join(selected)
-        truncated = (offset + limit) < total_lines
-        return self._success(args, {"path": str(target.relative_to(workspace)), "content": content, "size": file_size, "total_lines": total_lines, "truncated": truncated}, started_at)
+            text = target.read_text(encoding="utf-8", errors="replace")
+        except PermissionError:
+            return self._error(args, f"Permission denied: {args['path']}", started)
+        offset = args.get("offset", 0)
+        limit = args.get("limit", 5000)
+        lines = text.splitlines()
+        sliced = lines[offset:offset + limit]
+        return self._success(args, {"path": args["path"], "content": "\n".join(sliced),
+                                     "total_lines": len(lines), "truncated": len(lines) > offset + limit}, started)

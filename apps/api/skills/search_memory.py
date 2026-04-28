@@ -1,91 +1,34 @@
-"""search_memory tool — retrieve relevant facts or prior task summaries."""
+"""skills/search_memory — Retrieve facts or summaries from memory. Safe, no approval."""
 from __future__ import annotations
+from pathlib import Path
 from typing import Any
-from ..models.step import RiskLevel, ToolResult
-from ..models.tool_manifest import ToolManifest
-from .base import BaseTool, _now_iso
+from apps.api.models.run import RiskLevel
+from apps.api.models.tool_manifest import ToolManifest
+from apps.api.skills.base import BaseTool, ToolContext
 
 
 class SearchMemoryTool(BaseTool):
-    """Retrieve relevant facts or prior task summaries from memory."""
-
-    @classmethod
-    def get_manifest(cls) -> ToolManifest:
+    def manifest(self) -> ToolManifest:
         return ToolManifest(
             name="search_memory",
             description="Retrieve relevant facts or prior task summaries from memory.",
-            risk_level=RiskLevel.SAFE,
-            approval_required=False,
-            read_scope="memory",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "memory_type": {
-                        "type": "string",
-                        "enum": ["fact", "episode", "summary"],
-                    },
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 20},
-                },
-                "required": ["query"],
-                "additionalProperties": False,
-            },
-            output_schema={
-                "type": "object",
-                "properties": {
-                    "results": {"type": "array"},
-                    "total": {"type": "integer"},
-                },
-            },
-            failure_modes=["database_error"],
-        )
+            risk_level=RiskLevel.SAFE, approval_required=False,
+            input_schema={"type": "object", "properties": {
+                "query": {"type": "string"},
+                "memory_type": {"type": "string", "enum": ["fact", "episode", "summary"]},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            }, "required": ["query"]})
 
-    async def execute(self, args: dict[str, Any], context: dict[str, Any]) -> ToolResult:
-        """Search memory using MemoryRetrieval with word-level scoring.
-
-        Args:
-            args: Tool arguments (query, memory_type, limit).
-            context: Runtime context including db connection.
-
-        Returns:
-            Structured ToolResult with matching memory items.
-        """
-        started_at = _now_iso()
+    async def execute(self, args: dict[str, Any], context: ToolContext) -> Any:
+        started = self._now()
+        from apps.api.memory.retrieval import MemoryRetrieval
         query = args.get("query", "")
-        memory_type = args.get("memory_type")
-        limit = args.get("limit", 10)
-
         if not query.strip():
-            return self._error(args, "Empty search query", started_at)
+            return self._error(args, "Query cannot be empty", started)
 
-        db = context.get("db")
-        if db is None:
-            return self._error(args, "No database connection in context", started_at)
-
-        try:
-            from ..memory.retrieval import MemoryRetrieval
-            from ..models.memory_item import MemoryType
-
-            mt = MemoryType(memory_type) if memory_type else None
-            retrieval = MemoryRetrieval(db)
-            items = await retrieval.search(
-                query=query,
-                workspace_id=context.get("workspace_id", "default"),
-                memory_type=mt,
-                limit=limit,
-            )
-        except Exception as exc:
-            return self._error(args, f"Memory search failed: {exc}", started_at)
-
-        results = [
-            {
-                "id": i.id,
-                "content": i.content,
-                "memory_type": i.memory_type,
-                "source": i.source,
-                "confidence": i.confidence,
-                "created_at": i.created_at,
-            }
-            for i in items
-        ]
-        return self._success(args, {"items": results, "total": len(results)}, started_at)
+        retrieval = MemoryRetrieval(Path(context.db_path))
+        items = await retrieval.search(query=query, memory_type=args.get("memory_type"),
+                                        limit=args.get("limit", 10), workspace_id="default")
+        results = [{"id": i.id, "content": i.content, "memory_type": i.memory_type.value,
+                     "confidence": i.confidence, "source": i.source} for i in items]
+        return self._success(args, {"query": query, "results": results, "total": len(results)}, started)
