@@ -5,13 +5,15 @@ Creates the app, configures CORS and logging, registers routes,
 discovers tools, and initialises the database on startup.
 """
 import logging
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
-from .database import create_tables
+from .database import create_tables, get_connection
 from .skills.registry import skill_registry
 from .core.orchestrator import Orchestrator
 from .routes.health import router as health_router
@@ -31,25 +33,61 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup and shutdown lifecycle."""
+    """Startup and shutdown lifecycle with full validation."""
     logger.info("Mini-OpenClaw starting up")
 
-    # Ensure workspace directory exists
+    # 1. Check ANTHROPIC_API_KEY
+    if not settings.anthropic_api_key:
+        logger.warning(
+            "ANTHROPIC_API_KEY is not set. Chat will return errors. "
+            "Set it in .env or as an environment variable."
+        )
+    else:
+        logger.info("Anthropic API key: configured")
+
+    # 2. Ensure workspace directory exists
     workspace = settings.resolved_workspace
     workspace.mkdir(parents=True, exist_ok=True)
     logger.info("Workspace root: %s", workspace)
 
-    # Create database tables
-    await create_tables(settings.resolved_database)
-    logger.info("Database ready: %s", settings.resolved_database)
+    # 3. Create database tables
+    try:
+        await create_tables(settings.resolved_database)
+        logger.info("Database ready: %s", settings.resolved_database)
+    except Exception as exc:
+        logger.error("Failed to initialise database: %s", exc)
+        sys.exit(1)
 
-    # Discover and register tools
+    # 4. Discover and register tools
     skill_registry.discover()
+    logger.info("Registered %d tools", skill_registry.tool_count)
 
-    # Create orchestrator and attach to app state
+    # 5. Count existing memory items
+    memory_count = 0
+    try:
+        conn = await get_connection(settings.resolved_database)
+        try:
+            rows = await conn.execute_fetchall(
+                "SELECT COUNT(*) as cnt FROM memory_items"
+            )
+            memory_count = rows[0]["cnt"] if rows else 0
+        finally:
+            await conn.close()
+    except Exception:
+        pass
+
+    # 6. Create orchestrator and attach to app state
     orchestrator = Orchestrator(settings, skill_registry)
     app.state.orchestrator = orchestrator
-    logger.info("Orchestrator ready with %d tools", skill_registry.tool_count)
+
+    tool_names = [t.manifest().name for t in skill_registry.list_tools()]
+    logger.info(
+        "Mini-OpenClaw ready: %d tools (%s), workspace at %s, memory: %d items",
+        skill_registry.tool_count,
+        ", ".join(tool_names),
+        workspace,
+        memory_count,
+    )
 
     yield
 

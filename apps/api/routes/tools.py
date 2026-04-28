@@ -1,8 +1,9 @@
 """GET /api/tools — Return registered tool manifests."""
-from fastapi import APIRouter
-from apps.api.skills.registry import skill_registry
+import logging
 
-from ..skills.registry import SkillRegistry
+from fastapi import APIRouter
+
+from apps.api.skills.registry import skill_registry
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["tools"])
