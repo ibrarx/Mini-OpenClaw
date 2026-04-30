@@ -8,13 +8,15 @@ import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import ChatPanel from "../components/ChatPanel";
 import PlanPreview from "../components/PlanPreview";
 import ToolTrace from "../components/ToolTrace";
-import type { Run } from "../api/types";
+import type { ChatMessage, Run } from "../api/types";
 
 interface ChatPageProps {
   sessionId: string;
+  messages: ChatMessage[];
+  onMessagesChange: (msgs: ChatMessage[]) => void;
 }
 
-export default function ChatPage({ sessionId }: ChatPageProps) {
+export default function ChatPage({ sessionId, messages, onMessagesChange }: ChatPageProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeRun, setActiveRun] = useState<Run | null>(null);
 
@@ -29,7 +31,12 @@ export default function ChatPage({ sessionId }: ChatPageProps) {
     <div className="flex h-full">
       {/* Chat panel */}
       <div className="flex-1 flex flex-col min-w-0">
-        <ChatPanel sessionId={sessionId} onRunUpdate={handleRunUpdate} />
+        <ChatPanel
+          sessionId={sessionId}
+          messages={messages}
+          onMessagesChange={onMessagesChange}
+          onRunUpdate={handleRunUpdate}
+        />
       </div>
 
       {/* Sidebar toggle */}

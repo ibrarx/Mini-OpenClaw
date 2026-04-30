@@ -1,9 +1,10 @@
 /**
  * ChatPanel — main chat interface with messages, plans, approvals, and input.
+ * Messages state is owned externally (lifted to App) so it survives tab switches.
  */
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Loader2, Square } from "lucide-react";
+import { Send, Loader2, Square, Trash2 } from "lucide-react";
 import MessageBubble from "./MessageBubble";
 import PlanPreview from "./PlanPreview";
 import ApprovalCard from "./ApprovalCard";
@@ -14,12 +15,18 @@ import type { ChatMessage, Run, RunStatus } from "../api/types";
 
 interface ChatPanelProps {
   sessionId: string;
+  messages: ChatMessage[];
+  onMessagesChange: (msgs: ChatMessage[]) => void;
   /** Called whenever a run updates so the sidebar can reflect it. */
   onRunUpdate?: (run: Run | null) => void;
 }
 
-export default function ChatPanel({ sessionId, onRunUpdate }: ChatPanelProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+export default function ChatPanel({
+  sessionId,
+  messages,
+  onMessagesChange,
+  onRunUpdate,
+}: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -73,23 +80,38 @@ export default function ChatPanel({ sessionId, onRunUpdate }: ChatPanelProps) {
     content: string,
     runId?: string
   ) => {
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        role,
-        content,
-        timestamp: new Date().toISOString(),
-        run_id: runId,
-      },
-    ]);
+    const msg: ChatMessage = {
+      id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      role,
+      content,
+      timestamp: new Date().toISOString(),
+      run_id: runId,
+    };
+    onMessagesChange([...messages, msg]);
+  };
+
+  const handleClearChat = () => {
+    onMessagesChange([]);
+    lastRunRef.current = null;
+    setActiveRunId(null);
+    setDecidedSteps(new Set());
+    inputRef.current?.focus();
   };
 
   const handleSubmit = async () => {
     const text = input.trim();
     if (!text || submitting || activeRunId) return;
 
-    addMessage("user", text);
+    const userMsg: ChatMessage = {
+      id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      role: "user",
+      content: text,
+      timestamp: new Date().toISOString(),
+    };
+
+    // Add user message immediately
+    const withUser = [...messages, userMsg];
+    onMessagesChange(withUser);
     setInput("");
     setSubmitting(true);
     setDecidedSteps(new Set());
@@ -97,7 +119,16 @@ export default function ChatPanel({ sessionId, onRunUpdate }: ChatPanelProps) {
     try {
       const { run_id } = await submitChat(sessionId, text);
       setActiveRunId(run_id);
-      addMessage("system", "Planning...");
+      // Append "Planning..." system message after user message
+      onMessagesChange([
+        ...withUser,
+        {
+          id: `msg_${Date.now()}_sys`,
+          role: "system",
+          content: "Planning...",
+          timestamp: new Date().toISOString(),
+        },
+      ]);
     } catch (err) {
       addMessage(
         "system",
@@ -123,7 +154,7 @@ export default function ChatPanel({ sessionId, onRunUpdate }: ChatPanelProps) {
         );
       }
     },
-    [refresh]
+    [refresh, messages, onMessagesChange]
   );
 
   const handleReject = useCallback(
@@ -140,7 +171,7 @@ export default function ChatPanel({ sessionId, onRunUpdate }: ChatPanelProps) {
         );
       }
     },
-    [refresh]
+    [refresh, messages, onMessagesChange]
   );
 
   const handleCancel = async () => {
@@ -252,6 +283,16 @@ export default function ChatPanel({ sessionId, onRunUpdate }: ChatPanelProps) {
       {/* Input bar */}
       <div className="border-t border-app px-4 py-3 bg-app-input-bar backdrop-blur-sm">
         <div className="flex items-center gap-2">
+          {/* Clear chat button — only visible when there are messages */}
+          {messages.length > 0 && !isActive && (
+            <button
+              onClick={handleClearChat}
+              className="btn btn-ghost flex-shrink-0 p-1.5 t-faint hover:text-red-400"
+              title="Clear chat"
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
           <input
             ref={inputRef}
             type="text"

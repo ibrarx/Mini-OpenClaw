@@ -17,6 +17,7 @@ import ChatPage from "./pages/ChatPage";
 import HistoryPage from "./pages/HistoryPage";
 import MemoryPage from "./pages/MemoryPage";
 import Settings from "./components/Settings";
+import type { ChatMessage } from "./api/types";
 
 // ── Theme ─────────────────────────────────────────────
 
@@ -101,6 +102,7 @@ function AppContent() {
   const { sessionId, resetSession } = useSession();
   const [page, setPage] = useState<Page>("chat");
   const [backendUp, setBackendUp] = useState<boolean | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
 
   useEffect(() => {
     healthCheck()
@@ -163,7 +165,13 @@ function AppContent() {
 
       {/* Page content */}
       <main className="flex-1 overflow-hidden">
-        {page === "chat" && <ChatPage sessionId={sessionId} />}
+        {page === "chat" && (
+          <ChatPage
+            sessionId={sessionId}
+            messages={chatMessages}
+            onMessagesChange={setChatMessages}
+          />
+        )}
         {page === "history" && <HistoryPage sessionId={sessionId} />}
         {page === "memory" && <MemoryPage />}
         {page === "settings" && (
