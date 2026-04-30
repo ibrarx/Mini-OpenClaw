@@ -1,6 +1,5 @@
 /**
- * MemoryBrowser — browse, search, and delete memory items.
- * Tabs to filter by memory type: all, facts, episodes, summaries.
+ * MemoryBrowser — browse, search, and delete memory items (theme-aware).
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -84,7 +83,7 @@ export default function MemoryBrowser({ workspaceId = "default" }: MemoryBrowser
   return (
     <div className="p-4 h-full flex flex-col">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-medium text-gray-300">Memory Browser</h2>
+        <h2 className="text-sm font-medium t-secondary">Memory Browser</h2>
         <button onClick={fetchItems} className="btn btn-ghost text-xs p-1">
           <RefreshCw size={12} />
         </button>
@@ -93,10 +92,7 @@ export default function MemoryBrowser({ workspaceId = "default" }: MemoryBrowser
       {/* Search */}
       <div className="flex gap-2 mb-3">
         <div className="relative flex-1">
-          <Search
-            size={14}
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500"
-          />
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 t-faint" />
           <input
             type="text"
             value={searchQuery}
@@ -123,8 +119,8 @@ export default function MemoryBrowser({ workspaceId = "default" }: MemoryBrowser
             onClick={() => setActiveTab(value)}
             className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors ${
               activeTab === value
-                ? "bg-gray-700 text-gray-200"
-                : "text-gray-500 hover:text-gray-300 hover:bg-gray-800"
+                ? "bg-tab-active t-primary"
+                : "t-faint hover:t-secondary"
             }`}
           >
             <Icon size={12} />
@@ -136,19 +132,19 @@ export default function MemoryBrowser({ workspaceId = "default" }: MemoryBrowser
       {/* Content */}
       <div className="flex-1 overflow-y-auto space-y-2">
         {loading && (
-          <div className="flex items-center justify-center py-12 text-gray-500">
+          <div className="flex items-center justify-center py-12 t-muted">
             <Loader2 size={20} className="animate-spin" />
           </div>
         )}
 
         {error && (
-          <div className="text-sm text-red-400 bg-red-500/10 px-3 py-2 rounded border border-red-500/20">
+          <div className="text-sm text-red-600 bg-red-500/10 px-3 py-2 rounded border border-red-500/20">
             {error}
           </div>
         )}
 
         {!loading && !error && items.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-12 text-gray-500 gap-2">
+          <div className="flex flex-col items-center justify-center py-12 t-muted gap-2">
             <Brain size={24} className="opacity-40" />
             <p className="text-sm">No memories found</p>
           </div>
@@ -159,9 +155,8 @@ export default function MemoryBrowser({ workspaceId = "default" }: MemoryBrowser
         ))}
       </div>
 
-      {/* Stats */}
       {!loading && items.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-gray-800 text-[10px] text-gray-600">
+        <div className="mt-2 pt-2 border-t border-app text-[10px] t-faint">
           {items.length} item{items.length !== 1 ? "s" : ""}
         </div>
       )}
@@ -169,14 +164,7 @@ export default function MemoryBrowser({ workspaceId = "default" }: MemoryBrowser
   );
 }
 
-// ── Memory Card ───────────────────────────────────────
-
-interface MemoryCardProps {
-  item: MemoryItem;
-  onDelete: (id: string) => void;
-}
-
-function MemoryCard({ item, onDelete }: MemoryCardProps) {
+function MemoryCard({ item, onDelete }: { item: MemoryItem; onDelete: (id: string) => void }) {
   const typeColor: Record<string, string> = {
     fact: "border-l-blue-500",
     episode: "border-l-purple-500",
@@ -185,28 +173,28 @@ function MemoryCard({ item, onDelete }: MemoryCardProps) {
 
   return (
     <div
-      className={`card border-l-2 ${typeColor[item.memory_type] ?? "border-l-gray-600"} p-3 animate-fade-in`}
+      className={`card border-l-2 ${typeColor[item.memory_type] ?? "border-l-gray-400"} p-3 animate-fade-in`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-1">
-            <span className="badge bg-gray-700/50 text-gray-400 text-[10px]">
+            <span className="badge bg-badge-type t-muted text-[10px]">
               {item.memory_type}
             </span>
             <ConfidenceDot confidence={item.confidence} />
           </div>
-          <p className="text-sm text-gray-200 leading-relaxed">{item.content}</p>
+          <p className="text-sm t-primary leading-relaxed">{item.content}</p>
           {item.summary && item.summary !== item.content && (
-            <p className="text-xs text-gray-500 mt-1 italic">{item.summary}</p>
+            <p className="text-xs t-muted mt-1 italic">{item.summary}</p>
           )}
-          <div className="flex items-center gap-2 mt-1.5 text-[10px] text-gray-600">
+          <div className="flex items-center gap-2 mt-1.5 text-[10px] t-faint">
             {item.source && <span>Source: {item.source}</span>}
             <span>{formatDate(item.created_at)}</span>
           </div>
         </div>
         <button
           onClick={() => onDelete(item.id)}
-          className="p-1 rounded hover:bg-red-500/10 text-gray-600 hover:text-red-400 transition-colors flex-shrink-0"
+          className="p-1 rounded hover:bg-red-500/10 t-faint hover:text-red-500 transition-colors flex-shrink-0"
           title="Delete"
         >
           <Trash2 size={12} />
@@ -219,11 +207,10 @@ function MemoryCard({ item, onDelete }: MemoryCardProps) {
 function ConfidenceDot({ confidence }: { confidence: number }) {
   const color =
     confidence >= 0.8
-      ? "bg-emerald-400"
+      ? "bg-emerald-500"
       : confidence >= 0.5
-        ? "bg-amber-400"
-        : "bg-red-400";
-
+        ? "bg-amber-500"
+        : "bg-red-500";
   return (
     <span
       className={`w-1.5 h-1.5 rounded-full ${color}`}

@@ -259,7 +259,7 @@ export default function ChatPanel({
             {/* Active status indicator */}
             {(["planning", "running"].includes(run.status) || decidedSteps.size > 0) &&
               !["completed", "failed", "cancelled"].includes(run.status) && (
-              <div className="ml-9 flex items-center gap-2 text-xs text-gray-400">
+              <div className="ml-9 flex items-center gap-2 text-xs t-muted">
                 <Loader2 size={14} className="animate-spin text-blue-400" />
                 <span>
                   {run.status === "planning"

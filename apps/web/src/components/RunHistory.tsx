@@ -1,5 +1,5 @@
 /**
- * RunHistory — shows a list of past runs from GET /api/runs.
+ * RunHistory — list of past runs (theme-aware).
  */
 
 import { useState, useEffect } from "react";
@@ -46,7 +46,7 @@ export default function RunHistory({ sessionId }: RunHistoryProps) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12 text-gray-500">
+      <div className="flex items-center justify-center py-12 t-muted">
         <Loader2 size={20} className="animate-spin" />
       </div>
     );
@@ -55,7 +55,7 @@ export default function RunHistory({ sessionId }: RunHistoryProps) {
   if (error) {
     return (
       <div className="p-4">
-        <div className="text-sm text-red-400 bg-red-500/10 px-3 py-2 rounded border border-red-500/20">
+        <div className="text-sm text-red-600 bg-red-500/10 px-3 py-2 rounded border border-red-500/20">
           {error}
         </div>
         <button onClick={fetchRuns} className="btn btn-ghost mt-2 text-xs">
@@ -67,7 +67,7 @@ export default function RunHistory({ sessionId }: RunHistoryProps) {
 
   if (runs.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 text-gray-500 gap-2">
+      <div className="flex flex-col items-center justify-center py-12 t-muted gap-2">
         <Clock size={24} className="opacity-40" />
         <p className="text-sm">No runs yet</p>
       </div>
@@ -77,7 +77,7 @@ export default function RunHistory({ sessionId }: RunHistoryProps) {
   return (
     <div className="p-4">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-medium text-gray-300">Run History</h2>
+        <h2 className="text-sm font-medium t-secondary">Run History</h2>
         <button onClick={fetchRuns} className="btn btn-ghost text-xs p-1">
           <RefreshCw size={12} />
         </button>
@@ -89,9 +89,7 @@ export default function RunHistory({ sessionId }: RunHistoryProps) {
             run={run}
             expanded={expandedRun === run.run_id}
             onToggle={() =>
-              setExpandedRun(
-                expandedRun === run.run_id ? null : run.run_id
-              )
+              setExpandedRun(expandedRun === run.run_id ? null : run.run_id)
             }
           />
         ))}
@@ -100,27 +98,19 @@ export default function RunHistory({ sessionId }: RunHistoryProps) {
   );
 }
 
-// ── Run Row ───────────────────────────────────────────
-
-interface RunRowProps {
-  run: Run;
-  expanded: boolean;
-  onToggle: () => void;
-}
-
-function RunRow({ run, expanded, onToggle }: RunRowProps) {
+function RunRow({ run, expanded, onToggle }: { run: Run; expanded: boolean; onToggle: () => void }) {
   const stepCount = run.plan?.steps.length ?? 0;
 
   return (
     <div className="card overflow-hidden">
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-gray-800/50 transition-colors"
+        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left bg-step-row-hover transition-colors"
       >
         <RunStatusIcon status={run.status} />
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-gray-200 truncate">{run.user_message}</p>
-          <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-500">
+          <p className="text-sm t-primary truncate">{run.user_message}</p>
+          <div className="flex items-center gap-2 mt-0.5 text-[10px] t-faint">
             <span>{formatTimestamp(run.created_at)}</span>
             {stepCount > 0 && (
               <>
@@ -132,24 +122,22 @@ function RunRow({ run, expanded, onToggle }: RunRowProps) {
         </div>
         <StatusBadge status={run.status} />
         {expanded ? (
-          <ChevronDown size={14} className="text-gray-500 flex-shrink-0" />
+          <ChevronDown size={14} className="t-faint flex-shrink-0" />
         ) : (
-          <ChevronRight size={14} className="text-gray-500 flex-shrink-0" />
+          <ChevronRight size={14} className="t-faint flex-shrink-0" />
         )}
       </button>
 
       {expanded && (
-        <div className="border-t border-gray-800 px-3 py-2.5 bg-gray-900/40">
-          {run.plan && (
-            <PlanPreview plan={run.plan} compact />
-          )}
+        <div className="border-t border-app px-3 py-2.5 bg-app-secondary">
+          {run.plan && <PlanPreview plan={run.plan} compact />}
           {run.final_response && (
-            <div className="mt-2 text-xs text-gray-400 bg-gray-900/60 rounded px-2.5 py-2 leading-relaxed">
+            <div className="mt-2 text-xs t-muted bg-app-code rounded px-2.5 py-2 leading-relaxed">
               {run.final_response}
             </div>
           )}
           {!run.plan && !run.final_response && (
-            <p className="text-xs text-gray-500 italic">No plan data</p>
+            <p className="text-xs t-faint italic">No plan data</p>
           )}
         </div>
       )}
@@ -160,30 +148,30 @@ function RunRow({ run, expanded, onToggle }: RunRowProps) {
 function RunStatusIcon({ status }: { status: RunStatus }) {
   switch (status) {
     case "completed":
-      return <CheckCircle2 size={16} className="text-emerald-400 flex-shrink-0" />;
+      return <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0" />;
     case "failed":
-      return <XCircle size={16} className="text-red-400 flex-shrink-0" />;
+      return <XCircle size={16} className="text-red-500 flex-shrink-0" />;
     case "cancelled":
-      return <XCircle size={16} className="text-gray-400 flex-shrink-0" />;
+      return <XCircle size={16} className="t-faint flex-shrink-0" />;
     case "awaiting_approval":
-      return <AlertTriangle size={16} className="text-amber-400 flex-shrink-0" />;
+      return <AlertTriangle size={16} className="text-amber-500 flex-shrink-0" />;
     case "planning":
     case "running":
-      return <Loader2 size={16} className="text-blue-400 animate-spin flex-shrink-0" />;
+      return <Loader2 size={16} className="text-blue-500 animate-spin flex-shrink-0" />;
     default:
-      return <Clock size={16} className="text-gray-500 flex-shrink-0" />;
+      return <Clock size={16} className="t-faint flex-shrink-0" />;
   }
 }
 
 function StatusBadge({ status }: { status: RunStatus }) {
   const map: Record<RunStatus, string> = {
-    idle: "bg-gray-700/50 text-gray-400",
-    planning: "bg-blue-500/15 text-blue-400",
-    running: "bg-blue-500/15 text-blue-400",
-    awaiting_approval: "bg-amber-500/15 text-amber-400",
-    completed: "bg-emerald-500/15 text-emerald-400",
-    failed: "bg-red-500/15 text-red-400",
-    cancelled: "bg-gray-600/30 text-gray-400",
+    idle: "bg-badge-type t-faint",
+    planning: "bg-blue-500/15 text-blue-600",
+    running: "bg-blue-500/15 text-blue-600",
+    awaiting_approval: "bg-amber-500/15 text-amber-600",
+    completed: "bg-emerald-500/15 text-emerald-600",
+    failed: "bg-red-500/15 text-red-600",
+    cancelled: "bg-badge-type t-faint",
   };
 
   return (
@@ -197,8 +185,7 @@ function formatTimestamp(iso: string): string {
   try {
     const d = new Date(iso);
     const now = new Date();
-    const isToday = d.toDateString() === now.toDateString();
-    if (isToday) {
+    if (d.toDateString() === now.toDateString()) {
       return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     }
     return d.toLocaleDateString([], { month: "short", day: "numeric" });
