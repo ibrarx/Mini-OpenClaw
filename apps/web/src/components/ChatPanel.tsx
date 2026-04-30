@@ -161,12 +161,30 @@ export default function ChatPanel({ sessionId, onRunUpdate }: ChatPanelProps) {
       {/* Messages area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-gray-500 gap-2">
-            <div className="text-4xl mb-2 opacity-30">🦀</div>
-            <p className="text-sm">Send a message to get started</p>
-            <p className="text-xs text-gray-600">
-              Try: &quot;List files in the workspace&quot;
-            </p>
+          <div className="flex flex-col items-center justify-center h-full t-muted gap-3">
+            <div className="text-5xl mb-1 opacity-30">🦀</div>
+            <p className="text-sm t-secondary">Send a message to get started</p>
+            <div className="flex flex-col gap-1.5 mt-1">
+              {[
+                "List files in the workspace",
+                "Read the README and summarize it",
+                "Search for TODO in all files",
+                "Remember that I prefer dark mode",
+                "Create a file called notes.txt with hello world",
+              ].map((cmd) => (
+                <button
+                  key={cmd}
+                  onClick={() => {
+                    setInput(cmd);
+                    inputRef.current?.focus();
+                  }}
+                  className="text-xs t-faint hover:text-blue-400 hover:bg-blue-500/5 px-3 py-1.5 rounded-md border border-transparent hover:border-blue-500/20 transition-all text-left"
+                >
+                  <span className="t-faint mr-1.5">Try:</span>
+                  &quot;{cmd}&quot;
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -232,7 +250,7 @@ export default function ChatPanel({ sessionId, onRunUpdate }: ChatPanelProps) {
       </div>
 
       {/* Input bar */}
-      <div className="border-t border-gray-800 px-4 py-3 bg-gray-950/80 backdrop-blur-sm">
+      <div className="border-t border-app px-4 py-3 bg-app-input-bar backdrop-blur-sm">
         <div className="flex items-center gap-2">
           <input
             ref={inputRef}
