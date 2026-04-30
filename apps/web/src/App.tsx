@@ -121,15 +121,18 @@ function AppContent() {
     <div className="h-screen flex flex-col bg-app">
       {/* Header */}
       <header className="flex items-center justify-between px-4 h-12 border-b border-app bg-app-header backdrop-blur-sm flex-shrink-0">
-        <div className="flex items-center gap-2.5">
-          <span className="text-2xl leading-none">🦀</span>
+        <button
+          onClick={() => setPage("chat")}
+          className="flex items-center gap-2.5 hover:opacity-80 transition-opacity"
+        >
+          <span className="text-4xl leading-none">🦀</span>
           <h1 className="text-sm font-semibold t-primary tracking-tight">
             Mini-OpenClaw
           </h1>
           <span className="text-[10px] t-faint font-mono hidden sm:inline">
             v0.1.0
           </span>
-        </div>
+        </button>
 
         <nav className="flex items-center gap-0.5">
           {navItems.map(({ id, label, icon: Icon }) => (
