@@ -418,7 +418,7 @@ class Orchestrator:
             await conn.close()
 
     @staticmethod
-    def _row_to_run(row: aiosqlite.Row) -> Run:
+    def _row_to_run(row: dict) -> Run:
         plan = None
         if row["plan"]:
             try:

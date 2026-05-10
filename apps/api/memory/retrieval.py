@@ -50,7 +50,7 @@ class MemoryRetrieval:
         return "\n".join(lines)
 
     @staticmethod
-    def _row_to_item(row: aiosqlite.Row) -> MemoryItem:
+    def _row_to_item(row: dict) -> MemoryItem:
         return MemoryItem(id=row["id"], workspace_id=row["workspace_id"], memory_type=row["memory_type"],
                            content=row["content"], summary=row["summary"], source=row["source"],
                            confidence=row["confidence"], visibility=row["visibility"],

@@ -18,9 +18,34 @@ Mini-OpenClaw takes plain-language instructions from a user, routes them through
 - **Node.js 18+** and npm — [nodejs.org](https://nodejs.org/)
 - **Anthropic API key** — [console.anthropic.com](https://console.anthropic.com/)
 
-## Quick Start
+## Getting Started
 
-### macOS / Linux
+### Using Docker (Recommended)
+
+Mini-OpenClaw is fully containerized. You can start the entire stack (Frontend, Backend, and Postgres) with a single command.
+
+**Prerequisites:**
+- [Docker](https://docs.docker.com/get-docker/)
+- [Docker Compose](https://docs.docker.com/compose/install/)
+
+**Launch:**
+1. Copy `.env.example` to `.env` and fill in your API keys.
+2. Run the stack:
+   ```bash
+   docker-compose up --build
+   ```
+
+**Services:**
+- **Frontend**: [http://localhost](http://localhost) (Port 80)
+- **API**: [http://localhost:8000](http://localhost:8000)
+- **Database**: Postgres running on port 5432 (internal to Docker network)
+
+**Persistence:**
+The database data is persisted in a Docker volume named `postgres_data`. Your workspace files are mapped to the `./workspace` directory on your host.
+
+To stop the services and remove containers: `docker-compose down`. To remove the volumes as well: `docker-compose down -v`.
+
+### Local Quick Start (macOS / Linux)
 
 ```bash
 # 1. Extract the ZIP (or clone)

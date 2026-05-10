@@ -28,7 +28,9 @@ class Settings(BaseSettings):
 
     # Paths — all use Path for cross-platform safety
     workspace_root: Path = Path("./workspace")
+    # Database
     database_path: Path = Path("./mini_openclaw.db")
+    database_url: str = ""  # If set, use Postgres (e.g. postgresql://user:pass@db/name)
 
     # Server
     backend_port: int = 8000

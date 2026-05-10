@@ -1,19 +1,23 @@
 """
-SQLite database setup, connection management, and table creation.
-
-Uses aiosqlite for async access. Tables match the schema defined
-in 04-memory-model.md and 01-architecture.md.
+Database setup and connection management for SQLite and Postgres.
 """
 
 import logging
+import os
 from pathlib import Path
+from typing import Any, AsyncGenerator
 
 import aiosqlite
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except ImportError:
+    psycopg = None
 
 logger = logging.getLogger(__name__)
 
 # SQL statements to create all tables.
-# Order matters: no foreign-key dependencies in V1 (all TEXT references).
+# Note: Syntax is mostly compatible between SQLite and Postgres.
 CREATE_TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS sessions (
     id          TEXT PRIMARY KEY,
@@ -25,7 +29,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS messages (
     id          TEXT PRIMARY KEY,
     session_id  TEXT NOT NULL,
-    role        TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+    role        TEXT NOT NULL,
     content     TEXT NOT NULL,
     created_at  TEXT NOT NULL,
     run_id      TEXT
@@ -79,7 +83,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
 CREATE TABLE IF NOT EXISTS memory_items (
     id            TEXT PRIMARY KEY,
     workspace_id  TEXT NOT NULL DEFAULT 'default',
-    memory_type   TEXT NOT NULL CHECK (memory_type IN ('fact', 'episode', 'summary')),
+    memory_type   TEXT NOT NULL,
     content       TEXT NOT NULL,
     summary       TEXT,
     source        TEXT,
@@ -102,45 +106,84 @@ CREATE TABLE IF NOT EXISTS tool_manifests (
 """
 
 
-async def get_connection(db_path: Path) -> aiosqlite.Connection:
-    """Open an async SQLite connection with WAL mode enabled."""
-    conn = await aiosqlite.connect(str(db_path))
-    conn.row_factory = aiosqlite.Row
-    await conn.execute("PRAGMA journal_mode=WAL")
-    await conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+class DatabaseConnection:
+    """A wrapper to unify SQLite and Postgres connection behavior."""
+    def __init__(self, conn: Any, is_postgres: bool = False):
+        self.conn = conn
+        self.is_postgres = is_postgres
+
+    async def execute(self, sql: str, params: tuple = ()) -> Any:
+        sql = self._normalize_sql(sql)
+        if self.is_postgres:
+            return await self.conn.execute(sql, params)
+        else:
+            return await self.conn.execute(sql, params)
+
+    async def execute_fetchall(self, sql: str, params: tuple = ()) -> list[dict]:
+        sql = self._normalize_sql(sql)
+        if self.is_postgres:
+            async with self.conn.cursor() as cur:
+                await cur.execute(sql, params)
+                return await cur.fetchall()
+        else:
+            async with self.conn.execute(sql, params) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(r) for r in rows]
+
+    async def commit(self):
+        await self.conn.commit()
+
+    async def close(self):
+        await self.conn.close()
+
+    def _normalize_sql(self, sql: str) -> str:
+        if self.is_postgres:
+            return sql.replace("?", "%s")
+        return sql
 
 
-async def create_tables(db_path: Path) -> None:
-    """Create all application tables if they don't exist."""
-    logger.info("Creating database tables at %s", db_path)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+async def get_connection(db_path: Path | str = "") -> DatabaseConnection:
+    """Connect to SQLite or Postgres based on settings."""
+    from .config import get_settings
+    settings = get_settings()
+
+    if settings.database_url:
+        if not psycopg:
+            raise ImportError("psycopg is required for Postgres support")
+        logger.info("Connecting to Postgres database")
+        conn = await psycopg.AsyncConnection.connect(
+            settings.database_url,
+            row_factory=dict_row,
+            autocommit=True
+        )
+        return DatabaseConnection(conn, is_postgres=True)
+    else:
+        logger.info("Connecting to SQLite database at %s", db_path or settings.resolved_database)
+        path = str(db_path) if db_path else str(settings.resolved_database)
+        conn = await aiosqlite.connect(path)
+        conn.row_factory = aiosqlite.Row
+        await conn.execute("PRAGMA journal_mode=WAL")
+        await conn.execute("PRAGMA foreign_keys=ON")
+        return DatabaseConnection(conn, is_postgres=False)
+
+
+async def create_tables(db_path: Path | str = "") -> None:
+    """Initialise tables if they don't exist."""
     conn = await get_connection(db_path)
     try:
-        await conn.executescript(CREATE_TABLES_SQL)
+        # Postgres doesn't support executescript, so we split or handle differently
+        for statement in CREATE_TABLES_SQL.split(";"):
+            if statement.strip():
+                await conn.execute(statement)
         await conn.commit()
-        logger.info("Database tables created successfully")
     finally:
         await conn.close()
 
 
-async def get_db() -> aiosqlite.Connection:
-    """FastAPI dependency that yields an async SQLite connection.
-
-    Usage in routes::
-
-        @router.get("/example")
-        async def example(db: aiosqlite.Connection = Depends(get_db)):
-            ...
-
-    The connection is opened at the start of the request and closed
-    when the request finishes, even if an error occurs.
-    """
-    from .config import get_settings
-
-    settings = get_settings()
-    conn = await get_connection(settings.resolved_database)
+async def get_db() -> AsyncGenerator[DatabaseConnection, None]:
+    """FastAPI dependency."""
+    conn = await get_connection()
     try:
-        yield conn  # type: ignore[misc]
+        yield conn
     finally:
         await conn.close()
