@@ -23,6 +23,8 @@ from apps.api.memory.retrieval import MemoryRetrieval
 from apps.api.models.run import (
     Plan, PlanStep, Run, RunStatus, StepStatus, RiskLevel, ToolResult,
 )
+from apps.api.providers import build_provider
+from apps.api.providers.errors import ProviderConfigError
 from apps.api.skills.base import ToolContext
 from apps.api.skills.registry import SkillRegistry
 
@@ -38,9 +40,16 @@ class Orchestrator:
         self._audit = AuditLogger(self._db_path)
         self._policy = PolicyEngine(self._workspace)
         self._executor = Executor(registry, self._audit)
-        if settings.anthropic_api_key:
-            self._planner = Planner(settings.anthropic_api_key, settings.anthropic_model, registry)
-        else:
+        # Build the LLM provider via the factory. The factory inspects
+        # ``settings.llm_provider`` to choose Anthropic, Gemini, or another
+        # backend. If credentials are missing for the selected provider, we
+        # run in degraded "no API key" mode (planner=None) — handle_message
+        # will surface a friendly error to the user.
+        try:
+            provider = build_provider(settings)
+            self._planner = Planner(provider, registry)
+        except ProviderConfigError as exc:
+            logger.warning("LLM provider not configured: %s", exc)
             self._planner = None
 
     async def handle_message(self, session_id: str, message: str,
@@ -72,7 +81,10 @@ class Orchestrator:
         try:
             if not self._planner:
                 run.status = RunStatus.FAILED
-                run.final_response = "API key not configured. Set ANTHROPIC_API_KEY in .env"
+                run.final_response = (
+                    "LLM provider not configured. Set ANTHROPIC_API_KEY or "
+                    "GEMINI_API_KEY in .env (and optionally LLM_PROVIDER)."
+                )
                 await self._save_run(run)
                 return
             retrieval = MemoryRetrieval(self._db_path)
