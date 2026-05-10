@@ -38,7 +38,9 @@ async def health_check() -> dict:
 
     return {
         "status": "ok",
-        "api_key_configured": bool(settings.anthropic_api_key),
+        "anthropic_configured": bool(settings.anthropic_api_key),
+        "gemini_configured": bool(settings.gemini_api_key),
+        "provider": "gemini" if settings.gemini_api_key else ("anthropic" if settings.anthropic_api_key else "none"),
         "database": db_status,
         "tools_registered": skill_registry.tool_count,
         "tool_names": tool_names,

@@ -42,6 +42,7 @@ def _make_settings(workspace: Path, db_path: Path) -> Settings:
     """Create a Settings instance for testing."""
     return Settings(
         anthropic_api_key="test-fake",
+        gemini_api_key="",
         workspace_root=workspace,
         database_path=db_path,
     )
@@ -73,8 +74,8 @@ class TestDirectAnswer:
         orch = Orchestrator(settings, registry)
 
         # Mock the planner's Claude client
-        orch._planner._client = MagicMock()
-        orch._planner._client.messages.create = AsyncMock(
+        orch._planner._anthropic_client = MagicMock()
+        orch._planner._anthropic_client.messages.create = AsyncMock(
             return_value=_mock_planner_response({
                 "task_type": "direct_answer",
                 "confidence": 0.95,
@@ -112,8 +113,8 @@ class TestSafeToolExecution:
         orch = Orchestrator(settings, registry)
 
         # Plan: use list_files
-        orch._planner._client = MagicMock()
-        orch._planner._client.messages.create = AsyncMock(
+        orch._planner._anthropic_client = MagicMock()
+        orch._planner._anthropic_client.messages.create = AsyncMock(
             side_effect=[
                 _mock_planner_response({
                     "task_type": "tool_needed",
@@ -160,8 +161,8 @@ class TestApprovalFlow:
         settings = _make_settings(tmp_workspace, tmp_db_path)
         orch = Orchestrator(settings, registry)
 
-        orch._planner._client = MagicMock()
-        orch._planner._client.messages.create = AsyncMock(
+        orch._planner._anthropic_client = MagicMock()
+        orch._planner._anthropic_client.messages.create = AsyncMock(
             return_value=_mock_planner_response({
                 "task_type": "tool_needed",
                 "confidence": 0.9,
@@ -193,8 +194,8 @@ class TestApprovalFlow:
         settings = _make_settings(tmp_workspace, tmp_db_path)
         orch = Orchestrator(settings, registry)
 
-        orch._planner._client = MagicMock()
-        orch._planner._client.messages.create = AsyncMock(
+        orch._planner._anthropic_client = MagicMock()
+        orch._planner._anthropic_client.messages.create = AsyncMock(
             side_effect=[
                 _mock_planner_response({
                     "task_type": "tool_needed",
@@ -246,8 +247,8 @@ class TestApprovalFlow:
         settings = _make_settings(tmp_workspace, tmp_db_path)
         orch = Orchestrator(settings, registry)
 
-        orch._planner._client = MagicMock()
-        orch._planner._client.messages.create = AsyncMock(
+        orch._planner._anthropic_client = MagicMock()
+        orch._planner._anthropic_client.messages.create = AsyncMock(
             return_value=_mock_planner_response({
                 "task_type": "tool_needed",
                 "confidence": 0.9,
@@ -294,6 +295,7 @@ class TestNoApiKey:
         await create_tables(tmp_db_path)
         settings = Settings(
             anthropic_api_key="",
+            gemini_api_key="",
             workspace_root=tmp_workspace,
             database_path=tmp_db_path,
         )
@@ -308,7 +310,7 @@ class TestNoApiKey:
             await asyncio.sleep(0.1)
 
         assert run.status == RunStatus.FAILED
-        assert "API key" in run.final_response
+        assert "LLM provider" in run.final_response
 
 
 # ---------------------------------------------------------------------------

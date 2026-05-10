@@ -20,9 +20,11 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Anthropic
+    # LLM Providers
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
 
     # Paths — all use Path for cross-platform safety
     workspace_root: Path = Path("./workspace")

@@ -38,10 +38,13 @@ class Orchestrator:
         self._audit = AuditLogger(self._db_path)
         self._policy = PolicyEngine(self._workspace)
         self._executor = Executor(registry, self._audit)
-        if settings.anthropic_api_key:
-            self._planner = Planner(settings.anthropic_api_key, settings.anthropic_model, registry)
-        else:
-            self._planner = None
+        self._planner = Planner(
+            anthropic_key=settings.anthropic_api_key,
+            anthropic_model=settings.anthropic_model,
+            gemini_key=settings.gemini_api_key,
+            gemini_model=settings.gemini_model,
+            registry=registry
+        )
 
     async def handle_message(self, session_id: str, message: str,
                               workspace_id: str = "default") -> Run:
@@ -70,9 +73,9 @@ class Orchestrator:
 
     async def _process_run(self, run: Run) -> None:
         try:
-            if not self._planner:
+            if not self._planner or not self._planner._provider:
                 run.status = RunStatus.FAILED
-                run.final_response = "API key not configured. Set ANTHROPIC_API_KEY in .env"
+                run.final_response = "No LLM provider configured. Set ANTHROPIC_API_KEY or GEMINI_API_KEY in .env"
                 await self._save_run(run)
                 return
             retrieval = MemoryRetrieval(self._db_path)

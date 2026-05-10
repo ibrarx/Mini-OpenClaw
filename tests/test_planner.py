@@ -28,7 +28,7 @@ def registry() -> SkillRegistry:
 
 @pytest.fixture
 def planner(registry: SkillRegistry) -> Planner:
-    return Planner(api_key="test-fake", model="test", registry=registry)
+    return Planner(anthropic_key="test-fake", anthropic_model="test", registry=registry)
 
 
 def _mock_response(text: str) -> MagicMock:
@@ -43,8 +43,8 @@ def _mock_response(text: str) -> MagicMock:
 
 def _patch(planner: Planner, response: MagicMock) -> None:
     """Patch the planner's async client to return a canned response."""
-    planner._client = MagicMock()
-    planner._client.messages.create = AsyncMock(return_value=response)
+    planner._anthropic_client = MagicMock()
+    planner._anthropic_client.messages.create = AsyncMock(return_value=response)
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +156,7 @@ class TestGenerateSummary:
 
     @pytest.mark.asyncio
     async def test_summary_handles_api_error(self, planner: Planner) -> None:
-        planner._client = MagicMock()
-        planner._client.messages.create = AsyncMock(side_effect=Exception("API error"))
+        planner._anthropic_client = MagicMock()
+        planner._anthropic_client.messages.create = AsyncMock(side_effect=Exception("API error"))
         result = await planner.generate_summary("test", [])
         assert "completed" in result.lower() or "traces" in result.lower()

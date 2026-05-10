@@ -36,14 +36,15 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown lifecycle with full validation."""
     logger.info("Mini-OpenClaw starting up")
 
-    # 1. Check ANTHROPIC_API_KEY
-    if not settings.anthropic_api_key:
+    # 1. Check API Keys
+    if not settings.anthropic_api_key and not settings.gemini_api_key:
         logger.warning(
-            "ANTHROPIC_API_KEY is not set. Chat will return errors. "
-            "Set it in .env or as an environment variable."
+            "Neither ANTHROPIC_API_KEY nor GEMINI_API_KEY is set. Chat will return errors. "
+            "Set one in .env or as an environment variable."
         )
     else:
-        logger.info("Anthropic API key: configured")
+        provider = "Gemini" if settings.gemini_api_key else "Anthropic"
+        logger.info(f"LLM Provider: {provider} configured")
 
     # 2. Ensure workspace directory exists
     workspace = settings.resolved_workspace
