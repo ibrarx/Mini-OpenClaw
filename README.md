@@ -16,7 +16,11 @@ Mini-OpenClaw takes plain-language instructions from a user, routes them through
 
 - **Python 3.11+** — [python.org/downloads](https://www.python.org/downloads/)
 - **Node.js 18+** and npm — [nodejs.org](https://nodejs.org/)
-- **Anthropic API key** — [console.anthropic.com](https://console.anthropic.com/)
+- **An API key from either**:
+  - **Anthropic** (default) — [console.anthropic.com](https://console.anthropic.com/), or
+  - **Google Gemini** — [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
+
+  See [Switching LLM providers](#switching-llm-providers) below.
 
 ## Quick Start
 
@@ -115,9 +119,46 @@ Once the app is running, type these into the chat:
 4. **"Search for TODO in all files"** — grep-like search across workspace
 5. **"Remember that I prefer dark mode"** — stores a fact in memory, visible in Memory Browser
 
+## Switching LLM providers
+
+Mini-OpenClaw is LLM-provider-agnostic. The planner talks to an abstract
+`LLMProvider` interface (see [`docs/provider-abstraction.md`](docs/provider-abstraction.md));
+concrete providers are plug-in modules. Two are shipped today: **Anthropic
+Claude** (default) and **Google Gemini**.
+
+To switch, edit `.env`:
+
+```dotenv
+# Use Anthropic (default)
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+# ANTHROPIC_MODEL=claude-sonnet-4-20250514
+
+# OR use Gemini
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=AI...
+# GEMINI_MODEL=gemini-2.5-flash
+```
+
+Restart the backend. Verify with:
+
+```bash
+curl http://localhost:8000/api/health
+```
+
+You should see `"llm_provider": "gemini"` (or `"anthropic"`) and
+`"api_key_configured": true`.
+
+### Adding another provider
+
+To plug in OpenAI / Ollama / Groq / DeepSeek / local models, see the
+five-step recipe in [`docs/provider-abstraction.md`](docs/provider-abstraction.md).
+None of the planner, orchestrator, policy engine, or tool code needs to
+change.
+
 ## Architecture
 
-Mini-OpenClaw follows a run-centric architecture: every user request becomes a **run** with discrete steps, each validated and logged. The conversation orchestrator coordinates the pipeline: the **planner** (Claude) proposes a structured JSON plan, the **policy engine** classifies each step as safe / approval-required / forbidden, the **executor** runs approved steps through the **skill registry**, and the **memory manager** persists useful context. An append-only **audit logger** records every decision for inspection. See [docs/architecture.md](docs/architecture.md) for the full design.
+Mini-OpenClaw follows a run-centric architecture: every user request becomes a **run** with discrete steps, each validated and logged. The conversation orchestrator coordinates the pipeline: the **planner** (driven by a pluggable LLM provider — Claude, Gemini, or another backend) proposes a structured JSON plan, the **policy engine** classifies each step as safe / approval-required / forbidden, the **executor** runs approved steps through the **skill registry**, and the **memory manager** persists useful context. An append-only **audit logger** records every decision for inspection. See [docs/architecture.md](docs/architecture.md) for the full design and [docs/provider-abstraction.md](docs/provider-abstraction.md) for the LLM provider layer.
 
 ## Available Tools
 
