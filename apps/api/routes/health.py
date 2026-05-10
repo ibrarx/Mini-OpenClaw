@@ -36,9 +36,16 @@ async def health_check() -> dict:
 
     tool_names = [t.manifest().name for t in skill_registry.list_tools()]
 
+    provider_name = (settings.llm_provider or "anthropic").strip().lower()
     return {
         "status": "ok",
-        "api_key_configured": bool(settings.anthropic_api_key),
+        "llm_provider": provider_name,
+        "llm_model": settings.active_provider_model,
+        "api_key_configured": bool(settings.active_provider_key),
+        # Kept for backward compatibility with older clients/tests that
+        # specifically checked the Anthropic key.
+        "anthropic_api_key_configured": bool(settings.anthropic_api_key),
+        "gemini_api_key_configured": bool(settings.gemini_api_key),
         "database": db_status,
         "tools_registered": skill_registry.tool_count,
         "tool_names": tool_names,
