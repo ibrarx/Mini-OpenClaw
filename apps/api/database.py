@@ -40,7 +40,10 @@ CREATE TABLE IF NOT EXISTS runs (
     plan            TEXT,
     final_response  TEXT,
     created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL
+    updated_at      TEXT NOT NULL,
+    iterations      INTEGER NOT NULL DEFAULT 0,
+    max_iterations  INTEGER NOT NULL DEFAULT 10,
+    observations    TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS run_steps (

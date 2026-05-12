@@ -8,6 +8,7 @@ export type RunStatus =
   | "planning"
   | "awaiting_approval"
   | "running"
+  | "reacting"
   | "completed"
   | "failed"
   | "cancelled";
@@ -32,6 +33,19 @@ export interface Run {
   final_response: string | null;
   created_at: string;
   updated_at: string;
+  iterations: number;
+  max_iterations: number;
+  observations: Observation[];
+}
+
+export interface Observation {
+  step_id: string;
+  iteration: number;
+  tool?: string | null;
+  args?: Record<string, unknown> | null;
+  reasoning?: string;
+  result?: ToolResult | null;
+  timestamp: string;
 }
 
 export interface Plan {
@@ -54,7 +68,7 @@ export interface PlanStep {
 
 export interface ToolResult {
   tool_name: string;
-  status: "success" | "error";
+  status: "success" | "error" | "denied" | "rejected";
   risk_level: RiskLevel;
   input: Record<string, unknown>;
   output: Record<string, unknown> | null;

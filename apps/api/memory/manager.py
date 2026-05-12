@@ -54,6 +54,20 @@ class MemoryManager:
         finally:
             await conn.close()
 
+    async def soft_delete_by_run(self, run_id: str) -> int:
+        """Soft-delete all memory items created by a given run (saga compensation)."""
+        now = datetime.now(timezone.utc).isoformat()
+        conn = await get_connection(self._db_path)
+        try:
+            cursor = await conn.execute(
+                "DELETE FROM memory_items WHERE run_id = ?", (run_id,))
+            await conn.commit()
+            deleted = cursor.rowcount
+            logger.info("Soft-deleted %d memory items for run %s", deleted, run_id)
+            return deleted
+        finally:
+            await conn.close()
+
     async def list_items(self, workspace_id: str = "default", memory_type: str | None = None,
                           limit: int = 100) -> list[MemoryItem]:
         conn = await get_connection(self._db_path)

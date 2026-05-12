@@ -229,7 +229,7 @@ export default function ChatPanel({
             {/* Plan preview */}
             {run.plan && run.plan.task_type !== "direct_answer" && (
               <div className="ml-9 card px-3 py-2.5">
-                <PlanPreview plan={run.plan} />
+                <PlanPreview plan={run.plan} run={run} />
               </div>
             )}
 
@@ -257,13 +257,15 @@ export default function ChatPanel({
               ))}
 
             {/* Active status indicator */}
-            {(["planning", "running"].includes(run.status) || decidedSteps.size > 0) &&
+            {(["planning", "running", "reacting"].includes(run.status) || decidedSteps.size > 0) &&
               !["completed", "failed", "cancelled"].includes(run.status) && (
               <div className="ml-9 flex items-center gap-2 text-xs t-muted">
                 <Loader2 size={14} className="animate-spin text-blue-400" />
                 <span>
                   {run.status === "planning"
                     ? "Creating plan..."
+                    : run.status === "reacting"
+                    ? `Thinking… (iteration ${run.iterations ?? 0})`
                     : decidedSteps.size > 0
                     ? "Executing approved step..."
                     : "Executing..."}

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio, logging, subprocess
 from pathlib import Path
 from typing import Any
-from apps.api.models.run import RiskLevel
+from apps.api.models.run import RetryPolicy, RiskLevel
 from apps.api.models.tool_manifest import ToolManifest
 from apps.api.platform_utils import IS_WINDOWS, get_shell_allowlist
 from apps.api.skills.base import BaseTool, ToolContext
@@ -19,6 +19,10 @@ class RunShellSafeTool(BaseTool):
                             "command":{"type":"string","enum":["pwd","ls","find","cat","grep"]},
                             "args":{"type":"array","items":{"type":"string"}},
                             "cwd":{"type":"string"}},"required":["command","args","cwd"]})
+
+    @property
+    def retry_policy(self) -> RetryPolicy:
+        return RetryPolicy(max_retries=1, idempotent=True)
 
     async def execute(self, args: dict[str, Any], context: ToolContext) -> Any:
         started = self._now()

@@ -1,5 +1,9 @@
 """
 core/orchestrator — The brain: run lifecycle manager.
+
+Supports two execution modes:
+  - ReAct loop (default, ``settings.use_react=True``): iterative think→act→observe
+  - Plan-and-execute (legacy, ``settings.use_react=False``): full upfront plan
 """
 from __future__ import annotations
 import asyncio
@@ -21,7 +25,7 @@ from apps.api.core.policy import PolicyEngine
 from apps.api.database import get_connection
 from apps.api.memory.retrieval import MemoryRetrieval
 from apps.api.models.run import (
-    Plan, PlanStep, Run, RunStatus, StepStatus, RiskLevel, ToolResult,
+    Observation, Plan, PlanStep, Run, RunStatus, StepStatus, RiskLevel, ToolResult,
 )
 from apps.api.providers import build_provider
 from apps.api.providers.errors import ProviderConfigError
@@ -40,11 +44,6 @@ class Orchestrator:
         self._audit = AuditLogger(self._db_path)
         self._policy = PolicyEngine(self._workspace)
         self._executor = Executor(registry, self._audit)
-        # Build the LLM provider via the factory. The factory inspects
-        # ``settings.llm_provider`` to choose Anthropic, Gemini, or another
-        # backend. If credentials are missing for the selected provider, we
-        # run in degraded "no API key" mode (planner=None) — handle_message
-        # will surface a friendly error to the user.
         try:
             provider = build_provider(settings)
             self._planner = Planner(provider, registry)
@@ -58,7 +57,8 @@ class Orchestrator:
         now = datetime.now(timezone.utc).isoformat()
         run = Run(run_id=run_id, session_id=session_id, workspace_id=workspace_id,
                    status=RunStatus.PLANNING, user_message=message,
-                   created_at=now, updated_at=now)
+                   created_at=now, updated_at=now,
+                   max_iterations=self._settings.react_max_iterations)
         await self._save_run(run)
         await self._store_message(session_id, "user", message, run_id)
         await self._audit.log("run_created", run_id=run_id,
@@ -70,7 +70,6 @@ class Orchestrator:
 
     @staticmethod
     def _task_done(task: asyncio.Task) -> None:
-        """Log unhandled exceptions from background run tasks."""
         if task.cancelled():
             return
         exc = task.exception()
@@ -87,42 +86,12 @@ class Orchestrator:
                 )
                 await self._save_run(run)
                 return
-            retrieval = MemoryRetrieval(self._db_path)
-            memory_context = await retrieval.get_context_bundle(
-                query=run.user_message, workspace_id=run.workspace_id)
-            event_emitter.emit(run.run_id, "planning_started")
-            plan_dict = await self._planner.create_plan(
-                user_message=run.user_message, memory_context=memory_context,
-                workspace_info=f"Workspace root: {self._workspace}")
-            steps = []
-            for i, sd in enumerate(plan_dict.get("steps", [])):
-                raw_risk = sd.get("risk_level", "safe")
-                try:
-                    risk = RiskLevel(raw_risk)
-                except ValueError:
-                    risk = RiskLevel.SAFE
-                steps.append(PlanStep(
-                    step_id=sd.get("step_id", f"step_{i+1}"),
-                    tool=sd.get("tool", ""), args=sd.get("args", {}),
-                    risk_level=risk,
-                    status=StepStatus.PENDING, reasoning=sd.get("reasoning")))
-            run.plan = Plan(
-                task_type=plan_dict.get("task_type", "direct_answer"),
-                confidence=plan_dict.get("confidence", 0.5),
-                reasoning=plan_dict.get("reasoning", ""),
-                steps=steps, direct_response=plan_dict.get("direct_response"))
-            await self._audit.log("plan_ready", run_id=run.run_id,
-                                   data={"task_type": run.plan.task_type, "steps": len(steps)})
-            event_emitter.emit(run.run_id, "plan_ready")
-            if run.plan.task_type == "direct_answer":
-                run.status = RunStatus.COMPLETED
-                run.final_response = run.plan.direct_response
-                await self._save_run(run)
-                if run.final_response:
-                    await self._store_message(run.session_id, "assistant", run.final_response, run.run_id)
-                event_emitter.emit(run.run_id, "run_completed")
-                return
-            await self._execute_steps(run)
+
+            if self._settings.use_react:
+                await self._react_loop(run)
+            else:
+                await self._plan_and_execute(run)
+
         except PlannerError as exc:
             run.status = RunStatus.FAILED
             run.final_response = f"Planning failed: {exc}"
@@ -134,6 +103,317 @@ class Orchestrator:
             run.final_response = f"Internal error: {exc}"
             await self._save_run(run)
             event_emitter.emit(run.run_id, "run_failed")
+
+    # ------------------------------------------------------------------
+    # ReAct loop
+    # ------------------------------------------------------------------
+
+    async def _react_loop(self, run: Run) -> None:
+        """Iterative ReAct loop: think → act → observe, up to max_iterations."""
+        retrieval = MemoryRetrieval(self._db_path)
+        memory_context = await retrieval.get_context_bundle(
+            query=run.user_message, workspace_id=run.workspace_id)
+        workspace_info = f"Workspace root: {self._workspace}"
+
+        # Ensure plan exists for step tracking
+        if run.plan is None:
+            run.plan = Plan(task_type="react", reasoning="ReAct loop")
+
+        while run.iterations < run.max_iterations:
+            run.iterations += 1
+            run.status = RunStatus.REACTING
+            await self._save_run(run)
+
+            # Build observation history for the planner
+            obs_for_planner = [
+                {
+                    "tool": o.tool,
+                    "status": o.result.status if o.result else "N/A",
+                    "output": o.result.output if o.result and o.result.status == "success" else None,
+                    "error": o.result.error if o.result and o.result.status != "success" else None,
+                }
+                for o in run.observations
+                if o.tool is not None  # skip final_answer observations
+            ]
+
+            # THINK: ask planner for next action
+            try:
+                decision = await self._planner.react_step(
+                    user_message=run.user_message,
+                    observations=obs_for_planner,
+                    memory_context=memory_context,
+                    workspace_info=workspace_info,
+                )
+            except PlannerError:
+                raise  # let _process_run handle it
+            except Exception as exc:
+                logger.error("ReAct planner error at iteration %d: %s", run.iterations, exc, exc_info=True)
+                # Generate summary of partial results
+                run.final_response = await self._summarize_partial(run)
+                run.final_response += f"\n\n(Stopped: planner error at iteration {run.iterations})"
+                run.status = RunStatus.FAILED
+                await self._save_run(run)
+                event_emitter.emit(run.run_id, "run_failed")
+                return
+
+            action = decision.get("action")
+            step_id = f"step_{run.iterations}"
+            now = datetime.now(timezone.utc).isoformat()
+
+            # FINAL ANSWER
+            if action == "final_answer":
+                obs = Observation(
+                    step_id=step_id, iteration=run.iterations,
+                    reasoning=decision.get("reasoning", ""),
+                    timestamp=now,
+                )
+                run.observations.append(obs)
+                run.final_response = decision.get("response", "Task completed.")
+                run.status = RunStatus.COMPLETED
+                await self._save_run(run)
+                if run.final_response:
+                    await self._store_message(run.session_id, "assistant", run.final_response, run.run_id)
+                await self._audit.log("run_completed", run_id=run.run_id,
+                                       data={"iterations": run.iterations})
+                event_emitter.emit(run.run_id, "run_completed")
+                return
+
+            # TOOL ACTION
+            tool_name = decision.get("tool", "")
+            tool_args = decision.get("args", {})
+            reasoning = decision.get("reasoning", "")
+
+            # Look up tool
+            tool = self._registry.get(tool_name)
+            if tool is None:
+                error_result = ToolResult(
+                    tool_name=tool_name, status="error", input=tool_args,
+                    error=f"Unknown tool: {tool_name}",
+                )
+                obs = Observation(
+                    step_id=step_id, iteration=run.iterations,
+                    tool=tool_name, args=tool_args, reasoning=reasoning,
+                    result=error_result, timestamp=now,
+                )
+                run.observations.append(obs)
+                await self._save_run(run)
+                await self._audit.log("react_iteration", run_id=run.run_id,
+                                       step_id=step_id,
+                                       data={"tool": tool_name, "status": "error",
+                                             "error": "unknown tool"})
+                continue
+
+            manifest = tool.manifest()
+
+            # POLICY CHECK
+            policy_result = self._policy.classify_tool(
+                tool_name, manifest.risk_level.value, manifest.approval_required)
+
+            # Path validation for file tools
+            if tool_name in ("read_file", "write_file", "list_files", "search_in_files"):
+                pc = self._policy.validate_path(
+                    tool_args.get("path", "."),
+                    write=(tool_name == "write_file"))
+                if not pc.allowed:
+                    denied_result = ToolResult(
+                        tool_name=tool_name, status="denied", input=tool_args,
+                        error=f"policy: {pc.reason}",
+                    )
+                    obs = Observation(
+                        step_id=step_id, iteration=run.iterations,
+                        tool=tool_name, args=tool_args, reasoning=reasoning,
+                        result=denied_result, timestamp=now,
+                    )
+                    run.observations.append(obs)
+                    await self._save_run(run)
+                    await self._audit.log("react_policy_denied", run_id=run.run_id,
+                                           step_id=step_id,
+                                           data={"tool": tool_name, "reason": pc.reason})
+                    continue
+
+            # Shell validation
+            if tool_name == "run_shell_safe":
+                sc = self._policy.validate_shell(
+                    tool_args.get("command", ""), tool_args.get("args", []))
+                if not sc.allowed:
+                    denied_result = ToolResult(
+                        tool_name=tool_name, status="denied", input=tool_args,
+                        error=f"policy: {sc.reason}",
+                    )
+                    obs = Observation(
+                        step_id=step_id, iteration=run.iterations,
+                        tool=tool_name, args=tool_args, reasoning=reasoning,
+                        result=denied_result, timestamp=now,
+                    )
+                    run.observations.append(obs)
+                    await self._save_run(run)
+                    await self._audit.log("react_policy_denied", run_id=run.run_id,
+                                           step_id=step_id,
+                                           data={"tool": tool_name, "reason": sc.reason})
+                    continue
+
+            # APPROVAL CHECK
+            if policy_result.classification == "approval_required":
+                # Create a PlanStep for the UI and pause
+                plan_step = PlanStep(
+                    step_id=step_id, tool=tool_name, args=tool_args,
+                    risk_level=manifest.risk_level,
+                    status=StepStatus.AWAITING_APPROVAL, reasoning=reasoning,
+                )
+                run.plan.steps.append(plan_step)
+                run.status = RunStatus.AWAITING_APPROVAL
+                # Store the pending observation (no result yet)
+                pending_obs = Observation(
+                    step_id=step_id, iteration=run.iterations,
+                    tool=tool_name, args=tool_args, reasoning=reasoning,
+                    timestamp=now,
+                )
+                run.observations.append(pending_obs)
+                await self._save_run(run)
+                await self._audit.log("approval_requested", run_id=run.run_id,
+                                       step_id=step_id, data={"tool": tool_name})
+                event_emitter.emit(run.run_id, "approval_requested")
+
+                # Wait for user decision
+                approved = await self._wait_for_approval(run.run_id, step_id)
+                logger.info("Run %s step %s: approval=%s", run.run_id, step_id, approved)
+
+                if not approved:
+                    rejected_result = ToolResult(
+                        tool_name=tool_name, status="rejected", input=tool_args,
+                        error="user declined",
+                    )
+                    # Update the pending observation with rejection
+                    run.observations[-1].result = rejected_result
+                    plan_step.status = StepStatus.FAILED
+                    plan_step.result = rejected_result
+                    await self._save_run(run)
+                    await self._audit.log("react_user_rejected", run_id=run.run_id,
+                                           step_id=step_id, data={"tool": tool_name})
+                    # Continue loop — LLM will see rejection and adapt
+                    continue
+
+                # Approved — fall through to execution
+                plan_step.status = StepStatus.RUNNING
+                run.status = RunStatus.REACTING
+                await self._save_run(run)
+            else:
+                # Auto-execute — create a PlanStep for the UI
+                plan_step = PlanStep(
+                    step_id=step_id, tool=tool_name, args=tool_args,
+                    risk_level=manifest.risk_level,
+                    status=StepStatus.RUNNING, reasoning=reasoning,
+                )
+                run.plan.steps.append(plan_step)
+                await self._save_run(run)
+
+            # ACT: execute the tool
+            context = ToolContext(
+                workspace_root=str(self._workspace), run_id=run.run_id,
+                step_id=step_id, db_path=str(self._db_path),
+            )
+            result = await self._executor.execute_tool(tool_name, tool_args, context)
+
+            # OBSERVE: record result
+            plan_step.result = result
+            plan_step.status = (
+                StepStatus.COMPLETED if result.status == "success" else StepStatus.FAILED
+            )
+
+            # Update or create observation
+            if (run.observations and run.observations[-1].step_id == step_id
+                    and run.observations[-1].result is None):
+                # Update pending observation from approval flow
+                run.observations[-1].result = result
+            else:
+                obs = Observation(
+                    step_id=step_id, iteration=run.iterations,
+                    tool=tool_name, args=tool_args, reasoning=reasoning,
+                    result=result, timestamp=datetime.now(timezone.utc).isoformat(),
+                )
+                run.observations.append(obs)
+
+            await self._save_run(run)
+            await self._audit.log("react_iteration", run_id=run.run_id,
+                                   step_id=step_id,
+                                   data={"tool": tool_name, "status": result.status,
+                                         "iteration": run.iterations})
+            event_emitter.emit(run.run_id, "step_completed")
+
+        # Max iterations reached
+        logger.warning("Run %s: max iterations (%d) reached", run.run_id, run.max_iterations)
+        run.final_response = await self._summarize_partial(run)
+        run.final_response += "\n\n(Stopped: maximum iterations reached)"
+        run.status = RunStatus.FAILED
+        await self._save_run(run)
+        if run.final_response:
+            await self._store_message(run.session_id, "assistant", run.final_response, run.run_id)
+        await self._audit.log("run_failed", run_id=run.run_id,
+                               data={"reason": "max_iterations_exceeded",
+                                     "iterations": run.iterations})
+        event_emitter.emit(run.run_id, "run_failed")
+
+    async def _summarize_partial(self, run: Run) -> str:
+        """Generate a summary from whatever observations we have so far."""
+        tool_results = []
+        for obs in run.observations:
+            if obs.result and obs.tool:
+                tool_results.append({
+                    "tool": obs.tool, "status": obs.result.status,
+                    "output": obs.result.output, "error": obs.result.error,
+                })
+        if self._planner and tool_results:
+            try:
+                return await asyncio.wait_for(
+                    self._planner.generate_summary(run.user_message, tool_results),
+                    timeout=30.0,
+                )
+            except Exception as exc:
+                logger.warning("Partial summary failed: %s", exc)
+        return "Task partially completed. Check tool traces for details."
+
+    # ------------------------------------------------------------------
+    # Plan-and-execute (legacy path, use_react=False)
+    # ------------------------------------------------------------------
+
+    async def _plan_and_execute(self, run: Run) -> None:
+        """Original plan-all-upfront-then-execute path."""
+        retrieval = MemoryRetrieval(self._db_path)
+        memory_context = await retrieval.get_context_bundle(
+            query=run.user_message, workspace_id=run.workspace_id)
+        event_emitter.emit(run.run_id, "planning_started")
+        plan_dict = await self._planner.create_plan(
+            user_message=run.user_message, memory_context=memory_context,
+            workspace_info=f"Workspace root: {self._workspace}")
+        steps = []
+        for i, sd in enumerate(plan_dict.get("steps", [])):
+            raw_risk = sd.get("risk_level", "safe")
+            try:
+                risk = RiskLevel(raw_risk)
+            except ValueError:
+                risk = RiskLevel.SAFE
+            steps.append(PlanStep(
+                step_id=sd.get("step_id", f"step_{i+1}"),
+                tool=sd.get("tool", ""), args=sd.get("args", {}),
+                risk_level=risk,
+                status=StepStatus.PENDING, reasoning=sd.get("reasoning")))
+        run.plan = Plan(
+            task_type=plan_dict.get("task_type", "direct_answer"),
+            confidence=plan_dict.get("confidence", 0.5),
+            reasoning=plan_dict.get("reasoning", ""),
+            steps=steps, direct_response=plan_dict.get("direct_response"))
+        await self._audit.log("plan_ready", run_id=run.run_id,
+                               data={"task_type": run.plan.task_type, "steps": len(steps)})
+        event_emitter.emit(run.run_id, "plan_ready")
+        if run.plan.task_type == "direct_answer":
+            run.status = RunStatus.COMPLETED
+            run.final_response = run.plan.direct_response
+            await self._save_run(run)
+            if run.final_response:
+                await self._store_message(run.session_id, "assistant", run.final_response, run.run_id)
+            event_emitter.emit(run.run_id, "run_completed")
+            return
+        await self._execute_steps(run)
 
     async def _execute_steps(self, run: Run) -> None:
         assert run.plan is not None
@@ -221,6 +501,10 @@ class Orchestrator:
             await self._store_message(run.session_id, "assistant", run.final_response, run.run_id)
         event_emitter.emit(run.run_id, "run_completed")
 
+    # ------------------------------------------------------------------
+    # Approval
+    # ------------------------------------------------------------------
+
     async def _wait_for_approval(self, run_id: str, step_id: str, timeout: float = 300) -> bool:
         start = asyncio.get_event_loop().time()
         while (asyncio.get_event_loop().time() - start) < timeout:
@@ -263,7 +547,8 @@ class Orchestrator:
 
         # Resume execution if approved — handles case where background task
         # died (e.g. uvicorn --reload) and nobody is polling the approvals table.
-        if approved:
+        if approved and not self._settings.use_react:
+            # Legacy path only — ReAct loop resumes via _wait_for_approval
             run = await self.get_run(run_id)
             if run and run.status == RunStatus.AWAITING_APPROVAL:
                 logger.info("Resuming execution for run %s after approval", run_id)
@@ -273,29 +558,22 @@ class Orchestrator:
         return await self.get_run(run_id)
 
     async def _resume_after_approval(self, run: Run, approved_step_id: str) -> None:
-        """Resume a run after approval, executing the approved step and any remaining steps.
-
-        This handles the case where the original background task died (e.g. due
-        to uvicorn --reload) and the _wait_for_approval loop is no longer running.
-        """
+        """Resume a run after approval (legacy plan-and-execute path only)."""
         try:
             if not run.plan:
                 return
-            # Find the approved step and remaining steps
             tool_results: list[dict[str, Any]] = []
             found_approved = False
             for step in run.plan.steps:
                 if step.step_id == approved_step_id:
                     found_approved = True
                 if not found_approved:
-                    # Already completed steps — collect their results
                     if step.result and step.result.status == "success":
                         tool_results.append({"tool": step.tool, "status": step.result.status,
                                               "output": step.result.output, "error": step.result.error})
                     continue
                 if step.status in (StepStatus.COMPLETED, StepStatus.FAILED):
                     continue
-                # Execute this step
                 tool = self._registry.get(step.tool)
                 if tool is None:
                     step.status = StepStatus.FAILED
@@ -316,8 +594,6 @@ class Orchestrator:
                 await self._save_run(run)
                 tool_results.append({"tool": step.tool, "status": result.status,
                                       "output": result.output, "error": result.error})
-
-            # Generate summary
             try:
                 if self._planner and tool_results:
                     run.final_response = await asyncio.wait_for(
@@ -330,7 +606,6 @@ class Orchestrator:
                 run.final_response = "Task completed. (Summary generation timed out.)"
             except Exception:
                 run.final_response = "Task completed. Check tool traces for details."
-
             all_ok = all(s.status == StepStatus.COMPLETED for s in run.plan.steps)
             run.status = RunStatus.COMPLETED if all_ok else RunStatus.FAILED
             logger.info("Resume run %s: final status=%s", run.run_id, run.status.value)
@@ -345,21 +620,33 @@ class Orchestrator:
             await self._save_run(run)
             event_emitter.emit(run.run_id, "run_failed")
 
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
     async def _save_run(self, run: Run) -> None:
         run.updated_at = datetime.now(timezone.utc).isoformat()
         plan_json = run.plan.model_dump_json() if run.plan else None
+        observations_json = json.dumps(
+            [o.model_dump() for o in run.observations], default=str
+        ) if run.observations else "[]"
         conn = await get_connection(self._db_path)
         try:
             existing = await conn.execute_fetchall("SELECT id FROM runs WHERE id=?", (run.run_id,))
             if existing:
                 await conn.execute(
-                    "UPDATE runs SET status=?, plan=?, final_response=?, updated_at=? WHERE id=?",
-                    (run.status.value, plan_json, run.final_response, run.updated_at, run.run_id))
+                    "UPDATE runs SET status=?, plan=?, final_response=?, updated_at=?, "
+                    "iterations=?, max_iterations=?, observations=? WHERE id=?",
+                    (run.status.value, plan_json, run.final_response, run.updated_at,
+                     run.iterations, run.max_iterations, observations_json, run.run_id))
             else:
                 await conn.execute(
-                    "INSERT INTO runs (id,session_id,workspace_id,status,user_message,plan,final_response,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO runs (id,session_id,workspace_id,status,user_message,plan,"
+                    "final_response,created_at,updated_at,iterations,max_iterations,observations) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                     (run.run_id, run.session_id, run.workspace_id, run.status.value,
-                     run.user_message, plan_json, run.final_response, run.created_at, run.updated_at))
+                     run.user_message, plan_json, run.final_response, run.created_at,
+                     run.updated_at, run.iterations, run.max_iterations, observations_json))
             await conn.commit()
         finally:
             await conn.close()
@@ -434,7 +721,22 @@ class Orchestrator:
                 plan = Plan.model_validate_json(row["plan"])
             except Exception:
                 pass
-        return Run(run_id=row["id"], session_id=row["session_id"], workspace_id=row["workspace_id"],
-                    status=RunStatus(row["status"]), user_message=row["user_message"],
-                    plan=plan, final_response=row["final_response"],
-                    created_at=row["created_at"], updated_at=row["updated_at"])
+        observations = []
+        obs_raw = row["observations"] if "observations" in row.keys() else None
+        if obs_raw:
+            try:
+                obs_list = json.loads(obs_raw)
+                observations = [Observation.model_validate(o) for o in obs_list]
+            except Exception:
+                pass
+        iterations = row["iterations"] if "iterations" in row.keys() else 0
+        max_iterations = row["max_iterations"] if "max_iterations" in row.keys() else 10
+        return Run(
+            run_id=row["id"], session_id=row["session_id"],
+            workspace_id=row["workspace_id"],
+            status=RunStatus(row["status"]), user_message=row["user_message"],
+            plan=plan, final_response=row["final_response"],
+            created_at=row["created_at"], updated_at=row["updated_at"],
+            iterations=iterations or 0, max_iterations=max_iterations or 10,
+            observations=observations,
+        )

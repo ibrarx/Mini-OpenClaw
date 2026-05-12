@@ -62,7 +62,7 @@ export default function ChatPage({ sessionId, messages, onMessagesChange }: Chat
                 <h3 className="text-xs font-medium t-muted uppercase tracking-wider mb-2">
                   Plan Preview
                 </h3>
-                <PlanPreview plan={activeRun.plan} />
+                <PlanPreview plan={activeRun.plan} run={activeRun} />
               </div>
 
               {/* Tool traces */}

@@ -5,6 +5,7 @@ from apps.api.models.run import RiskLevel
 from apps.api.models.tool_manifest import ToolManifest
 from apps.api.skills.base import BaseTool, ToolContext
 
+
 class RememberFactTool(BaseTool):
     def manifest(self) -> ToolManifest:
         return ToolManifest(name="remember_fact",
@@ -29,3 +30,15 @@ class RememberFactTool(BaseTool):
                                     workspace_id="default", run_id=context.run_id)
         return self._success(args, {"memory_id": item.id, "content": item.content,
                                      "memory_type": item.memory_type}, started)
+
+    async def compensate(self, args: dict[str, Any], context: ToolContext, execution_id: str) -> Any:
+        """Soft-delete the memory item created by this tool."""
+        started = self._now()
+        from apps.api.memory.manager import MemoryManager
+        from pathlib import Path
+        if not context.db_path:
+            return self._error(args, "No db_path in context for compensation", started)
+        # We don't have the memory_id here, so delete by run_id + content match
+        mm = MemoryManager(Path(context.db_path))
+        deleted = await mm.soft_delete_by_run(context.run_id)
+        return self._success(args, {"compensated": True, "deleted_count": deleted}, started)

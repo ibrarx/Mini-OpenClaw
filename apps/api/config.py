@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     frontend_port: int = 5173
     log_level: str = "INFO"
 
+    # ----- ReAct loop -----
+    use_react: bool = True
+    react_max_iterations: int = 10
+
     # ----- Derived -----
     @property
     def temp_dir(self) -> Path:
