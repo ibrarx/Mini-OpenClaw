@@ -2,7 +2,7 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
-from apps.api.models.run import RiskLevel
+from apps.api.models.run import RetryPolicy, RiskLevel
 from apps.api.models.tool_manifest import ToolManifest
 from apps.api.skills.base import BaseTool, ToolContext
 
@@ -14,6 +14,10 @@ class SearchInFilesTool(BaseTool):
                             input_schema={"type":"object","properties":{"path":{"type":"string"},
                             "query":{"type":"string"},"file_glob":{"type":"string"}},
                             "required":["path","query"]})
+
+    @property
+    def retry_policy(self) -> RetryPolicy:
+        return RetryPolicy(max_retries=1, idempotent=True)
 
     async def execute(self, args: dict[str, Any], context: ToolContext) -> Any:
         started = self._now()

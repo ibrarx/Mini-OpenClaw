@@ -1,20 +1,26 @@
 """
 models/run — Pydantic models for runs and plans.
-Matches the Run, Plan, and PlanStep interfaces in the frontend types.ts.
+
+Supports both the legacy plan-and-execute path and the ReAct loop.
+ReAct additions: RetryPolicy, Observation, Run.iterations/max_iterations/observations,
+and RunStatus.REACTING.
 """
 from __future__ import annotations
 from enum import Enum
 from typing import Any
 from pydantic import BaseModel, Field
 
+
 class RunStatus(str, Enum):
     IDLE = "idle"
     PLANNING = "planning"
     AWAITING_APPROVAL = "awaiting_approval"
     RUNNING = "running"
+    REACTING = "reacting"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
 
 class StepStatus(str, Enum):
     PENDING = "pending"
@@ -23,10 +29,12 @@ class StepStatus(str, Enum):
     FAILED = "failed"
     AWAITING_APPROVAL = "awaiting_approval"
 
+
 class RiskLevel(str, Enum):
     SAFE = "safe"
     MEDIUM = "medium"
     HIGH = "high"
+
 
 class ToolResult(BaseModel):
     tool_name: str
@@ -39,6 +47,14 @@ class ToolResult(BaseModel):
     finished_at: str = ""
     artifacts: list[str] = Field(default_factory=list)
 
+
+class RetryPolicy(BaseModel):
+    """Controls whether and how a tool retries on transient failure."""
+    max_retries: int = 0
+    backoff_base: float = 1.0
+    idempotent: bool = False
+
+
 class PlanStep(BaseModel):
     step_id: str
     tool: str
@@ -48,12 +64,25 @@ class PlanStep(BaseModel):
     result: ToolResult | None = None
     reasoning: str | None = None
 
+
 class Plan(BaseModel):
     task_type: str = "tool_needed"
     confidence: float = 0.0
     reasoning: str = ""
     steps: list[PlanStep] = Field(default_factory=list)
     direct_response: str | None = None
+
+
+class Observation(BaseModel):
+    """One iteration of the ReAct loop: think → act → observe."""
+    step_id: str
+    iteration: int
+    tool: str | None = None        # None for final_answer steps
+    args: dict[str, Any] = Field(default_factory=dict)
+    reasoning: str = ""             # LLM's Think output
+    result: ToolResult | None = None
+    timestamp: str = ""
+
 
 class Run(BaseModel):
     run_id: str
@@ -65,3 +94,7 @@ class Run(BaseModel):
     final_response: str | None = None
     created_at: str = ""
     updated_at: str = ""
+    # ReAct fields
+    iterations: int = 0
+    max_iterations: int = 10
+    observations: list[Observation] = Field(default_factory=list)

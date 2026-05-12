@@ -2,7 +2,7 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
-from apps.api.models.run import RiskLevel
+from apps.api.models.run import RetryPolicy, RiskLevel
 from apps.api.models.tool_manifest import ToolManifest
 from apps.api.skills.base import BaseTool, ToolContext
 
@@ -18,6 +18,10 @@ class SearchMemoryTool(BaseTool):
                 "memory_type": {"type": "string", "enum": ["fact", "episode", "summary"]},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 20},
             }, "required": ["query"]})
+
+    @property
+    def retry_policy(self) -> RetryPolicy:
+        return RetryPolicy(max_retries=1, idempotent=True)
 
     async def execute(self, args: dict[str, Any], context: ToolContext) -> Any:
         started = self._now()

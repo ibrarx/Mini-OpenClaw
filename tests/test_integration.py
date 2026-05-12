@@ -114,6 +114,7 @@ def _make_settings(workspace: Path, db_path: Path) -> Settings:
         anthropic_api_key="test-fake",
         workspace_root=workspace,
         database_path=db_path,
+        use_react=False,
     )
 
 
@@ -410,6 +411,7 @@ class TestProviderSwitching:
             gemini_api_key="test-fake-gemini",
             workspace_root=tmp_workspace,
             database_path=tmp_db_path,
+            use_react=False,
         )
         orch = Orchestrator(settings, registry)
         # Confirm the factory built a Gemini provider before we swap it.

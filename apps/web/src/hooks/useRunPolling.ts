@@ -11,6 +11,7 @@ import type { Run, RunStatus } from "../api/types";
 const ACTIVE_STATUSES: Set<RunStatus> = new Set([
   "planning",
   "running",
+  "reacting",
   "awaiting_approval",
 ]);
 

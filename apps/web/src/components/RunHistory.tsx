@@ -130,7 +130,7 @@ function RunRow({ run, expanded, onToggle }: { run: Run; expanded: boolean; onTo
 
       {expanded && (
         <div className="border-t border-app px-3 py-2.5 bg-app-secondary">
-          {run.plan && <PlanPreview plan={run.plan} compact />}
+          {run.plan && <PlanPreview plan={run.plan} run={run} compact />}
           {run.final_response && (
             <div className="mt-2 text-xs t-muted bg-app-code rounded px-2.5 py-2 leading-relaxed">
               {run.final_response}

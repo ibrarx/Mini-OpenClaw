@@ -492,6 +492,28 @@ class TestBaseProvider:
         with pytest.raises(LLMProviderError):
             await p.generate_json(messages=[LLMMessage(role="user", content="x")])
 
+    @pytest.mark.asyncio
+    async def test_generate_json_extracts_from_preamble(self) -> None:
+        """Model returns reasoning text before the JSON — we extract it."""
+        raw = (
+            'I need to read the file first. Let me list files.\n\n'
+            '{"action": "tool", "tool": "list_files", "args": {"path": "."}}'
+        )
+        p = _StubProvider(text=raw)
+        out = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
+        assert out == {"action": "tool", "tool": "list_files", "args": {"path": "."}}
+
+    @pytest.mark.asyncio
+    async def test_generate_json_extracts_nested_braces(self) -> None:
+        """JSON with nested objects is extracted correctly."""
+        raw = (
+            'Here is my plan:\n'
+            '{"action": "tool", "args": {"nested": {"deep": true}}}'
+        )
+        p = _StubProvider(text=raw)
+        out = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
+        assert out["args"]["nested"]["deep"] is True
+
     def test_model_property_default(self) -> None:
         p = _StubProvider()
         assert p.model == "stub-1"

@@ -40,7 +40,10 @@ CREATE TABLE IF NOT EXISTS runs (
     plan            TEXT,
     final_response  TEXT,
     created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL
+    updated_at      TEXT NOT NULL,
+    iterations      INTEGER NOT NULL DEFAULT 0,
+    max_iterations  INTEGER NOT NULL DEFAULT 10,
+    observations    TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS run_steps (
@@ -102,6 +105,19 @@ CREATE TABLE IF NOT EXISTS tool_manifests (
 """
 
 
+# ---------------------------------------------------------------------------
+# Migrations — add columns that may be missing from older databases.
+# Each statement uses "ALTER TABLE … ADD COLUMN" which is a no-op error if
+# the column already exists, so we catch and ignore that specific error.
+# ---------------------------------------------------------------------------
+
+MIGRATIONS = [
+    "ALTER TABLE runs ADD COLUMN iterations INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE runs ADD COLUMN max_iterations INTEGER NOT NULL DEFAULT 10",
+    "ALTER TABLE runs ADD COLUMN observations TEXT NOT NULL DEFAULT '[]'",
+]
+
+
 async def get_connection(db_path: Path) -> aiosqlite.Connection:
     """Open an async SQLite connection with WAL mode enabled."""
     conn = await aiosqlite.connect(str(db_path))
@@ -112,12 +128,20 @@ async def get_connection(db_path: Path) -> aiosqlite.Connection:
 
 
 async def create_tables(db_path: Path) -> None:
-    """Create all application tables if they don't exist."""
+    """Create all application tables if they don't exist, then run migrations."""
     logger.info("Creating database tables at %s", db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = await get_connection(db_path)
     try:
         await conn.executescript(CREATE_TABLES_SQL)
+        await conn.commit()
+        # Run migrations for existing databases that may lack newer columns.
+        for stmt in MIGRATIONS:
+            try:
+                await conn.execute(stmt)
+            except Exception:
+                # Column already exists — expected for fresh or migrated DBs.
+                pass
         await conn.commit()
         logger.info("Database tables created successfully")
     finally:
