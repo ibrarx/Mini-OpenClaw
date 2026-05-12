@@ -176,10 +176,48 @@ class GeminiProvider(LLMProvider):
             text = text[:-3]
         try:
             return json.loads(text.strip())
-        except json.JSONDecodeError as exc:
-            raise LLMProviderError(
-                f"Gemini returned invalid JSON: {exc}. First 200 chars: {text[:200]!r}"
-            ) from exc
+        except json.JSONDecodeError:
+            pass
+        # Fallback: extract first balanced { … } block.
+        parsed = self._extract_json_object(text.strip())
+        if parsed is not None:
+            return parsed
+        raise LLMProviderError(
+            f"Gemini returned invalid JSON. First 200 chars: {text[:200]!r}"
+        )
+
+    @staticmethod
+    def _extract_json_object(text: str) -> dict[str, Any] | None:
+        """Find the first balanced top-level JSON object in *text*."""
+        start = text.find("{")
+        if start == -1:
+            return None
+        depth = 0
+        in_string = False
+        escape = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"' and not escape:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start : i + 1])
+                    except json.JSONDecodeError:
+                        return None
+        return None
 
     # ------------------------------------------------------------------
     # Internal

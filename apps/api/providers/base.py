@@ -169,8 +169,9 @@ class LLMProvider(ABC):
         """Run a completion and return a parsed JSON object.
 
         Default implementation: call ``generate``, strip any markdown fences,
-        and ``json.loads`` the result. Providers with a native JSON mode
-        SHOULD override this for better reliability.
+        and ``json.loads`` the result. If the model prefixed the JSON with
+        reasoning text (common with ReAct prompts), we extract the first
+        ``{…}`` block.
 
         Raises
         ------
@@ -193,14 +194,51 @@ class LLMProvider(ABC):
         if text.endswith("```"):
             text = text[:-3]
         text = text.strip()
+
+        # Try parsing directly first (fast path).
         try:
             return json.loads(text)
-        except json.JSONDecodeError as exc:
-            from apps.api.providers.errors import LLMProviderError
+        except json.JSONDecodeError:
+            pass
 
-            raise LLMProviderError(
-                f"{self.name} returned invalid JSON: {exc}. First 200 chars: {text[:200]!r}"
-            ) from exc
+        # Fallback: the model may have prefixed the JSON with reasoning text.
+        # Find the first top-level { … } block by scanning for balanced braces.
+        start = text.find("{")
+        if start != -1:
+            depth = 0
+            in_string = False
+            escape = False
+            for i in range(start, len(text)):
+                ch = text[i]
+                if escape:
+                    escape = False
+                    continue
+                if ch == "\\":
+                    escape = True
+                    continue
+                if ch == '"' and not escape:
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = text[start : i + 1]
+                        try:
+                            return json.loads(candidate)
+                        except json.JSONDecodeError:
+                            break
+
+        from apps.api.providers.errors import LLMProviderError
+
+        raise LLMProviderError(
+            f"{self.name} returned invalid JSON: "
+            f"Expecting value: line 1 column 1 (char 0). "
+            f"First 200 chars: {text[:200]!r}"
+        )
 
     # -- streaming (optional) -----------------------------------------------
 
