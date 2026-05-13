@@ -76,7 +76,11 @@ class EmbeddingProvider:
             from sentence_transformers import SentenceTransformer
             logger.info("Loading embedding model: %s", self._model_name)
             self._model = SentenceTransformer(self._model_name)
-            self._dimension = self._model.get_sentence_embedding_dimension()
+            self._dimension = (
+                self._model.get_embedding_dimension()
+                if hasattr(self._model, "get_embedding_dimension")
+                else self._model.get_sentence_embedding_dimension()
+            )
             _MODEL_CACHE[self._model_name] = self._model
             logger.info(
                 "Embedding model loaded: %s (dim=%d)",

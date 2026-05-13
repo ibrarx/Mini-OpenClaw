@@ -118,6 +118,26 @@ def _make_settings(workspace: Path, db_path: Path) -> Settings:
     )
 
 
+async def _wait_terminal(
+    orch: Orchestrator, run_id: str,
+    statuses: tuple = (RunStatus.COMPLETED, RunStatus.FAILED),
+    timeout: float = 5.0,
+):
+    """Poll until the run reaches one of the given statuses, then drain tasks."""
+    terminal = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
+    for _ in range(int(timeout / 0.1)):
+        run = await orch.get_run(run_id)
+        if run and run.status in statuses:
+            break
+        await asyncio.sleep(0.1)
+    # Only drain background tasks if we reached a truly terminal state
+    # (not AWAITING_APPROVAL, which means the task is still running)
+    run = await orch.get_run(run_id)
+    if run and run.status in terminal:
+        await orch.wait_pending()
+    return run
+
+
 # ---------------------------------------------------------------------------
 # Direct answer flow
 # ---------------------------------------------------------------------------
@@ -147,11 +167,7 @@ class TestDirectAnswer:
         )
 
         run = await orch.handle_message("sess_1", "What is a README?")
-        for _ in range(50):
-            run = await orch.get_run(run.run_id)
-            if run and run.status in (RunStatus.COMPLETED, RunStatus.FAILED):
-                break
-            await asyncio.sleep(0.1)
+        run = await _wait_terminal(orch, run.run_id)
 
         assert run.status == RunStatus.COMPLETED
         assert run.final_response == "A README is a documentation file."
@@ -195,11 +211,7 @@ class TestSafeToolExecution:
         )
 
         run = await orch.handle_message("sess_1", "List files")
-        for _ in range(50):
-            run = await orch.get_run(run.run_id)
-            if run and run.status in (RunStatus.COMPLETED, RunStatus.FAILED):
-                break
-            await asyncio.sleep(0.1)
+        run = await _wait_terminal(orch, run.run_id)
 
         assert run.status == RunStatus.COMPLETED
 
@@ -243,11 +255,7 @@ class TestApprovalFlow:
         )
 
         run = await orch.handle_message("sess_1", "Create test.txt")
-        for _ in range(50):
-            run = await orch.get_run(run.run_id)
-            if run and run.status == RunStatus.AWAITING_APPROVAL:
-                break
-            await asyncio.sleep(0.1)
+        run = await _wait_terminal(orch, run.run_id, statuses=(RunStatus.AWAITING_APPROVAL, RunStatus.FAILED))
 
         assert run.status == RunStatus.AWAITING_APPROVAL
 
@@ -286,21 +294,13 @@ class TestApprovalFlow:
         )
 
         run = await orch.handle_message("sess_1", "Create test.txt")
-        for _ in range(50):
-            run = await orch.get_run(run.run_id)
-            if run and run.status == RunStatus.AWAITING_APPROVAL:
-                break
-            await asyncio.sleep(0.1)
+        run = await _wait_terminal(orch, run.run_id, statuses=(RunStatus.AWAITING_APPROVAL, RunStatus.FAILED))
 
         assert run.status == RunStatus.AWAITING_APPROVAL
 
         await orch.approve_step(run.run_id, "s1", True)
 
-        for _ in range(50):
-            run = await orch.get_run(run.run_id)
-            if run and run.status in (RunStatus.COMPLETED, RunStatus.FAILED):
-                break
-            await asyncio.sleep(0.1)
+        run = await _wait_terminal(orch, run.run_id)
 
         assert run.status == RunStatus.COMPLETED
         assert (tmp_workspace / "test.txt").read_text() == "hello"
@@ -338,19 +338,11 @@ class TestApprovalFlow:
         )
 
         run = await orch.handle_message("sess_1", "Create test.txt")
-        for _ in range(50):
-            run = await orch.get_run(run.run_id)
-            if run and run.status == RunStatus.AWAITING_APPROVAL:
-                break
-            await asyncio.sleep(0.1)
+        run = await _wait_terminal(orch, run.run_id, statuses=(RunStatus.AWAITING_APPROVAL, RunStatus.FAILED))
 
         await orch.approve_step(run.run_id, "s1", False)
 
-        for _ in range(50):
-            run = await orch.get_run(run.run_id)
-            if run and run.status in (RunStatus.CANCELLED, RunStatus.FAILED):
-                break
-            await asyncio.sleep(0.1)
+        run = await _wait_terminal(orch, run.run_id, statuses=(RunStatus.CANCELLED, RunStatus.FAILED))
 
         assert run.status == RunStatus.CANCELLED
 
@@ -377,11 +369,7 @@ class TestNoApiKey:
         orch = Orchestrator(settings, registry)
 
         run = await orch.handle_message("sess_1", "hello")
-        for _ in range(50):
-            run = await orch.get_run(run.run_id)
-            if run and run.status in (RunStatus.COMPLETED, RunStatus.FAILED):
-                break
-            await asyncio.sleep(0.1)
+        run = await _wait_terminal(orch, run.run_id)
 
         assert run.status == RunStatus.FAILED
         # Message now references both provider keys; assert on a stable token.
@@ -434,11 +422,7 @@ class TestProviderSwitching:
         )
 
         run = await orch.handle_message("sess_1", "say hi")
-        for _ in range(50):
-            run = await orch.get_run(run.run_id)
-            if run and run.status in (RunStatus.COMPLETED, RunStatus.FAILED):
-                break
-            await asyncio.sleep(0.1)
+        run = await _wait_terminal(orch, run.run_id)
 
         assert run.status == RunStatus.COMPLETED
         assert run.final_response == "Hello from Gemini!"

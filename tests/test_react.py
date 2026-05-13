@@ -83,14 +83,20 @@ def _install_fake_provider(orch: Orchestrator, responses: list[Any]) -> FakeProv
 
 
 async def _wait_for_run(orch: Orchestrator, run_id: str, timeout: float = 10.0) -> Any:
-    """Poll until the run reaches a terminal state."""
+    """Poll until the run reaches a terminal state, then await background cleanup."""
+    terminal = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
     for _ in range(int(timeout / 0.1)):
         run = await orch.get_run(run_id)
-        if run and run.status in (
-            RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED,
-        ):
+        if run and run.status in terminal:
+            # Let background tasks (episode storage, etc.) finish
+            await orch.wait_pending()
             return run
         await asyncio.sleep(0.1)
+    # Timeout — drain what we can
+    try:
+        await asyncio.wait_for(orch.wait_pending(), timeout=2.0)
+    except asyncio.TimeoutError:
+        pass
     return await orch.get_run(run_id)
 
 

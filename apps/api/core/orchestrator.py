@@ -58,6 +58,9 @@ class Orchestrator:
             self._db_path, self._embedder, self._vector_store
         )
 
+        # Track background tasks for clean test teardown
+        self._pending_tasks: list[asyncio.Task] = []
+
         try:
             provider = build_provider(settings)
             self._planner = Planner(provider, registry)
@@ -87,7 +90,16 @@ class Orchestrator:
         event_emitter.emit(run_id, "run_created")
         task = asyncio.create_task(self._process_run(run))
         task.add_done_callback(self._task_done)
+        self._pending_tasks.append(task)
+        # Clean up finished tasks
+        self._pending_tasks = [t for t in self._pending_tasks if not t.done()]
         return run
+
+    async def wait_pending(self) -> None:
+        """Await all pending background tasks. Used by tests for clean shutdown."""
+        if self._pending_tasks:
+            await asyncio.gather(*self._pending_tasks, return_exceptions=True)
+            self._pending_tasks.clear()
 
     @staticmethod
     def _task_done(task: asyncio.Task) -> None:
