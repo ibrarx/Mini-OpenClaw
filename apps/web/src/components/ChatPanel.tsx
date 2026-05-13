@@ -10,7 +10,7 @@ import PlanPreview from "./PlanPreview";
 import ApprovalCard from "./ApprovalCard";
 import ToolTrace from "./ToolTrace";
 import { submitChat, approveStep, rejectStep, cancelRun } from "../api/client";
-import { useRunPolling } from "../hooks/useRunPolling";
+import { useRunSSE } from "../hooks/useRunSSE";
 import type { ChatMessage, Run, RunStatus } from "../api/types";
 
 interface ChatPanelProps {
@@ -36,7 +36,7 @@ export default function ChatPanel({
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Poll the active run
-  const { run, error: pollError, refresh } = useRunPolling(activeRunId);
+  const { run, error: pollError, refresh } = useRunSSE(activeRunId);
 
   // Notify parent of run updates
   useEffect(() => {
