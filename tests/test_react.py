@@ -846,3 +846,89 @@ class TestObservationModel:
         )
         assert obs.tool == "list_files"
         assert obs.result.status == "success"
+
+
+# ---------------------------------------------------------------------------
+# Error classification tests
+# ---------------------------------------------------------------------------
+
+
+class TestErrorKindClassification:
+    """Verify tools classify errors correctly and the executor respects them."""
+
+    @pytest.mark.asyncio
+    async def test_read_file_not_found_is_permanent(
+        self, registry: SkillRegistry, tmp_workspace: Path,
+    ) -> None:
+        """File not found should be PERMANENT — never retried."""
+        from apps.api.models.run import ErrorKind
+        tool = registry.get("read_file")
+        from apps.api.skills.base import ToolContext
+        ctx = ToolContext(workspace_root=str(tmp_workspace), run_id="r1", step_id="s1")
+        result = await tool.execute({"path": "nonexistent.txt"}, ctx)
+        assert result.status == "error"
+        assert result.error_kind == ErrorKind.PERMANENT
+
+    @pytest.mark.asyncio
+    async def test_write_file_already_exists_is_permanent(
+        self, registry: SkillRegistry, tmp_workspace: Path,
+    ) -> None:
+        """Creating a file that already exists should be PERMANENT."""
+        from apps.api.models.run import ErrorKind
+        (tmp_workspace / "exists.txt").write_text("hello")
+        tool = registry.get("write_file")
+        from apps.api.skills.base import ToolContext
+        ctx = ToolContext(workspace_root=str(tmp_workspace), run_id="r1", step_id="s1")
+        result = await tool.execute({"path": "exists.txt", "content": "x", "mode": "create"}, ctx)
+        assert result.status == "error"
+        assert result.error_kind == ErrorKind.PERMANENT
+
+    @pytest.mark.asyncio
+    async def test_shell_disallowed_command_is_permanent(
+        self, registry: SkillRegistry, tmp_workspace: Path,
+    ) -> None:
+        """Disallowed shell command should be PERMANENT."""
+        from apps.api.models.run import ErrorKind
+        tool = registry.get("run_shell_safe")
+        from apps.api.skills.base import ToolContext
+        ctx = ToolContext(workspace_root=str(tmp_workspace), run_id="r1", step_id="s1")
+        result = await tool.execute({"command": "rm", "args": ["-rf", "/"], "cwd": "."}, ctx)
+        assert result.status == "error"
+        assert result.error_kind == ErrorKind.PERMANENT
+
+    @pytest.mark.asyncio
+    async def test_permanent_error_not_retried(
+        self, registry: SkillRegistry, tmp_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """Executor should NOT retry a permanent error even if retry_policy allows."""
+        from apps.api.models.run import ErrorKind
+        from apps.api.core.audit import AuditLogger
+        from apps.api.core.executor import Executor
+        from apps.api.skills.base import ToolContext
+        await create_tables(tmp_db_path)
+
+        audit = AuditLogger(tmp_db_path)
+        executor = Executor(registry, audit)
+        ctx = ToolContext(
+            workspace_root=str(tmp_workspace), run_id="r1",
+            step_id="s1", db_path=str(tmp_db_path),
+        )
+        # read_file has retry_policy(max_retries=1, idempotent=True)
+        # but "file not found" is PERMANENT — should NOT retry
+        result = await executor.execute_tool(
+            "read_file", {"path": "missing.txt"}, ctx,
+        )
+        assert result.status == "error"
+        assert result.error_kind == ErrorKind.PERMANENT
+        # Check audit log — should have step_started and step_failed, but NO step_retrying
+        from apps.api.database import get_connection
+        conn = await get_connection(tmp_db_path)
+        try:
+            rows = await conn.execute_fetchall(
+                "SELECT event_type FROM audit_events WHERE run_id='r1' ORDER BY created_at")
+            event_types = [r["event_type"] for r in rows]
+        finally:
+            await conn.close()
+        assert "step_retrying" not in event_types, (
+            f"Permanent error should not be retried, but got: {event_types}"
+        )

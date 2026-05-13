@@ -4,7 +4,7 @@ import abc
 from datetime import datetime, timezone
 from typing import Any
 from pydantic import BaseModel
-from apps.api.models.run import RetryPolicy, RiskLevel, ToolResult
+from apps.api.models.run import ErrorKind, RetryPolicy, RiskLevel, ToolResult
 from apps.api.models.tool_manifest import ToolManifest
 
 
@@ -53,10 +53,12 @@ class BaseTool(abc.ABC):
                           input=args, output=output, started_at=started_at,
                           finished_at=datetime.now(timezone.utc).isoformat(), **kw)
 
-    def _error(self, args: dict[str, Any], error: str, started_at: str) -> ToolResult:
+    def _error(self, args: dict[str, Any], error: str, started_at: str,
+               error_kind: ErrorKind = ErrorKind.PERMANENT) -> ToolResult:
         m = self.manifest()
         return ToolResult(tool_name=m.name, status="error", risk_level=m.risk_level,
-                          input=args, error=error, started_at=started_at,
+                          input=args, error=error, error_kind=error_kind,
+                          started_at=started_at,
                           finished_at=datetime.now(timezone.utc).isoformat())
 
     @staticmethod

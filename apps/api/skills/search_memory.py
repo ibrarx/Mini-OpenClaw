@@ -2,7 +2,7 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
-from apps.api.models.run import RetryPolicy, RiskLevel
+from apps.api.models.run import ErrorKind, RetryPolicy, RiskLevel
 from apps.api.models.tool_manifest import ToolManifest
 from apps.api.skills.base import BaseTool, ToolContext
 

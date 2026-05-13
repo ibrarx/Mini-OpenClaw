@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 from typing import Any
-from apps.api.models.run import RetryPolicy, RiskLevel
+from apps.api.models.run import ErrorKind, RetryPolicy, RiskLevel
 from apps.api.models.tool_manifest import ToolManifest
 from apps.api.skills.base import BaseTool, ToolContext
 
@@ -28,7 +28,8 @@ class WriteFileTool(BaseTool):
         try:
             target.relative_to(workspace)
         except ValueError:
-            return self._error(args, f"Path outside workspace: {target}", self._now())
+            return self._error(args, f"Path outside workspace: {target}", self._now(),
+                               error_kind=ErrorKind.PERMANENT)
         mode = args.get("mode", "create")
         if mode == "overwrite" and not target.exists():
             # Not an error per se — overwrite on missing file just creates it.
@@ -42,11 +43,13 @@ class WriteFileTool(BaseTool):
         try:
             target.relative_to(workspace)
         except ValueError:
-            return self._error(args, f"Path outside workspace: {target}", started)
+            return self._error(args, f"Path outside workspace: {target}", started,
+                               error_kind=ErrorKind.PERMANENT)
         mode = args.get("mode", "create")
         content = args.get("content", "")
         if mode == "create" and target.exists():
-            return self._error(args, f"File already exists: {args['path']} (use overwrite)", started)
+            return self._error(args, f"File already exists: {args['path']} (use overwrite)", started,
+                               error_kind=ErrorKind.PERMANENT)
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             # Backup before overwrite for saga compensation
@@ -58,8 +61,13 @@ class WriteFileTool(BaseTool):
                     f.write(content)
             else:
                 target.write_text(content, encoding="utf-8")
-        except (PermissionError, OSError) as exc:
-            return self._error(args, f"Write failed: {exc}", started)
+        except PermissionError as exc:
+            return self._error(args, f"Write failed: {exc}", started,
+                               error_kind=ErrorKind.PERMANENT)
+        except OSError as exc:
+            # Disk full, I/O error — transient, may succeed on retry
+            return self._error(args, f"Write failed: {exc}", started,
+                               error_kind=ErrorKind.TRANSIENT)
         return self._success(args, {"path": args["path"], "mode": mode,
                                      "bytes_written": len(content.encode("utf-8"))}, started)
 

@@ -13,7 +13,7 @@ import uuid
 from typing import Any
 
 from apps.api.core.audit import AuditLogger
-from apps.api.models.run import PlanStep, ToolResult
+from apps.api.models.run import ErrorKind, PlanStep, ToolResult
 from apps.api.skills.base import BaseTool, ToolContext
 from apps.api.skills.registry import SkillRegistry
 
@@ -91,10 +91,18 @@ class Executor:
                 break
 
             # Should we retry?
+            # Only retry if: retries remain, tool is idempotent, AND the
+            # failure is transient (or unclassified — legacy tools that
+            # don't set error_kind get the benefit of the doubt).
+            is_retryable = (
+                result.error_kind == ErrorKind.TRANSIENT
+                or result.error_kind is None  # unclassified → respect retry_policy
+            )
             if (
                 attempt < max_attempts - 1
                 and retry_policy.max_retries > 0
                 and retry_policy.idempotent
+                and is_retryable
             ):
                 delay = retry_policy.backoff_base * (2 ** attempt)
                 logger.info(

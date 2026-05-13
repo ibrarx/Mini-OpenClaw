@@ -73,6 +73,7 @@ export interface ToolResult {
   input: Record<string, unknown>;
   output: Record<string, unknown> | null;
   error: string | null;
+  error_kind: "transient" | "permanent" | "side_effect" | null;
   started_at: string;
   finished_at: string;
   artifacts?: string[];

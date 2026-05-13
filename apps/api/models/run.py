@@ -36,6 +36,19 @@ class RiskLevel(str, Enum):
     HIGH = "high"
 
 
+class ErrorKind(str, Enum):
+    """Classifies tool failures so the executor knows how to respond.
+
+    TRANSIENT — retry is safe (network timeout, rate limit, lock contention).
+    PERMANENT — never retry (bad credentials, not found, validation error).
+    SIDE_EFFECT — the action partially/fully succeeded but something broke.
+                  Cannot be undone automatically. Must surface to user.
+    """
+    TRANSIENT = "transient"
+    PERMANENT = "permanent"
+    SIDE_EFFECT = "side_effect"
+
+
 class ToolResult(BaseModel):
     tool_name: str
     status: str
@@ -43,6 +56,7 @@ class ToolResult(BaseModel):
     input: dict[str, Any] = Field(default_factory=dict)
     output: dict[str, Any] | None = None
     error: str | None = None
+    error_kind: ErrorKind | None = None
     started_at: str = ""
     finished_at: str = ""
     artifacts: list[str] = Field(default_factory=list)

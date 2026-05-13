@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio, logging, subprocess
 from pathlib import Path
 from typing import Any
-from apps.api.models.run import RetryPolicy, RiskLevel
+from apps.api.models.run import ErrorKind, RetryPolicy, RiskLevel
 from apps.api.models.tool_manifest import ToolManifest
 from apps.api.platform_utils import IS_WINDOWS, get_shell_allowlist
 from apps.api.skills.base import BaseTool, ToolContext
@@ -33,12 +33,15 @@ class RunShellSafeTool(BaseTool):
         try:
             cwd.relative_to(workspace)
         except ValueError:
-            return self._error(args, f"Working directory outside workspace: {cwd}", started)
+            return self._error(args, f"Working directory outside workspace: {cwd}", started,
+                               error_kind=ErrorKind.PERMANENT)
         if not cwd.is_dir():
-            return self._error(args, f"Working directory not found: {args.get('cwd','.')}", started)
+            return self._error(args, f"Working directory not found: {args.get('cwd','.')}", started,
+                               error_kind=ErrorKind.PERMANENT)
         allowlist = get_shell_allowlist()
         if command not in allowlist:
-            return self._error(args, f"Command not allowed: {command}", started)
+            return self._error(args, f"Command not allowed: {command}", started,
+                               error_kind=ErrorKind.PERMANENT)
         native_cmd = allowlist[command]
         try:
             if IS_WINDOWS:
@@ -52,13 +55,17 @@ class RunShellSafeTool(BaseTool):
             out = stdout.decode("utf-8", errors="replace").strip()
             err = stderr.decode("utf-8", errors="replace").strip()
             if proc.returncode != 0:
-                return self._error(args, f"Command failed (exit {proc.returncode}): {err or out}", started)
+                return self._error(args, f"Command failed (exit {proc.returncode}): {err or out}", started,
+                                   error_kind=ErrorKind.PERMANENT)
             return self._success(args, {"command": command, "native_command": native_cmd,
                                          "stdout": out[:5000], "stderr": err[:1000] if err else None,
                                          "exit_code": proc.returncode}, started)
         except asyncio.TimeoutError:
-            return self._error(args, "Command timed out after 15s", started)
+            return self._error(args, "Command timed out after 15s", started,
+                               error_kind=ErrorKind.TRANSIENT)
         except FileNotFoundError:
-            return self._error(args, f"Command not found: {native_cmd}", started)
+            return self._error(args, f"Command not found: {native_cmd}", started,
+                               error_kind=ErrorKind.PERMANENT)
         except Exception as exc:
-            return self._error(args, f"Execution error: {exc}", started)
+            return self._error(args, f"Execution error: {exc}", started,
+                               error_kind=ErrorKind.TRANSIENT)
