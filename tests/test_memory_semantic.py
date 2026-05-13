@@ -692,3 +692,167 @@ class TestEpisodeStorage:
         episodes = await mm.list_items(memory_type="episode")
         assert len(episodes) >= 1
         assert "Tell me about the project" in episodes[0].content
+
+
+# ── store_summary ─────────────────────────────────────────────────
+
+
+class TestStoreSummary:
+    @pytest.mark.asyncio
+    async def test_store_summary(self, db_path: Path, manager: MemoryManager) -> None:
+        await create_tables(db_path)
+        item = await manager.store_summary(content="User is working on NLP thesis.")
+        assert item.memory_type == MemoryType.SUMMARY
+        assert item.content == "User is working on NLP thesis."
+
+    @pytest.mark.asyncio
+    async def test_store_summary_replaces_previous(
+        self, db_path: Path, manager: MemoryManager
+    ) -> None:
+        """Only the most recent summary should exist."""
+        await create_tables(db_path)
+        await manager.store_summary(content="Old summary")
+        await manager.store_summary(content="New summary")
+
+        summaries = await manager.list_items(memory_type="summary")
+        assert len(summaries) == 1
+        assert summaries[0].content == "New summary"
+
+    @pytest.mark.asyncio
+    async def test_episode_count(self, db_path: Path, manager: MemoryManager) -> None:
+        await create_tables(db_path)
+        assert await manager.episode_count() == 0
+        await manager.store_episode(content="ep1")
+        await manager.store_episode(content="ep2")
+        assert await manager.episode_count() == 2
+
+    @pytest.mark.asyncio
+    async def test_get_recent_episodes(self, db_path: Path, manager: MemoryManager) -> None:
+        await create_tables(db_path)
+        for i in range(8):
+            await manager.store_episode(content=f"Episode {i}")
+        recent = await manager.get_recent_episodes(limit=3)
+        assert len(recent) == 3
+        # Most recent first
+        assert "Episode 7" in recent[0].content
+
+
+# ── Summary generation via orchestrator ───────────────────────────
+
+
+class TestSummaryGeneration:
+    @pytest.mark.asyncio
+    async def test_summary_generated_after_threshold(
+        self, db_path: Path, tmp_workspace: Path
+    ) -> None:
+        """After SUMMARY_INTERVAL episodes, a summary should be auto-generated."""
+        from apps.api.config import Settings
+        from apps.api.core.orchestrator import Orchestrator
+        from apps.api.skills.registry import SkillRegistry
+        from apps.api.providers.base import LLMResponse
+
+        await create_tables(db_path)
+
+        settings = Settings(
+            workspace_root=str(tmp_workspace),
+            database_path=str(db_path),
+            anthropic_api_key="test-key",
+            use_react=True,
+        )
+        registry = SkillRegistry()
+        registry.discover()
+        orch = Orchestrator(settings, registry)
+        await orch.initialize_memory()
+
+        call_counter = 0
+
+        async def mock_react_step(user_message, observations, memory_context="", workspace_info=""):
+            return {"action": "final_answer", "response": f"Answer to: {user_message}", "reasoning": "done"}
+
+        async def mock_generate(messages, system="", max_tokens=1024, timeout=30.0):
+            return LLMResponse(text="The user has been asking various questions about their workspace.")
+
+        orch._planner = MagicMock()
+        orch._planner.react_step = mock_react_step
+        orch._planner._provider = MagicMock()
+        orch._planner._provider.generate = mock_generate
+
+        import asyncio
+
+        # Run exactly SUMMARY_INTERVAL tasks
+        for i in range(Orchestrator.SUMMARY_INTERVAL):
+            await orch.handle_message(f"sess_{i}", f"Task number {i}")
+            await asyncio.sleep(0.3)
+
+        # Wait for background tasks
+        await asyncio.sleep(1.0)
+
+        # Check that a summary was generated
+        mm = MemoryManager(db_path)
+        summaries = await mm.list_items(memory_type="summary")
+        assert len(summaries) == 1, f"Expected 1 summary, got {len(summaries)}"
+        assert "user" in summaries[0].content.lower()
+
+    @pytest.mark.asyncio
+    async def test_no_summary_before_threshold(
+        self, db_path: Path, tmp_workspace: Path
+    ) -> None:
+        """Fewer than SUMMARY_INTERVAL episodes should NOT trigger summary."""
+        from apps.api.config import Settings
+        from apps.api.core.orchestrator import Orchestrator
+        from apps.api.skills.registry import SkillRegistry
+
+        await create_tables(db_path)
+
+        settings = Settings(
+            workspace_root=str(tmp_workspace),
+            database_path=str(db_path),
+            anthropic_api_key="test-key",
+            use_react=True,
+        )
+        registry = SkillRegistry()
+        registry.discover()
+        orch = Orchestrator(settings, registry)
+        await orch.initialize_memory()
+
+        async def mock_react_step(user_message, observations, memory_context="", workspace_info=""):
+            return {"action": "final_answer", "response": "done", "reasoning": "done"}
+
+        orch._planner = MagicMock()
+        orch._planner.react_step = mock_react_step
+        orch._planner._provider = None  # No LLM — summary shouldn't happen
+
+        import asyncio
+
+        # Run fewer than threshold
+        for i in range(3):
+            await orch.handle_message(f"sess_{i}", f"Task {i}")
+            await asyncio.sleep(0.3)
+
+        await asyncio.sleep(0.5)
+
+        mm = MemoryManager(db_path)
+        summaries = await mm.list_items(memory_type="summary")
+        assert len(summaries) == 0
+
+
+# ── Summary appears in planner context ────────────────────────────
+
+
+class TestSummaryInPlannerContext:
+    @pytest.mark.asyncio
+    async def test_summary_included_in_context(
+        self, db_path: Path, retrieval: MemoryRetrieval,
+        manager: MemoryManager, vector_store: VectorStore,
+    ) -> None:
+        """Stored summaries appear in get_context_for_planner output."""
+        await create_tables(db_path)
+        await vector_store.ensure_table()
+
+        await manager.store_summary(content="User is working on a Python ML project using PyTorch.")
+        await manager.store_fact(content="Preferred language: Python")
+
+        context = await retrieval.get_context_for_planner("help me with code")
+        assert "Conversation Summary" in context
+        assert "PyTorch" in context
+        assert "Python" in context

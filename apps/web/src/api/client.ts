@@ -96,14 +96,17 @@ export async function getMemory(
   return apiFetch(`/memory?${params}`);
 }
 
+export type SearchMode = "hybrid" | "keyword" | "vector";
+
 export async function searchMemory(
   query: string,
   type?: MemoryType,
-  limit: number = 10
+  limit: number = 10,
+  searchMode: SearchMode = "hybrid"
 ): Promise<MemoryItem[]> {
   return apiFetch("/memory/search", {
     method: "POST",
-    body: JSON.stringify({ query, memory_type: type, limit }),
+    body: JSON.stringify({ query, memory_type: type, limit, search_mode: searchMode }),
   });
 }
 

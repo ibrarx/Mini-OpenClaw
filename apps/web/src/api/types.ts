@@ -90,6 +90,8 @@ export interface MemoryItem {
   visibility: string;
   created_at: string;
   updated_at: string;
+  /** Similarity score from search (0-1). Only present in search results. */
+  score?: number;
 }
 
 export interface ToolManifest {

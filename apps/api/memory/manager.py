@@ -41,6 +41,44 @@ class MemoryManager:
         return await self._store(MemoryType.EPISODE, content, source, confidence, workspace_id,
                                   summary=summary, run_id=run_id)
 
+    async def store_summary(self, content: str, source: str = "system",
+                             confidence: float = 0.6, workspace_id: str = "default") -> MemoryItem:
+        """Store a conversation summary. Replaces previous summaries to keep one current."""
+        # Delete older summaries (keep only the latest)
+        conn = await get_connection(self._db_path)
+        try:
+            await conn.execute(
+                "DELETE FROM memory_items WHERE workspace_id = ? AND memory_type = 'summary'",
+                (workspace_id,))
+            await conn.commit()
+        finally:
+            await conn.close()
+        return await self._store(MemoryType.SUMMARY, content, source, confidence, workspace_id)
+
+    async def episode_count(self, workspace_id: str = "default") -> int:
+        """Count episodes in the workspace (used to decide when to generate summaries)."""
+        conn = await get_connection(self._db_path)
+        try:
+            rows = await conn.execute_fetchall(
+                "SELECT COUNT(*) as cnt FROM memory_items WHERE workspace_id = ? AND memory_type = 'episode'",
+                (workspace_id,))
+            return rows[0]["cnt"] if rows else 0
+        finally:
+            await conn.close()
+
+    async def get_recent_episodes(self, workspace_id: str = "default",
+                                    limit: int = 10) -> list[MemoryItem]:
+        """Get the most recent episodes for summarization."""
+        conn = await get_connection(self._db_path)
+        try:
+            rows = await conn.execute_fetchall(
+                "SELECT * FROM memory_items WHERE workspace_id = ? AND memory_type = 'episode' "
+                "ORDER BY created_at DESC LIMIT ?",
+                (workspace_id, limit))
+            return [self._row_to_item(row) for row in rows]
+        finally:
+            await conn.close()
+
     async def _store(self, memory_type: MemoryType, content: str, source: str, confidence: float,
                       workspace_id: str, summary: str | None = None, run_id: str | None = None) -> MemoryItem:
         item_id = f"mem_{uuid.uuid4().hex[:12]}"

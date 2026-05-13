@@ -423,12 +423,24 @@ class Orchestrator:
         return "Task partially completed. Check tool traces for details."
 
     async def _store_episode_for_run(self, run: Run) -> None:
-        """Store an episodic memory after a run completes successfully."""
+        """Store an episodic memory after a run completes successfully.
+
+        Also triggers conversation summary generation when enough episodes
+        accumulate (every 5 episodes).
+        """
         try:
+            # Collect tools from observations (ReAct path)
             tools_used = []
             for obs in run.observations:
                 if obs.tool and obs.result and obs.result.status == "success":
                     tools_used.append(obs.tool)
+
+            # Also collect from plan steps (plan-and-execute path)
+            if not tools_used and run.plan and run.plan.steps:
+                for step in run.plan.steps:
+                    if step.result and step.result.status == "success":
+                        tools_used.append(step.tool)
+
             tools_str = ", ".join(tools_used) if tools_used else "none"
             content = (
                 f"User asked: {run.user_message}\n"
@@ -447,8 +459,85 @@ class Orchestrator:
                 workspace_id=run.workspace_id,
                 run_id=run.run_id,
             )
+
+            # Auto-generate conversation summary every SUMMARY_INTERVAL episodes
+            await self._maybe_generate_summary(run.workspace_id)
+
         except Exception as exc:
             logger.warning("Failed to store episode for run %s: %s", run.run_id, exc)
+
+    # Summary generation threshold: generate after every N episodes
+    SUMMARY_INTERVAL = 5
+
+    async def _maybe_generate_summary(self, workspace_id: str) -> None:
+        """Generate a conversation summary if enough episodes have accumulated."""
+        try:
+            ep_count = await self._memory.episode_count(workspace_id)
+            if ep_count < self.SUMMARY_INTERVAL:
+                return
+            if ep_count % self.SUMMARY_INTERVAL != 0:
+                return  # Only summarize on interval boundaries
+
+            if not self._planner or not self._planner._provider:
+                return  # Can't summarize without an LLM
+
+            episodes = await self._memory.get_recent_episodes(
+                workspace_id, limit=self.SUMMARY_INTERVAL * 2
+            )
+            if not episodes:
+                return
+
+            # Also include current facts for context
+            facts = await self._memory.list_items(
+                workspace_id=workspace_id, memory_type="fact"
+            )
+
+            # Build summary prompt
+            ep_text = "\n".join(
+                f"- {ep.summary or ep.content[:150]}" for ep in episodes
+            )
+            fact_text = "\n".join(
+                f"- {f.content}" for f in facts
+            ) if facts else "None stored."
+
+            from apps.api.providers.base import LLMMessage
+            try:
+                response = await self._planner._provider.generate(
+                    messages=[LLMMessage(
+                        role="user",
+                        content=(
+                            "Summarize the following user interactions and known facts "
+                            "into a concise paragraph (3-5 sentences) that captures:\n"
+                            "1. What the user is working on\n"
+                            "2. Their preferences and patterns\n"
+                            "3. Key outcomes from recent tasks\n\n"
+                            f"Known facts:\n{fact_text}\n\n"
+                            f"Recent interactions:\n{ep_text}\n\n"
+                            "Write a concise summary paragraph:"
+                        ),
+                    )],
+                    system="You are summarizing a user's interactions with an AI assistant. "
+                           "Be factual, concise, and focus on useful context for future interactions. "
+                           "Write in third person (e.g., 'The user is working on...').",
+                    max_tokens=512,
+                    timeout=30.0,
+                )
+                summary_text = (response.text or "").strip()
+                if summary_text:
+                    await self._memory.store_summary(
+                        content=summary_text,
+                        source="auto_summary",
+                        workspace_id=workspace_id,
+                    )
+                    logger.info(
+                        "Generated conversation summary for workspace %s (%d episodes)",
+                        workspace_id, ep_count,
+                    )
+            except Exception as exc:
+                logger.warning("Failed to generate summary: %s", exc)
+
+        except Exception as exc:
+            logger.warning("Summary generation check failed: %s", exc)
 
     async def _compensate_completed_steps(self, run: Run) -> list[ToolResult]:
         """Run saga compensation on all successfully completed mutating steps.
@@ -597,6 +686,9 @@ class Orchestrator:
         if run.final_response:
             await self._store_message(run.session_id, "assistant", run.final_response, run.run_id)
         event_emitter.emit(run.run_id, "run_completed")
+        # Store episode in memory for future context
+        if run.status == RunStatus.COMPLETED:
+            await self._store_episode_for_run(run)
 
     # ------------------------------------------------------------------
     # Approval
@@ -710,6 +802,9 @@ class Orchestrator:
             if run.final_response:
                 await self._store_message(run.session_id, "assistant", run.final_response, run.run_id)
             event_emitter.emit(run.run_id, "run_completed")
+            # Store episode in memory for future context
+            if run.status == RunStatus.COMPLETED:
+                await self._store_episode_for_run(run)
         except Exception as exc:
             logger.error("Resume run %s failed: %s", run.run_id, exc, exc_info=True)
             run.status = RunStatus.FAILED
