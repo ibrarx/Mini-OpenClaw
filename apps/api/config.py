@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     use_react: bool = True
     react_max_iterations: int = 10
 
+    # ----- Memory summaries -----
+    # How many completed runs between auto-generated conversation summaries.
+    # Set to 0 to disable auto-summarization.
+    summary_interval: int = 5
+    # Maximum number of summaries to keep. Oldest are deleted when exceeded.
+    # Set to 1 to keep only the latest summary (default).
+    max_summaries: int = 1
+
     # ----- Derived -----
     @property
     def temp_dir(self) -> Path:

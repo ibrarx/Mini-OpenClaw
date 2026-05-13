@@ -42,14 +42,26 @@ class MemoryManager:
                                   summary=summary, run_id=run_id)
 
     async def store_summary(self, content: str, source: str = "system",
-                             confidence: float = 0.6, workspace_id: str = "default") -> MemoryItem:
-        """Store a conversation summary. Replaces previous summaries to keep one current."""
-        # Delete older summaries (keep only the latest)
+                             confidence: float = 0.6, workspace_id: str = "default",
+                             max_summaries: int = 1) -> MemoryItem:
+        """Store a conversation summary.
+
+        When the number of existing summaries reaches ``max_summaries``,
+        the oldest ones are deleted to stay within the limit.
+        """
         conn = await get_connection(self._db_path)
         try:
-            await conn.execute(
-                "DELETE FROM memory_items WHERE workspace_id = ? AND memory_type = 'summary'",
-                (workspace_id,))
+            if max_summaries >= 1:
+                # Keep at most (max_summaries - 1) so the new one fits
+                rows = await conn.execute_fetchall(
+                    "SELECT id FROM memory_items "
+                    "WHERE workspace_id = ? AND memory_type = 'summary' "
+                    "ORDER BY created_at DESC",
+                    (workspace_id,))
+                ids_to_delete = [r["id"] for r in rows[max_summaries - 1:]]
+                for old_id in ids_to_delete:
+                    await conn.execute(
+                        "DELETE FROM memory_items WHERE id = ?", (old_id,))
             await conn.commit()
         finally:
             await conn.close()

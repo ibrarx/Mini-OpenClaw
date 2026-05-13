@@ -460,29 +460,34 @@ class Orchestrator:
                 run_id=run.run_id,
             )
 
-            # Auto-generate conversation summary every SUMMARY_INTERVAL episodes
+            # Auto-generate conversation summary periodically
             await self._maybe_generate_summary(run.workspace_id)
 
         except Exception as exc:
             logger.warning("Failed to store episode for run %s: %s", run.run_id, exc)
 
-    # Summary generation threshold: generate after every N episodes
-    SUMMARY_INTERVAL = 5
-
     async def _maybe_generate_summary(self, workspace_id: str) -> None:
-        """Generate a conversation summary if enough episodes have accumulated."""
+        """Generate a conversation summary if enough episodes have accumulated.
+
+        Controlled by ``settings.summary_interval`` (0 = disabled) and
+        ``settings.max_summaries`` (how many to keep).
+        """
+        interval = self._settings.summary_interval
+        if interval <= 0:
+            return  # Auto-summarization disabled
+
         try:
             ep_count = await self._memory.episode_count(workspace_id)
-            if ep_count < self.SUMMARY_INTERVAL:
+            if ep_count < interval:
                 return
-            if ep_count % self.SUMMARY_INTERVAL != 0:
+            if ep_count % interval != 0:
                 return  # Only summarize on interval boundaries
 
             if not self._planner or not self._planner._provider:
                 return  # Can't summarize without an LLM
 
             episodes = await self._memory.get_recent_episodes(
-                workspace_id, limit=self.SUMMARY_INTERVAL * 2
+                workspace_id, limit=interval * 2
             )
             if not episodes:
                 return
@@ -528,6 +533,7 @@ class Orchestrator:
                         content=summary_text,
                         source="auto_summary",
                         workspace_id=workspace_id,
+                        max_summaries=self._settings.max_summaries,
                     )
                     logger.info(
                         "Generated conversation summary for workspace %s (%d episodes)",

@@ -709,14 +709,30 @@ class TestStoreSummary:
     async def test_store_summary_replaces_previous(
         self, db_path: Path, manager: MemoryManager
     ) -> None:
-        """Only the most recent summary should exist."""
+        """With max_summaries=1 (default), only the newest summary should exist."""
         await create_tables(db_path)
-        await manager.store_summary(content="Old summary")
-        await manager.store_summary(content="New summary")
+        await manager.store_summary(content="Old summary", max_summaries=1)
+        await manager.store_summary(content="New summary", max_summaries=1)
 
         summaries = await manager.list_items(memory_type="summary")
         assert len(summaries) == 1
         assert summaries[0].content == "New summary"
+
+    @pytest.mark.asyncio
+    async def test_store_summary_keeps_multiple(
+        self, db_path: Path, manager: MemoryManager
+    ) -> None:
+        """With max_summaries=3, up to 3 summaries are kept."""
+        await create_tables(db_path)
+        for i in range(5):
+            await manager.store_summary(content=f"Summary {i}", max_summaries=3)
+
+        summaries = await manager.list_items(memory_type="summary")
+        assert len(summaries) == 3
+        # Most recent first
+        assert summaries[0].content == "Summary 4"
+        assert summaries[1].content == "Summary 3"
+        assert summaries[2].content == "Summary 2"
 
     @pytest.mark.asyncio
     async def test_episode_count(self, db_path: Path, manager: MemoryManager) -> None:
@@ -745,7 +761,7 @@ class TestSummaryGeneration:
     async def test_summary_generated_after_threshold(
         self, db_path: Path, tmp_workspace: Path
     ) -> None:
-        """After SUMMARY_INTERVAL episodes, a summary should be auto-generated."""
+        """After summary_interval episodes, a summary should be auto-generated."""
         from apps.api.config import Settings
         from apps.api.core.orchestrator import Orchestrator
         from apps.api.skills.registry import SkillRegistry
@@ -779,8 +795,8 @@ class TestSummaryGeneration:
 
         import asyncio
 
-        # Run exactly SUMMARY_INTERVAL tasks
-        for i in range(Orchestrator.SUMMARY_INTERVAL):
+        # Run exactly summary_interval tasks (default=5)
+        for i in range(settings.summary_interval):
             await orch.handle_message(f"sess_{i}", f"Task number {i}")
             await asyncio.sleep(0.3)
 
@@ -797,7 +813,7 @@ class TestSummaryGeneration:
     async def test_no_summary_before_threshold(
         self, db_path: Path, tmp_workspace: Path
     ) -> None:
-        """Fewer than SUMMARY_INTERVAL episodes should NOT trigger summary."""
+        """Fewer than summary_interval episodes should NOT trigger summary."""
         from apps.api.config import Settings
         from apps.api.core.orchestrator import Orchestrator
         from apps.api.skills.registry import SkillRegistry
