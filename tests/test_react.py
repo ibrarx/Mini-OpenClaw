@@ -617,7 +617,7 @@ class TestReactApprovalFlow:
         assert run.final_response == "Working directory confirmed."
 
     @pytest.mark.asyncio
-    async def test_rejection_continues_loop(
+    async def test_rejection_cancels_and_compensates(
         self, registry: SkillRegistry, tmp_workspace: Path, tmp_db_path: Path,
     ) -> None:
         await create_tables(tmp_db_path)
@@ -625,18 +625,13 @@ class TestReactApprovalFlow:
         orch = Orchestrator(settings, registry)
 
         # Iteration 1: run_shell_safe → user rejects
-        # Iteration 2: LLM sees rejection, gives final answer
+        # Run should cancel immediately (no more LLM calls needed)
         _install_fake_provider(orch, [
             _react_json({
                 "action": "tool",
                 "tool": "run_shell_safe",
                 "args": {"command": "pwd", "args": [], "cwd": "."},
                 "reasoning": "Check directory",
-            }),
-            _react_json({
-                "action": "final_answer",
-                "response": "User declined the shell command. Cannot proceed.",
-                "reasoning": "User rejected the action",
             }),
         ])
 
@@ -654,14 +649,97 @@ class TestReactApprovalFlow:
         # Reject
         run = await orch.approve_step(run.run_id, "step_1", approved=False)
 
-        # Wait for completion
+        # Wait for terminal state
         run = await _wait_for_run(orch, run.run_id)
 
-        assert run.status == RunStatus.COMPLETED
+        assert run.status == RunStatus.CANCELLED
         assert "declined" in run.final_response.lower()
         # The rejection observation should be recorded
         rejected_obs = [o for o in run.observations if o.result and o.result.status == "rejected"]
         assert len(rejected_obs) == 1
+
+
+class TestReactSagaCompensation:
+    """Saga compensation: reject step N → undo steps 1..N-1."""
+
+    @pytest.mark.asyncio
+    async def test_reject_third_file_undoes_first_two(
+        self, registry: SkillRegistry, tmp_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """Create file1, file2 (approved), then reject file3 → file1 and file2 deleted."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings(tmp_workspace, tmp_db_path)
+        orch = Orchestrator(settings, registry)
+
+        # The LLM will ask to create 3 files one at a time.
+        # We'll approve the first two, reject the third.
+        _install_fake_provider(orch, [
+            _react_json({
+                "action": "tool",
+                "tool": "write_file",
+                "args": {"path": "file1.txt", "content": "content1", "mode": "create"},
+                "reasoning": "Create first file",
+            }),
+            _react_json({
+                "action": "tool",
+                "tool": "write_file",
+                "args": {"path": "file2.txt", "content": "content2", "mode": "create"},
+                "reasoning": "Create second file",
+            }),
+            _react_json({
+                "action": "tool",
+                "tool": "write_file",
+                "args": {"path": "file3.txt", "content": "content3", "mode": "create"},
+                "reasoning": "Create third file",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Create three files")
+
+        # Approve file1
+        for _ in range(50):
+            run = await orch.get_run(run.run_id)
+            if run and run.status == RunStatus.AWAITING_APPROVAL:
+                break
+            await asyncio.sleep(0.1)
+        assert run.status == RunStatus.AWAITING_APPROVAL
+        assert any(s.step_id == "step_1" for s in run.plan.steps)
+        await orch.approve_step(run.run_id, "step_1", approved=True)
+
+        # Wait for step_2 approval (means step_1 executed)
+        for _ in range(50):
+            run = await orch.get_run(run.run_id)
+            if run and run.status == RunStatus.AWAITING_APPROVAL and len(run.plan.steps) >= 2:
+                break
+            await asyncio.sleep(0.1)
+        assert run.status == RunStatus.AWAITING_APPROVAL
+        assert (tmp_workspace / "file1.txt").exists(), "file1.txt should exist after approval"
+
+        # Approve file2
+        await orch.approve_step(run.run_id, "step_2", approved=True)
+
+        # Wait for step_3 approval (means step_2 executed)
+        for _ in range(50):
+            run = await orch.get_run(run.run_id)
+            if run and run.status == RunStatus.AWAITING_APPROVAL and len(run.plan.steps) >= 3:
+                break
+            await asyncio.sleep(0.1)
+        assert run.status == RunStatus.AWAITING_APPROVAL
+        assert (tmp_workspace / "file2.txt").exists(), "file2.txt should exist after approval"
+
+        # Reject file3
+        await orch.approve_step(run.run_id, "step_3", approved=False)
+
+        # Wait for terminal state
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.CANCELLED
+        assert "rolled back" in run.final_response.lower()
+
+        # Saga compensation should have deleted file1 and file2
+        assert not (tmp_workspace / "file1.txt").exists(), "file1.txt should have been deleted by compensation"
+        assert not (tmp_workspace / "file2.txt").exists(), "file2.txt should have been deleted by compensation"
+        assert not (tmp_workspace / "file3.txt").exists(), "file3.txt should never have been created"
 
 
 class TestReactPersistence:

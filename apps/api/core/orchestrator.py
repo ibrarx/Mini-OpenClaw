@@ -290,8 +290,36 @@ class Orchestrator:
                     await self._save_run(run)
                     await self._audit.log("react_user_rejected", run_id=run.run_id,
                                            step_id=step_id, data={"tool": tool_name})
-                    # Continue loop — LLM will see rejection and adapt
-                    continue
+
+                    # Saga compensation: undo previously completed mutating steps.
+                    # Without this, the LLM would try to "help" by calling write_file
+                    # with empty content, which is worse than a proper rollback.
+                    compensated = await self._compensate_completed_steps(run)
+
+                    # End the run — don't let the LLM improvise undo actions.
+                    comp_msg = ""
+                    if compensated:
+                        comp_names = [c.tool_name for c in compensated if c.status == "success"]
+                        if comp_names:
+                            comp_msg = (
+                                f" Rolled back {len(comp_names)} previous "
+                                f"step{'s' if len(comp_names) != 1 else ''}: "
+                                f"{', '.join(comp_names)}."
+                            )
+                    run.final_response = (
+                        f"Run stopped: you declined the {tool_name} action "
+                        f"(step {run.iterations}).{comp_msg}"
+                    )
+                    run.status = RunStatus.CANCELLED
+                    await self._save_run(run)
+                    if run.final_response:
+                        await self._store_message(
+                            run.session_id, "assistant", run.final_response, run.run_id)
+                    await self._audit.log("run_cancelled", run_id=run.run_id,
+                                           data={"reason": "user_rejected",
+                                                 "compensated": len(compensated)})
+                    event_emitter.emit(run.run_id, "run_cancelled")
+                    return
 
                 # Approved — fall through to execution
                 plan_step.status = StepStatus.RUNNING
@@ -371,6 +399,26 @@ class Orchestrator:
             except Exception as exc:
                 logger.warning("Partial summary failed: %s", exc)
         return "Task partially completed. Check tool traces for details."
+
+    async def _compensate_completed_steps(self, run: Run) -> list[ToolResult]:
+        """Run saga compensation on all successfully completed mutating steps.
+
+        Walks completed PlanSteps in reverse order and calls each tool's
+        ``compensate()`` method. Read-only tools return ``not_applicable``.
+        """
+        if not run.plan or not run.plan.steps:
+            return []
+        context = ToolContext(
+            workspace_root=str(self._workspace), run_id=run.run_id,
+            step_id="compensation", db_path=str(self._db_path),
+        )
+        results = await self._executor.compensate_steps(run.plan.steps, context)
+        for r in results:
+            if r.status == "success":
+                logger.info("Compensated %s in run %s", r.tool_name, run.run_id)
+            elif r.status != "not_applicable":
+                logger.warning("Compensation failed for %s: %s", r.tool_name, r.error)
+        return results
 
     # ------------------------------------------------------------------
     # Plan-and-execute (legacy path, use_react=False)
