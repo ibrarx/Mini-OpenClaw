@@ -23,7 +23,10 @@ from apps.api.core.executor import Executor
 from apps.api.core.planner import Planner, PlannerError
 from apps.api.core.policy import PolicyEngine
 from apps.api.database import get_connection
+from apps.api.memory.embeddings import EmbeddingProvider
+from apps.api.memory.manager import MemoryManager
 from apps.api.memory.retrieval import MemoryRetrieval
+from apps.api.memory.vector_store import VectorStore
 from apps.api.models.run import (
     Observation, Plan, PlanStep, Run, RunStatus, StepStatus, RiskLevel, ToolResult,
 )
@@ -44,12 +47,30 @@ class Orchestrator:
         self._audit = AuditLogger(self._db_path)
         self._policy = PolicyEngine(self._workspace)
         self._executor = Executor(registry, self._audit)
+
+        # Memory subsystem: embedding provider + vector store + retrieval + manager
+        self._embedder = EmbeddingProvider()
+        self._vector_store = VectorStore(self._db_path)
+        self._retrieval = MemoryRetrieval(
+            self._db_path, self._embedder, self._vector_store
+        )
+        self._memory = MemoryManager(
+            self._db_path, self._embedder, self._vector_store
+        )
+
         try:
             provider = build_provider(settings)
             self._planner = Planner(provider, registry)
         except ProviderConfigError as exc:
             logger.warning("LLM provider not configured: %s", exc)
             self._planner = None
+
+    async def initialize_memory(self) -> None:
+        """Create vector table and reindex. Call once at startup."""
+        await self._vector_store.ensure_table()
+        count = await self._retrieval.reindex_all(workspace_id="default")
+        if count > 0:
+            logger.info("Indexed %d memory items into vector store", count)
 
     async def handle_message(self, session_id: str, message: str,
                               workspace_id: str = "default") -> Run:
@@ -110,9 +131,8 @@ class Orchestrator:
 
     async def _react_loop(self, run: Run) -> None:
         """Iterative ReAct loop: think → act → observe, up to max_iterations."""
-        retrieval = MemoryRetrieval(self._db_path)
-        memory_context = await retrieval.get_context_bundle(
-            query=run.user_message, workspace_id=run.workspace_id)
+        memory_context = await self._retrieval.get_context_for_planner(
+            message=run.user_message, workspace_id=run.workspace_id)
         workspace_info = f"Workspace root: {self._workspace}"
 
         # Ensure plan exists for step tracking
@@ -176,6 +196,8 @@ class Orchestrator:
                 await self._audit.log("run_completed", run_id=run.run_id,
                                        data={"iterations": run.iterations})
                 event_emitter.emit(run.run_id, "run_completed")
+                # Store episode in memory for future context
+                await self._store_episode_for_run(run)
                 return
 
             # TOOL ACTION
@@ -400,6 +422,34 @@ class Orchestrator:
                 logger.warning("Partial summary failed: %s", exc)
         return "Task partially completed. Check tool traces for details."
 
+    async def _store_episode_for_run(self, run: Run) -> None:
+        """Store an episodic memory after a run completes successfully."""
+        try:
+            tools_used = []
+            for obs in run.observations:
+                if obs.tool and obs.result and obs.result.status == "success":
+                    tools_used.append(obs.tool)
+            tools_str = ", ".join(tools_used) if tools_used else "none"
+            content = (
+                f"User asked: {run.user_message}\n"
+                f"Tools used: {tools_str}\n"
+                f"Result: {(run.final_response or 'completed')[:300]}"
+            )
+            summary = (
+                f"{run.user_message[:100]} → "
+                f"{tools_str} → "
+                f"{(run.final_response or 'done')[:80]}"
+            )
+            await self._memory.store_episode(
+                content=content,
+                summary=summary,
+                source=f"run:{run.run_id}",
+                workspace_id=run.workspace_id,
+                run_id=run.run_id,
+            )
+        except Exception as exc:
+            logger.warning("Failed to store episode for run %s: %s", run.run_id, exc)
+
     async def _compensate_completed_steps(self, run: Run) -> list[ToolResult]:
         """Run saga compensation on all successfully completed mutating steps.
 
@@ -426,9 +476,8 @@ class Orchestrator:
 
     async def _plan_and_execute(self, run: Run) -> None:
         """Original plan-all-upfront-then-execute path."""
-        retrieval = MemoryRetrieval(self._db_path)
-        memory_context = await retrieval.get_context_bundle(
-            query=run.user_message, workspace_id=run.workspace_id)
+        memory_context = await self._retrieval.get_context_for_planner(
+            message=run.user_message, workspace_id=run.workspace_id)
         event_emitter.emit(run.run_id, "planning_started")
         plan_dict = await self._planner.create_plan(
             user_message=run.user_message, memory_context=memory_context,

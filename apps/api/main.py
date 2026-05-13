@@ -86,6 +86,12 @@ async def lifespan(app: FastAPI):
     orchestrator = Orchestrator(settings, skill_registry)
     app.state.orchestrator = orchestrator
 
+    # 7. Initialize memory vector store and reindex
+    try:
+        await orchestrator.initialize_memory()
+    except Exception as exc:
+        logger.warning("Memory initialization failed (non-fatal): %s", exc)
+
     tool_names = [t.manifest().name for t in skill_registry.list_tools()]
     logger.info(
         "Mini-OpenClaw ready: %d tools (%s), workspace at %s, memory: %d items",

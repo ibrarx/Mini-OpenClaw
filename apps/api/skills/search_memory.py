@@ -7,6 +7,17 @@ from apps.api.models.tool_manifest import ToolManifest
 from apps.api.skills.base import BaseTool, ToolContext
 
 
+def _build_retrieval(db_path_str: str):
+    """Build a MemoryRetrieval with embedding support for hybrid search."""
+    from apps.api.memory.embeddings import EmbeddingProvider
+    from apps.api.memory.retrieval import MemoryRetrieval
+    from apps.api.memory.vector_store import VectorStore
+    db_path = Path(db_path_str)
+    embedder = EmbeddingProvider()
+    vectors = VectorStore(db_path)
+    return MemoryRetrieval(db_path, embedder, vectors)
+
+
 class SearchMemoryTool(BaseTool):
     def manifest(self) -> ToolManifest:
         return ToolManifest(
@@ -25,12 +36,11 @@ class SearchMemoryTool(BaseTool):
 
     async def execute(self, args: dict[str, Any], context: ToolContext) -> Any:
         started = self._now()
-        from apps.api.memory.retrieval import MemoryRetrieval
         query = args.get("query", "")
         if not query.strip():
             return self._error(args, "Query cannot be empty", started)
 
-        retrieval = MemoryRetrieval(Path(context.db_path))
+        retrieval = _build_retrieval(context.db_path)
         items = await retrieval.search(query=query, memory_type=args.get("memory_type"),
                                         limit=args.get("limit", 10), workspace_id="default")
         results = [{"id": i.id, "content": i.content, "memory_type": i.memory_type.value,

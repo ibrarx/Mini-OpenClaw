@@ -1,19 +1,35 @@
-"""memory/manager — Write, update, and delete memory items."""
+"""memory/manager — Write, update, and delete memory items.
+
+Auto-indexes new items into the vector store for semantic search
+when an embedding provider and vector store are available.
+"""
 from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 import aiosqlite
 from apps.api.database import get_connection
 from apps.api.models.memory_item import MemoryItem, MemoryType
+
+if TYPE_CHECKING:
+    from apps.api.memory.embeddings import EmbeddingProvider
+    from apps.api.memory.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
 
 class MemoryManager:
-    def __init__(self, db_path: Path) -> None:
+    def __init__(
+        self,
+        db_path: Path,
+        embedding_provider: "EmbeddingProvider | None" = None,
+        vector_store: "VectorStore | None" = None,
+    ) -> None:
         self._db_path = db_path
+        self._embedder = embedding_provider
+        self._vectors = vector_store
 
     async def store_fact(self, content: str, source: str = "user", confidence: float = 0.8,
                           workspace_id: str = "default", run_id: str | None = None) -> MemoryItem:
@@ -43,7 +59,23 @@ class MemoryManager:
             logger.info("Stored memory %s type=%s", item.id, item.memory_type.value)
         finally:
             await conn.close()
+        # Auto-index into vector store for semantic search
+        await self._index_item(item)
         return item
+
+    async def _index_item(self, item: MemoryItem) -> None:
+        """Embed and index a memory item if embedding provider is available."""
+        if self._embedder is None or self._vectors is None:
+            return
+        if not self._embedder.available:
+            return
+        try:
+            embedding = await self._embedder.embed(item.content)
+            if embedding is not None:
+                await self._vectors.upsert(item.id, item.content, embedding)
+                logger.debug("Indexed memory item %s in vector store", item.id)
+        except Exception as exc:
+            logger.warning("Failed to index memory item %s: %s", item.id, exc)
 
     async def delete(self, item_id: str) -> bool:
         conn = await get_connection(self._db_path)

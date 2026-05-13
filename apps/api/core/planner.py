@@ -36,6 +36,15 @@ IMPORTANT RULES:
 Available tools:
 {tools_json}
 
+## User Context (from memory — USE THIS to inform your decisions)
+{memory_context}
+
+CRITICAL: Use the memory context above to personalize your responses and tool choices.
+- If memory says the user's project is at a specific path, use that path — don't ask.
+- If memory says the user prefers a particular tool or language, default to it.
+- If memory contains relevant past actions, reference them in your reasoning.
+- Do NOT ask the user for information that is already in the memory context.
+
 Respond with ONLY a valid JSON object (no markdown, no backticks). Structure:
 {{
   "task_type": "direct_answer" | "tool_needed" | "clarification_needed" | "multi_step",
@@ -55,9 +64,6 @@ Respond with ONLY a valid JSON object (no markdown, no backticks). Structure:
 
 For direct_answer: task_type="direct_answer", answer in direct_response, empty steps.
 For tool tasks: fill steps array.
-
-Memory context:
-{memory_context}
 """
 
 
@@ -79,6 +85,14 @@ IMPORTANT RULES:
 Available tools:
 {tools_json}
 
+## User Context (from memory — USE THIS to inform your decisions)
+{memory_context}
+
+CRITICAL: Use the memory context above to personalize your responses and tool choices.
+- If the user already told you something (stored in memory), use it directly — don't ask again.
+- If memory contains relevant facts, reference them in your reasoning.
+- If memory shows past actions related to this task, learn from them.
+
 Respond with ONLY valid JSON (no markdown, no backticks):
 
 To call a tool:
@@ -86,9 +100,6 @@ To call a tool:
 
 To give a final answer:
 {{"action": "final_answer", "response": "Your answer to the user", "reasoning": "Why done"}}
-
-Memory context:
-{memory_context}
 """
 
 
