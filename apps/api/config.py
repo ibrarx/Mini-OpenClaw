@@ -59,8 +59,7 @@ class Settings(BaseSettings):
     # Set to 0 to disable auto-summarization.
     summary_interval: int = 5
     # Maximum number of summaries to keep. Oldest are deleted when exceeded.
-    # Set to 1 to keep only the latest summary (default).
-    max_summaries: int = 1
+    max_summaries: int = 3
 
     # ----- Derived -----
     @property

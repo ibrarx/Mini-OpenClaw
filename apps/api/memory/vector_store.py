@@ -5,16 +5,16 @@ Stores embeddings alongside memory items. Uses brute-force cosine similarity
 in numpy for search (fine for <10K items). Content hashing avoids re-embedding
 unchanged items.
 
-Table: memory_vectors
-  - item_id TEXT PRIMARY KEY (references memory_items.id)
-  - embedding BLOB (stored as JSON array of floats)
-  - content_hash TEXT (SHA-256 of the text that was embedded)
+The table is auto-created on first write. All read operations gracefully
+return empty results if the table doesn't exist yet, so callers never crash
+on a fresh database.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
+import sqlite3
 from pathlib import Path
 
 import aiosqlite
@@ -42,22 +42,29 @@ class VectorStore:
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
+        self._table_ensured = False
 
     async def ensure_table(self) -> None:
         """Create the memory_vectors table if it doesn't exist."""
+        if self._table_ensured:
+            return
         conn = await get_connection(self._db_path)
         try:
             await conn.executescript(CREATE_VECTORS_TABLE)
             await conn.commit()
+            self._table_ensured = True
         finally:
             await conn.close()
 
     async def upsert(self, item_id: str, text: str, embedding: list[float]) -> None:
-        """Store embedding. Skip if content_hash matches (text unchanged)."""
+        """Store embedding. Skip if content_hash matches (text unchanged).
+
+        Auto-creates the table on first call.
+        """
+        await self.ensure_table()
         new_hash = _content_hash(text)
         conn = await get_connection(self._db_path)
         try:
-            # Check if already stored with same content
             rows = await conn.execute_fetchall(
                 "SELECT content_hash FROM memory_vectors WHERE item_id = ?",
                 (item_id,),
@@ -86,6 +93,8 @@ class VectorStore:
                 "DELETE FROM memory_vectors WHERE item_id = ?", (item_id,)
             )
             await conn.commit()
+        except sqlite3.OperationalError:
+            pass  # Table doesn't exist yet — nothing to delete
         finally:
             await conn.close()
 
@@ -95,6 +104,7 @@ class VectorStore:
         """Return (item_id, cosine_similarity) pairs sorted by similarity DESC.
 
         Uses brute-force numpy computation — fine for <10K items.
+        Returns empty list if table doesn't exist yet.
         """
         try:
             import numpy as np
@@ -149,6 +159,9 @@ class VectorStore:
                 if similarities[i] > 0
             ]
             return results
+        except sqlite3.OperationalError:
+            # Table doesn't exist yet — return empty
+            return []
         finally:
             await conn.close()
 
