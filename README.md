@@ -10,7 +10,20 @@ A lightweight local-first AI agent that converts natural-language requests into 
 
 ## Overview
 
-Mini-OpenClaw takes plain-language instructions from a user, routes them through a structured planner (Claude), validates every proposed action against a security policy engine, and executes approved steps using a registry of local tools — all within an auditable, inspectable pipeline. Key features include intent-to-tool routing via structured JSON plans, human-readable memory backed by SQLite with JSON export, manifest-driven tool extensibility (add a tool without touching the core), and a multi-layer security model with approval gates for risky operations.
+Mini-OpenClaw takes plain-language instructions from a user, routes them through a structured planner (Claude or Gemini), validates every proposed action against a security policy engine, and executes approved steps using a registry of local tools — all within an auditable, inspectable pipeline.
+
+The agent uses a **ReAct (Reason → Act → Observe) loop** as its default execution model: the LLM thinks about what to do next, executes one tool, observes the result, and decides the next action — adapting in real time to errors, policy denials, and user rejections. A legacy plan-and-execute mode is available for comparison.
+
+Key features:
+
+- **ReAct loop** with iterative reasoning and real-time adaptation to failures
+- **Saga compensation** — reject a step and all previous write operations are automatically rolled back
+- **Error classification** — transient errors are retried with backoff, permanent errors go straight to the LLM, side-effect errors are surfaced to the user
+- **LLM-provider-agnostic** — swap Claude for Gemini (or add your own) without touching core code
+- **Human-readable memory** backed by SQLite with JSON export for evaluation
+- **Manifest-driven tool extensibility** — add a tool without rewriting the core agent loop
+- **Multi-layer security** — policy engine, command allowlists, and approval gates for risky operations
+- **Full audit trail** — every decision logged in an append-only audit table
 
 ## Prerequisites
 
@@ -113,11 +126,77 @@ copy .env.example .env
 
 Once the app is running, type these into the chat:
 
+### Basic tools
 1. **"List files in the workspace"** — safe tool, auto-executes
 2. **"Read the README file"** — reads and displays file content
 3. **"Create a file called notes.txt with a summary of the project"** — triggers approval flow
 4. **"Search for TODO in all files"** — grep-like search across workspace
 5. **"Remember that I prefer dark mode"** — stores a fact in memory, visible in Memory Browser
+
+### ReAct loop — adaptation and recovery
+6. **"Read the file config.yaml and summarize it"** — file doesn't exist, LLM adapts (lists files, discovers what's available, gives an informed answer instead of just failing)
+7. **"Read the README and tell me what this project is about"** — multi-step: may list_files first to find the README, then read it, then summarize
+8. **"Find any TODO comments in the codebase and list them"** — search, observe results, possibly try variations
+
+### Saga compensation — rollback on rejection
+9. **"Create files called a.txt, b.txt, and c.txt with some content"** — approve the first two, then **reject** the third. The first two files are automatically deleted (saga rollback). Check the workspace to verify they're gone.
+
+### Error classification
+10. **"Read /etc/passwd"** — policy denial (path outside workspace), LLM sees the denial and explains why it can't help
+
+### Comparing ReAct vs plan-and-execute
+11. Run the same prompt with `USE_REACT=true` (default) and `USE_REACT=false` — observe how the ReAct loop adapts to failures while plan-and-execute fails on the first error
+
+## Execution Modes
+
+### ReAct loop (default)
+
+The agent iterates: **Think → Act → Observe**, up to a configurable maximum number of iterations. Each iteration, the LLM decides whether to call a tool or give a final answer based on all previous observations.
+
+```
+User: "Read config.yaml and summarize it"
+
+Iteration 1: THINK → read_file("config.yaml")
+             ACT   → execute read_file
+             OBSERVE → error: "File not found"
+
+Iteration 2: THINK → list_files(".")           ← LLM adapts
+             ACT   → execute list_files
+             OBSERVE → success: ["README.md", "src/main.py"]
+
+Iteration 3: THINK → final_answer              ← LLM decides task is done
+             "config.yaml doesn't exist. Available files: README.md, src/main.py"
+```
+
+### Plan-and-execute (legacy)
+
+Set `USE_REACT=false` in `.env`. The LLM generates a complete plan upfront, then steps execute sequentially. If step 2 fails, there's no recovery — the run fails.
+
+## Failure Handling
+
+### Error classification
+
+Every tool error is classified into one of three categories, and the executor responds differently to each:
+
+| Error Kind | Examples | Executor Response |
+|---|---|---|
+| **Transient** | Network timeout, disk full, rate limit | Retry with exponential backoff (if tool is idempotent) |
+| **Permanent** | File not found, path outside workspace, bad credentials | Never retry — feed error to LLM as observation |
+| **Side-effect** | Action partially succeeded but downstream broke (e.g., email sent but confirmation failed) | Never retry — surface to user, log as non-reversible |
+
+The retry decision combines the tool's `retry_policy` (declares `max_retries` and `idempotent`) with the `error_kind` from the result. A permanent error is never retried even if the tool allows retries.
+
+### Saga compensation
+
+When a user **rejects** an approval in the ReAct loop, the orchestrator runs compensation in reverse order on all previously completed mutating steps:
+
+| Tool | Compensation action |
+|---|---|
+| `write_file` (create mode) | Delete the created file |
+| `write_file` (overwrite mode) | Restore from `.bak` backup |
+| `write_file` (append mode) | Log as non-reversible |
+| `remember_fact` | Soft-delete memory items created by this run |
+| Read-only tools | No-op (`not_applicable`) |
 
 ## Switching LLM providers
 
@@ -158,7 +237,22 @@ change.
 
 ## Architecture
 
-Mini-OpenClaw follows a run-centric architecture: every user request becomes a **run** with discrete steps, each validated and logged. The conversation orchestrator coordinates the pipeline: the **planner** (driven by a pluggable LLM provider — Claude, Gemini, or another backend) proposes a structured JSON plan, the **policy engine** classifies each step as safe / approval-required / forbidden, the **executor** runs approved steps through the **skill registry**, and the **memory manager** persists useful context. An append-only **audit logger** records every decision for inspection. See [docs/architecture.md](docs/architecture.md) for the full design and [docs/provider-abstraction.md](docs/provider-abstraction.md) for the LLM provider layer.
+Mini-OpenClaw follows a run-centric architecture: every user request becomes a **run** with discrete steps, each validated and logged.
+
+```
+User message
+  → Orchestrator
+    → Planner (ReAct step: reason about observations, pick next action)
+    → Policy Engine (classify: safe / approval-required / forbidden)
+    → Executor (validate → execute with retry → observe)
+    → Memory Manager (persist useful context)
+    → Audit Logger (append-only log of every decision)
+  → Final answer (or next iteration)
+```
+
+The **ReAct loop** replaces the legacy plan-all-upfront model. Each iteration persists observations to SQLite so the run survives approval pauses and server restarts. The **saga pattern** enables rollback when users reject mid-run. The **error classification** system ensures transient failures are retried while permanent failures are immediately fed back to the LLM.
+
+See [docs/architecture.md](docs/architecture.md) for the full design and [docs/provider-abstraction.md](docs/provider-abstraction.md) for the LLM provider layer.
 
 ## Available Tools
 
@@ -181,7 +275,8 @@ All proposed actions pass through a four-layer security model: (1) the planner m
 1. Create a new Python file in `apps/api/skills/` (e.g., `my_tool.py`)
 2. Implement the `BaseTool` abstract class with `manifest()` and `execute()` methods
 3. Define the tool manifest: name, description, risk level, input/output schemas
-4. Restart the server — the skill registry auto-discovers it
+4. Optionally implement `validate()`, `compensate()`, and `retry_policy` for full ReAct support
+5. Restart the server — the skill registry auto-discovers it
 
 No changes to the orchestrator, policy engine, or executor code are required.
 
@@ -191,10 +286,15 @@ All settings are read from the `.env` file (see `.env.example`):
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `ANTHROPIC_API_KEY` | Your Anthropic API key | _(required)_ |
+| `ANTHROPIC_API_KEY` | Your Anthropic API key | _(required if using Anthropic)_ |
+| `GEMINI_API_KEY` | Your Google Gemini API key | _(required if using Gemini)_ |
+| `LLM_PROVIDER` | Which LLM backend to use | `anthropic` |
 | `WORKSPACE_ROOT` | Directory the agent operates in | `./workspace` |
 | `DATABASE_PATH` | SQLite database file path | `./mini_openclaw.db` |
 | `ANTHROPIC_MODEL` | Claude model to use | `claude-sonnet-4-20250514` |
+| `GEMINI_MODEL` | Gemini model to use | `gemini-2.5-flash` |
+| `USE_REACT` | Use iterative ReAct loop (`true`) or legacy plan-and-execute (`false`) | `true` |
+| `REACT_MAX_ITERATIONS` | Maximum think→act→observe iterations per run | `10` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
 | `BACKEND_PORT` | Backend server port | `8000` |
 
@@ -207,6 +307,18 @@ make test
 # Any OS
 python -m pytest tests/ -v
 ```
+
+The test suite covers:
+
+| Test file | What it tests | Count |
+|-----------|--------------|-------|
+| `test_react.py` | ReAct loop, saga compensation, error classification, approval flow | ~30 |
+| `test_integration.py` | End-to-end legacy plan-and-execute path, provider switching | ~8 |
+| `test_planner.py` | Plan parsing, provider error handling, summary generation | ~10 |
+| `test_policy.py` | Path validation, shell blocking, injection detection, risk classification | ~25 |
+| `test_providers.py` | Anthropic/Gemini provider translation, factory, JSON extraction | ~30 |
+| `test_tools.py` | Each V1 tool in isolation | ~25 |
+| `test_memory.py` | Memory CRUD, search, retrieval, export | ~12 |
 
 ## Memory Export
 
@@ -222,6 +334,8 @@ python scripts/export_memory.py
 | Problem | Solution |
 |---------|----------|
 | `ANTHROPIC_API_KEY not set` | Check your `.env` file exists and contains the key |
+| `table runs has no column named iterations` | The DB was created before the ReAct update — restart the backend (auto-migration runs on startup) or delete `mini_openclaw.db` |
+| `anthropic returned invalid JSON` | The LLM prefixed reasoning text before JSON — this is auto-handled; if persistent, check your API key and model |
 | `Port 8000 already in use` | Kill the existing process or set `BACKEND_PORT` in `.env` |
 | `CORS error in browser` | Ensure the backend is running on port 8000 |
 | `No tools registered` | Check `apps/api/skills/` for import errors — run `python -c "from apps.api.skills.registry import SkillRegistry"` |
@@ -233,12 +347,18 @@ python scripts/export_memory.py
 
 ```
 mini-openclaw/
-├── apps/api/          # FastAPI backend (orchestrator, planner, policy, skills, memory)
-├── apps/web/          # React + TypeScript frontend (chat, approvals, memory browser)
-├── tests/             # pytest test suite
-├── scripts/           # Demo seeding and memory export
-├── docs/              # Architecture and design documentation
-└── requirements.txt   # Python dependencies
+├── apps/api/              # FastAPI backend
+│   ├── core/              #   Orchestrator, planner, policy, executor, audit
+│   ├── providers/         #   LLM provider abstraction (Anthropic, Gemini)
+│   ├── skills/            #   V1 tool implementations + registry
+│   ├── memory/            #   Memory manager + retrieval
+│   └── models/            #   Pydantic models (Run, ToolResult, ErrorKind, etc.)
+├── apps/web/              # React + TypeScript frontend
+│   └── src/components/    #   ChatPanel, PlanPreview, ApprovalCard, MemoryBrowser
+├── tests/                 # pytest test suite (171+ tests)
+├── scripts/               # Demo seeding and memory export
+├── docs/                  # Architecture and design documentation
+└── requirements.txt       # Python dependencies
 ```
 
 ## License
