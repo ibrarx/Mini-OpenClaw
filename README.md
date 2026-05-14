@@ -212,6 +212,17 @@ When a user **rejects** an approval in the ReAct loop, the orchestrator runs com
 | `remember_fact` | Soft-delete memory items created by this run |
 | Read-only tools | No-op (`not_applicable`) |
 
+### Loop detection
+
+If the LLM gets stuck calling the same tool with identical arguments repeatedly (e.g., `list_files(".")` ten times in a row), two layers of defense kick in:
+
+| Layer | Trigger | Action |
+|---|---|---|
+| **Soft warning** | 3 consecutive identical tool+args calls | A `_system` observation is injected telling the LLM it must try a different tool, different arguments, or give a `final_answer` |
+| **Hard block** | LLM ignores the warning and tries the same call again | Execution is short-circuited — a "Blocked: loop detected" error observation is returned without running the tool |
+
+Combined with the max iterations cap (default: 10, hard ceiling: 25), this prevents runaway loops from burning API credits.
+
 ## Switching LLM providers
 
 Mini-OpenClaw is LLM-provider-agnostic. The planner talks to an abstract
@@ -353,7 +364,7 @@ All settings are read from the `.env` file (see `.env.example`):
 | `ANTHROPIC_MODEL` | Claude model to use | `claude-sonnet-4-20250514` |
 | `GEMINI_MODEL` | Gemini model to use | `gemini-2.5-flash` |
 | `USE_REACT` | Use iterative ReAct loop (`true`) or legacy plan-and-execute (`false`) | `true` |
-| `REACT_MAX_ITERATIONS` | Maximum think→act→observe iterations per run | `10` |
+| `REACT_MAX_ITERATIONS` | Maximum think→act→observe iterations per run (hard ceiling: 25) | `10` |
 | `SUMMARY_INTERVAL` | Auto-generate a summary every N completed runs (0 = disable) | `5` |
 | `MAX_SUMMARIES` | Number of summaries to keep (oldest pruned) | `3` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
@@ -373,14 +384,14 @@ The test suite covers:
 
 | Test file | What it tests | Count |
 |-----------|--------------|-------|
-| `test_memory_semantic.py` | Hybrid search, embedding, vector store, planner wiring, summaries | ~44 |
-| `test_react.py` | ReAct loop, saga compensation, error classification, approval flow | ~30 |
-| `test_integration.py` | End-to-end legacy plan-and-execute path, provider switching | ~8 |
-| `test_planner.py` | Plan parsing, provider error handling, summary generation | ~13 |
-| `test_policy.py` | Path validation, shell blocking, injection detection, risk classification | ~25 |
-| `test_providers.py` | Anthropic/Gemini provider translation, factory, JSON extraction | ~30 |
-| `test_tools.py` | Each V1 tool in isolation | ~25 |
-| `test_memory.py` | Memory CRUD, keyword search, retrieval, export | ~13 |
+| `test_memory_semantic.py` | Hybrid search, embedding, vector store, planner wiring, summaries | 44 |
+| `test_policy.py` | Path validation, shell blocking, injection detection, risk classification | 38 |
+| `test_providers.py` | Anthropic/Gemini provider translation, factory, JSON extraction | 37 |
+| `test_tools.py` | Each V1 tool in isolation | 33 |
+| `test_react.py` | ReAct loop, saga compensation, error classification, loop detection, approval flow | 30 |
+| `test_planner.py` | Plan parsing, provider error handling, summary generation | 13 |
+| `test_memory.py` | Memory CRUD, keyword search, retrieval, export | 13 |
+| `test_integration.py` | End-to-end legacy plan-and-execute path, provider switching | 8 |
 
 ## Memory Export
 
@@ -398,6 +409,7 @@ python scripts/export_memory.py
 | `ANTHROPIC_API_KEY not set` | Check your `.env` file exists and contains the key |
 | `table runs has no column named iterations` | The DB was created before the ReAct update — restart the backend (auto-migration runs on startup) or delete `mini_openclaw.db` |
 | `anthropic returned invalid JSON` | The LLM prefixed reasoning text before JSON — this is auto-handled; if persistent, check your API key and model |
+| Agent keeps calling the same tool in a loop | Loop detection triggers after 3 identical calls (soft warning) then hard-blocks on the 4th. If it still seems stuck, lower `REACT_MAX_ITERATIONS` in `.env` |
 | `Port 8000 already in use` | Kill the existing process or set `BACKEND_PORT` in `.env` |
 | `CORS error in browser` | Ensure the backend is running on port 8000 |
 | `No tools registered` | Check `apps/api/skills/` for import errors — run `python -c "from apps.api.skills.registry import SkillRegistry"` |
@@ -421,7 +433,7 @@ mini-openclaw/
 │   └── models/            #   Pydantic models (Run, ToolResult, ErrorKind, etc.)
 ├── apps/web/              # React + TypeScript frontend
 │   └── src/components/    #   ChatPanel, PlanPreview, ApprovalCard, MemoryBrowser
-├── tests/                 # pytest test suite (215 tests, 0 warnings)
+├── tests/                 # pytest test suite (216 tests)
 ├── scripts/               # Demo seeding and memory export
 ├── docs/                  # Architecture and design documentation
 └── requirements.txt       # Python dependencies
