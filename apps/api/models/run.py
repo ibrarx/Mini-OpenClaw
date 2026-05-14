@@ -94,6 +94,7 @@ class Observation(BaseModel):
     tool: str | None = None        # None for final_answer steps
     args: dict[str, Any] = Field(default_factory=dict)
     reasoning: str = ""             # LLM's Think output
+    user_announcement: str = ""     # Friendly message for the UI
     result: ToolResult | None = None
     timestamp: str = ""
 

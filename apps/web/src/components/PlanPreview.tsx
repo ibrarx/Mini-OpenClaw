@@ -164,7 +164,7 @@ function ObservationRow({ obs, index, expanded, onToggle, compact }: Observation
         <ObservationStatusIcon status={status} isFinalAnswer={isFinalAnswer} />
         <span className="t-faint text-xs font-mono w-4">{index + 1}</span>
         <span className="font-mono text-xs t-primary flex-1 truncate">
-          {isFinalAnswer ? "final_answer" : obs.tool}
+          {obs.user_announcement || (isFinalAnswer ? "final_answer" : obs.tool)}
         </span>
         {status === "denied" && (
           <span className="badge badge-medium flex items-center gap-0.5">
@@ -187,8 +187,13 @@ function ObservationRow({ obs, index, expanded, onToggle, compact }: Observation
 
       {expanded && !compact && (
         <div className="px-3 pb-2.5 border-t border-app mt-0.5">
+          {obs.user_announcement && (
+            <p className="text-xs t-secondary mt-2 mb-1">{obs.user_announcement}</p>
+          )}
           {obs.reasoning && (
-            <p className="text-xs t-muted mt-2 mb-1.5">{obs.reasoning}</p>
+            <p className="text-xs t-muted mt-1 mb-1.5 italic">
+              Trace: {obs.reasoning}
+            </p>
           )}
           {obs.args && (
             <div className="text-xs font-mono bg-app-code rounded px-2.5 py-1.5 t-code overflow-x-auto mt-1.5">

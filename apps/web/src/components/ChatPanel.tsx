@@ -45,23 +45,71 @@ export default function ChatPanel({
 
   // When a run completes, add the final response as a message
   const lastRunRef = useRef<string | null>(null);
+  const lastAnnouncementRef = useRef<string | null>(null);
   useEffect(() => {
     if (!run) return;
+
+    // Remove the "Planning..." message once we leave planning state
+    if (run.status !== "planning") {
+      const hasPlanningMsg = messages.some(
+        (msg) => msg.role === "system" && msg.content === "Planning..." && msg.run_id === run.run_id
+      );
+      if (hasPlanningMsg) {
+        onMessagesChange(
+          messages.filter(
+            (msg) =>
+              !(msg.role === "system" && msg.content === "Planning..." && msg.run_id === run.run_id)
+          )
+        );
+        return; // let next render cycle handle the rest
+      }
+    }
+
+    // Show the latest user_announcement from observations as a transient system message
+    if (run.observations && run.observations.length > 0) {
+      const latest = run.observations[run.observations.length - 1];
+      if (latest.user_announcement && !latest.result && latest.user_announcement !== lastAnnouncementRef.current) {
+        lastAnnouncementRef.current = latest.user_announcement;
+        const withoutOldAnnouncements = messages.filter(
+          (msg) =>
+            !(msg.role === "system" && msg.run_id === run.run_id && msg.id?.includes("_announce"))
+        );
+        onMessagesChange([
+          ...withoutOldAnnouncements,
+          {
+            id: `msg_${Date.now()}_announce`,
+            role: "system",
+            content: latest.user_announcement,
+            timestamp: new Date().toISOString(),
+            run_id: run.run_id,
+          },
+        ]);
+        return;
+      }
+    }
 
     const terminal: RunStatus[] = ["completed", "failed", "cancelled"];
     if (terminal.includes(run.status) && lastRunRef.current !== run.run_id) {
       lastRunRef.current = run.run_id;
+      lastAnnouncementRef.current = null;
 
-      if (run.final_response) {
-        addMessage("assistant", run.final_response, run.run_id);
-      } else if (run.plan?.direct_response) {
-        addMessage("assistant", run.plan.direct_response, run.run_id);
-      } else if (run.status === "failed") {
-        addMessage("system", "Run failed. Check the trace for details.");
-      } else if (run.status === "cancelled") {
-        addMessage("system", "Run cancelled.");
-      }
+      // Clean up any remaining announcement messages for this run
+      const cleaned = messages.filter(
+        (msg) =>
+          !(msg.role === "system" && msg.run_id === run.run_id && msg.id?.includes("_announce"))
+      );
 
+      const finalMsg: ChatMessage | null = run.final_response
+        ? { id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, role: "assistant", content: run.final_response, timestamp: new Date().toISOString(), run_id: run.run_id }
+        : run.plan?.direct_response
+        ? { id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, role: "assistant", content: run.plan.direct_response, timestamp: new Date().toISOString(), run_id: run.run_id }
+        : run.status === "failed"
+        ? { id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, role: "system", content: "Run failed. Check the trace for details.", timestamp: new Date().toISOString() }
+        : run.status === "cancelled"
+        ? { id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, role: "system", content: "Run cancelled.", timestamp: new Date().toISOString() }
+        : null;
+
+      onMessagesChange(finalMsg ? [...cleaned, finalMsg] : cleaned);
       setActiveRunId(null);
       setDecidedSteps(new Set());
     }
@@ -119,7 +167,7 @@ export default function ChatPanel({
     try {
       const { run_id } = await submitChat(sessionId, text);
       setActiveRunId(run_id);
-      // Append "Planning..." system message after user message
+      // Append "Planning..." system message tagged with run_id for cleanup
       onMessagesChange([
         ...withUser,
         {
@@ -127,6 +175,7 @@ export default function ChatPanel({
           role: "system",
           content: "Planning...",
           timestamp: new Date().toISOString(),
+          run_id: run_id,
         },
       ]);
     } catch (err) {
@@ -264,11 +313,14 @@ export default function ChatPanel({
                 <span>
                   {run.status === "planning"
                     ? "Creating plan..."
-                    : run.status === "reacting"
-                    ? `Thinking… (iteration ${run.iterations ?? 0})`
-                    : decidedSteps.size > 0
-                    ? "Executing approved step..."
-                    : "Executing..."}
+                    : (() => {
+                        const latestObs = run.observations?.[run.observations.length - 1];
+                        if (latestObs?.user_announcement && !latestObs?.result) {
+                          return latestObs.user_announcement;
+                        }
+                        if (decidedSteps.size > 0) return "Executing approved step...";
+                        return `Working on it... (step ${run.iterations ?? 0})`;
+                      })()}
                 </span>
               </div>
             )}
