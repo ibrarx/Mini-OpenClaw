@@ -77,20 +77,32 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
         raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
 
     async def event_generator():
-        """Yield SSE-formatted events."""
-        # If the run is already terminal, send current state and close
-        if run.status.value in TERMINAL_STATUSES:
-            run_data = json.dumps(run.model_dump(), default=str)
-            yield f"event: {run.status.value}\ndata: {run_data}\n\n"
-            return
+        """Yield SSE-formatted events.
 
-        # Send the current state as the initial event
-        run_data = json.dumps(run.model_dump(), default=str)
-        yield f"event: initial\ndata: {run_data}\n\n"
-
-        # Subscribe to future events
+        Subscribe BEFORE checking current state so that events emitted
+        between the state check and the first queue.get() are captured.
+        This prevents a race where fast-completing runs finish before
+        the subscription is active.
+        """
+        # Subscribe first — any events emitted from this point are queued
         queue = event_emitter.subscribe(run_id)
         try:
+            # Now fetch the current state (after subscribing)
+            current_run = await orchestrator.get_run(run_id)
+            if current_run is None:
+                yield f"event: error\ndata: {{\"message\": \"Run not found\"}}\n\n"
+                return
+
+            # If already terminal, send final state and close
+            if current_run.status.value in TERMINAL_STATUSES:
+                run_data = json.dumps(current_run.model_dump(), default=str)
+                yield f"event: {current_run.status.value}\ndata: {run_data}\n\n"
+                return
+
+            # Send the current state as the initial event
+            run_data = json.dumps(current_run.model_dump(), default=str)
+            yield f"event: initial\ndata: {run_data}\n\n"
+
             while True:
                 try:
                     # Wait for next event with heartbeat timeout

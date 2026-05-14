@@ -97,10 +97,25 @@ export function useRunSSE(runId: string | null) {
         es.addEventListener(type, handleEvent);
       }
 
+      // Safety net: if the run completes before SSE delivers any events,
+      // do a REST fetch after a short delay to catch up.
+      const safetyTimer = setTimeout(async () => {
+        if (runIdRef.current === id && eventSourceRef.current === es) {
+          const data = await getRun(id).catch(() => null);
+          if (data && TERMINAL_STATUSES.has(data.status)) {
+            setRun(data);
+            setError(null);
+            es.close();
+            eventSourceRef.current = null;
+          }
+        }
+      }, 2000);
+
       // Also handle unnamed "message" events (fallback)
       es.onmessage = handleEvent;
 
       es.onerror = () => {
+        clearTimeout(safetyTimer);
         // EventSource auto-reconnects on error, but we want to limit retries
         if (runIdRef.current !== id) {
           es.close();
