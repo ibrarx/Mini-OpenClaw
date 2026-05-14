@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { getRuns } from "../api/client";
 import PlanPreview from "./PlanPreview";
+import ToolTrace from "./ToolTrace";
 import type { Run, RunStatus } from "../api/types";
 
 interface RunHistoryProps {
@@ -129,10 +130,18 @@ function RunRow({ run, expanded, onToggle }: { run: Run; expanded: boolean; onTo
       </button>
 
       {expanded && (
-        <div className="border-t border-app px-3 py-2.5 bg-app-secondary">
-          {run.plan && <PlanPreview plan={run.plan} run={run} compact />}
+        <div className="border-t border-app px-3 py-2.5 bg-app-secondary space-y-2">
+          {run.plan && <PlanPreview plan={run.plan} run={run} />}
+
+          {/* Tool traces for completed steps */}
+          {run.plan?.steps
+            .filter((s) => s.status === "completed" && s.result)
+            .map((step) => (
+              <ToolTrace key={`trace-${step.step_id}`} step={step} />
+            ))}
+
           {run.final_response && (
-            <div className="mt-2 text-xs t-muted bg-app-code rounded px-2.5 py-2 leading-relaxed">
+            <div className="text-xs t-muted bg-app-code rounded px-2.5 py-2 leading-relaxed">
               {run.final_response}
             </div>
           )}
@@ -168,6 +177,7 @@ function StatusBadge({ status }: { status: RunStatus }) {
     idle: "bg-badge-type t-faint",
     planning: "bg-blue-500/15 text-blue-600",
     running: "bg-blue-500/15 text-blue-600",
+    reacting: "bg-blue-500/15 text-blue-600",
     awaiting_approval: "bg-amber-500/15 text-amber-600",
     completed: "bg-emerald-500/15 text-emerald-600",
     failed: "bg-red-500/15 text-red-600",
