@@ -18,6 +18,7 @@ Key features:
 
 - **ReAct loop** with iterative reasoning and real-time adaptation to failures
 - **Real-time SSE streaming** — run status, plans, and approvals pushed to the frontend instantly via Server-Sent Events (no polling)
+- **User-friendly status announcements** — the agent narrates what it's doing in plain language ("Let me search your files…") instead of showing raw tool names, with full tool traceability preserved in expandable details
 - **Hybrid semantic memory** — 70% vector similarity + 30% keyword matching, powered by local sentence-transformers embeddings (no API cost)
 - **Three memory layers** — durable facts, episodic task history, and auto-generated conversation summaries
 - **Saga compensation** — reject a step and all previous write operations are automatically rolled back
@@ -185,6 +186,26 @@ Iteration 3: THINK → final_answer              ← LLM decides task is done
 ### Plan-and-execute (legacy)
 
 Set `USE_REACT=false` in `.env`. The LLM generates a complete plan upfront, then steps execute sequentially. If step 2 fails, there's no recovery — the run fails.
+
+### User-friendly status announcements
+
+During execution, the agent narrates each step in plain language instead of showing raw tool names and status codes:
+
+```
+User: "Find all TODO comments in my project"
+
+[spinner] Let me look through your workspace to find what's there...
+  ✓ 1  Let me see what files are in your workspace...     list_files
+[spinner] Now I'll search across your files for TODO comments...
+  ✓ 2  Let me search your files for 'TODO'...             search_in_files
+  ✓ 3  Done
+
+"I found 12 TODO comments across 5 files..."
+```
+
+Each observation row shows the friendly announcement as the primary label with the actual tool name as a badge on the right. Clicking any row expands it to reveal the full trace: internal reasoning, tool arguments, and raw result output. This gives evaluators and developers full traceability while keeping the default view clean for end users.
+
+The Run History tab shows the same level of detail — expand any past run to see its full observation timeline with expandable tool traces.
 
 ## Failure Handling
 
@@ -433,7 +454,7 @@ mini-openclaw/
 │   ├── memory/            #   Memory manager, hybrid retrieval, embeddings, vector store
 │   └── models/            #   Pydantic models (Run, ToolResult, ErrorKind, etc.)
 ├── apps/web/              # React + TypeScript frontend
-│   └── src/components/    #   ChatPanel, PlanPreview, ApprovalCard, MemoryBrowser
+│   └── src/components/    #   ChatPanel, PlanPreview, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser
 ├── tests/                 # pytest test suite (216 tests)
 ├── scripts/               # Demo seeding and memory export
 ├── docs/                  # Architecture and design documentation
