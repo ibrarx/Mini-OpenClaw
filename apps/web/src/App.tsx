@@ -105,9 +105,14 @@ function AppContent() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
 
   useEffect(() => {
-    healthCheck()
-      .then(() => setBackendUp(true))
-      .catch(() => setBackendUp(false));
+    const check = () =>
+      healthCheck()
+        .then(() => setBackendUp(true))
+        .catch(() => setBackendUp(false));
+    check();
+    // Re-check periodically so the indicator recovers after backend restarts
+    const id = setInterval(check, 10_000);
+    return () => clearInterval(id);
   }, []);
 
   const navItems: { id: Page; label: string; icon: typeof MessageSquare }[] = [

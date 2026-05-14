@@ -17,6 +17,7 @@ The agent uses a **ReAct (Reason → Act → Observe) loop** as its default exec
 Key features:
 
 - **ReAct loop** with iterative reasoning and real-time adaptation to failures
+- **Real-time SSE streaming** — run status, plans, and approvals pushed to the frontend instantly via Server-Sent Events (no polling)
 - **Hybrid semantic memory** — 70% vector similarity + 30% keyword matching, powered by local sentence-transformers embeddings (no API cost)
 - **Three memory layers** — durable facts, episodic task history, and auto-generated conversation summaries
 - **Saga compensation** — reject a step and all previous write operations are automatically rolled back
@@ -260,6 +261,7 @@ User message
     → Executor (validate → execute with retry → observe)
     → Memory Manager (persist useful context)
     → Audit Logger (append-only log of every decision)
+    → Event Emitter (push status via SSE to connected frontends)
   → Final answer (or next iteration)
 ```
 
@@ -405,6 +407,7 @@ python scripts/export_memory.py
 | Memory search only returns keyword matches | Check that `sentence-transformers` installed successfully; backend log should show "Embedding model loaded" on startup |
 | Summaries tab is empty | Summaries auto-generate after every 5 completed runs. Run more tasks, or set `SUMMARY_INTERVAL=3` in `.env` for faster generation |
 | Frontend won't start | Ensure Node.js 18+ is installed: `node --version` |
+| Run appears stuck in chat | The SSE stream may have disconnected — click the input and send a new message, or refresh the page. Check that the backend is still running |
 
 ## Project Structure
 
@@ -418,7 +421,7 @@ mini-openclaw/
 │   └── models/            #   Pydantic models (Run, ToolResult, ErrorKind, etc.)
 ├── apps/web/              # React + TypeScript frontend
 │   └── src/components/    #   ChatPanel, PlanPreview, ApprovalCard, MemoryBrowser
-├── tests/                 # pytest test suite (215 tests)
+├── tests/                 # pytest test suite (215 tests, 0 warnings)
 ├── scripts/               # Demo seeding and memory export
 ├── docs/                  # Architecture and design documentation
 └── requirements.txt       # Python dependencies
