@@ -52,7 +52,17 @@ class Settings(BaseSettings):
 
     # ----- ReAct loop -----
     use_react: bool = True
-    react_max_iterations: int = 10
+    react_max_iterations: int = 10  # capped at 25 — see validator below
+
+    from pydantic import model_validator as _model_validator
+
+    @_model_validator(mode="after")
+    def _cap_react_iterations(self) -> "Settings":
+        if self.react_max_iterations > 25:
+            object.__setattr__(self, "react_max_iterations", 25)
+        if self.react_max_iterations < 1:
+            object.__setattr__(self, "react_max_iterations", 1)
+        return self
 
     # ----- Memory summaries -----
     # How many completed runs between auto-generated conversation summaries.

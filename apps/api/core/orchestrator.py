@@ -151,6 +151,9 @@ class Orchestrator:
         if run.plan is None:
             run.plan = Plan(task_type="react", reasoning="ReAct loop")
 
+        # Loop detection: track consecutive duplicate actions
+        DUPLICATE_CAP = 3  # stop after 3 identical tool+args calls
+
         while run.iterations < run.max_iterations:
             run.iterations += 1
             run.status = RunStatus.REACTING
@@ -167,6 +170,35 @@ class Orchestrator:
                 for o in run.observations
                 if o.tool is not None  # skip final_answer observations
             ]
+
+            # Loop detection: check if we're stuck repeating the same action.
+            # If the last DUPLICATE_CAP observations all used the same tool+args,
+            # inject a warning so the LLM is forced to try something different.
+            if len(run.observations) >= DUPLICATE_CAP:
+                recent = run.observations[-DUPLICATE_CAP:]
+                if (
+                    all(o.tool is not None for o in recent)
+                    and len({o.tool for o in recent}) == 1
+                    and len({json.dumps(o.args, sort_keys=True) for o in recent}) == 1
+                ):
+                    loop_tool = recent[0].tool
+                    logger.warning(
+                        "Run %s: loop detected — %s called %d times with same args",
+                        run.run_id, loop_tool, DUPLICATE_CAP,
+                    )
+                    obs_for_planner.append({
+                        "tool": "_system",
+                        "status": "warning",
+                        "output": None,
+                        "error": (
+                            f"LOOP DETECTED: You have called '{loop_tool}' "
+                            f"{DUPLICATE_CAP} times in a row with the same arguments "
+                            f"and gotten the same result each time. You MUST either "
+                            f"try a DIFFERENT tool, use DIFFERENT arguments, or give "
+                            f"a final_answer with what you have so far. Do NOT call "
+                            f"'{loop_tool}' again with the same arguments."
+                        ),
+                    })
 
             # THINK: ask planner for next action
             try:
@@ -218,6 +250,35 @@ class Orchestrator:
             reasoning = decision.get("reasoning", "")
 
             # Look up tool
+            # Hard block: if this exact tool+args was already called DUPLICATE_CAP
+            # times, refuse to execute again — force the LLM to do something else.
+            current_key = json.dumps({"tool": tool_name, "args": tool_args}, sort_keys=True)
+            recent_keys = [
+                json.dumps({"tool": o.tool, "args": o.args}, sort_keys=True)
+                for o in run.observations[-DUPLICATE_CAP:]
+                if o.tool is not None
+            ]
+            if len(recent_keys) >= DUPLICATE_CAP and all(k == current_key for k in recent_keys[-DUPLICATE_CAP:]):
+                blocked_result = ToolResult(
+                    tool_name=tool_name, status="error", input=tool_args,
+                    error=(
+                        f"Blocked: '{tool_name}' has been called {DUPLICATE_CAP}+ "
+                        f"times with identical arguments. You must try a different "
+                        f"approach or give a final_answer."
+                    ),
+                )
+                obs = Observation(
+                    step_id=step_id, iteration=run.iterations,
+                    tool=tool_name, args=tool_args, reasoning=reasoning,
+                    result=blocked_result, timestamp=now,
+                )
+                run.observations.append(obs)
+                await self._save_run(run)
+                await self._audit.log("react_loop_blocked", run_id=run.run_id,
+                                       step_id=step_id,
+                                       data={"tool": tool_name, "duplicate_count": DUPLICATE_CAP})
+                continue
+
             tool = self._registry.get(tool_name)
             if tool is None:
                 error_result = ToolResult(

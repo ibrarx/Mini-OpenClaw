@@ -404,6 +404,51 @@ class TestReactMaxIterations:
         assert "maximum iterations" in run.final_response.lower()
 
 
+class TestReactLoopDetection:
+    """Loop detection: same tool+args repeated → blocked."""
+
+    @pytest.mark.asyncio
+    async def test_duplicate_action_blocked_after_cap(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """If the LLM calls list_files(".") 4+ times, the 4th is hard-blocked."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings(populated_workspace, tmp_db_path)
+        settings.react_max_iterations = 10
+        orch = Orchestrator(settings, registry)
+
+        # Queue: 4x identical list_files (the 4th should be blocked by loop
+        # detection), then the LLM gets the block error and gives final_answer.
+        responses = [
+            _react_json({
+                "action": "tool",
+                "tool": "list_files",
+                "args": {"path": "."},
+                "reasoning": f"Iteration {i+1}",
+            })
+            for i in range(5)
+        ]
+        responses.append(_react_json({
+            "action": "final_answer",
+            "response": "I was stuck in a loop, here's what I found.",
+            "reasoning": "Loop detected",
+        }))
+        _install_fake_provider(orch, responses)
+
+        run = await orch.handle_message("sess_1", "Analyze files")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        # Should have fewer than 10 iterations (loop was detected and broken)
+        assert run.iterations <= 7
+        # At least one observation should be a blocked duplicate
+        blocked = [
+            o for o in run.observations
+            if o.result and "Blocked" in (o.result.error or "")
+        ]
+        assert len(blocked) >= 1, "Expected at least one blocked duplicate action"
+
+
 class TestReactPolicyDenial:
     """Policy denies a tool → LLM sees denial and adapts."""
 
