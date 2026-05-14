@@ -221,7 +221,7 @@ If the LLM gets stuck calling the same tool with identical arguments repeatedly 
 | **Soft warning** | `REACT_DUPLICATE_CAP` consecutive identical tool+args calls (default: 3) | A `_system` observation is injected telling the LLM it must try a different tool, different arguments, or give a `final_answer` |
 | **Hard block** | LLM ignores the warning and tries the same call again | Execution is short-circuited — a "Blocked: loop detected" error observation is returned without running the tool |
 
-Combined with `REACT_MAX_ITERATIONS` (default: 10) clamped to `REACT_HARD_CEILING` (default: 25), this prevents runaway loops from burning API credits. All three values are configurable via `.env`.
+Combined with `REACT_MAX_ITERATIONS` (default: 10, internally capped at 25), this prevents runaway loops from burning API credits. Both `REACT_MAX_ITERATIONS` and `REACT_DUPLICATE_CAP` are configurable via `.env`.
 
 ## Switching LLM providers
 
@@ -364,8 +364,7 @@ All settings are read from the `.env` file (see `.env.example`):
 | `ANTHROPIC_MODEL` | Claude model to use | `claude-sonnet-4-20250514` |
 | `GEMINI_MODEL` | Gemini model to use | `gemini-2.5-flash` |
 | `USE_REACT` | Use iterative ReAct loop (`true`) or legacy plan-and-execute (`false`) | `true` |
-| `REACT_MAX_ITERATIONS` | Maximum think→act→observe iterations per run (clamped to `REACT_HARD_CEILING`) | `10` |
-| `REACT_HARD_CEILING` | Absolute max iterations — prevents runaway API costs | `25` |
+| `REACT_MAX_ITERATIONS` | Maximum think→act→observe iterations per run (internally capped at 25) | `10` |
 | `REACT_DUPLICATE_CAP` | Block after N consecutive identical tool+args calls (minimum: 2) | `3` |
 | `SUMMARY_INTERVAL` | Auto-generate a summary every N completed runs (0 = disable) | `5` |
 | `MAX_SUMMARIES` | Number of summaries to keep (oldest pruned) | `3` |
@@ -411,7 +410,7 @@ python scripts/export_memory.py
 | `ANTHROPIC_API_KEY not set` | Check your `.env` file exists and contains the key |
 | `table runs has no column named iterations` | The DB was created before the ReAct update — restart the backend (auto-migration runs on startup) or delete `mini_openclaw.db` |
 | `anthropic returned invalid JSON` | The LLM prefixed reasoning text before JSON — this is auto-handled; if persistent, check your API key and model |
-| Agent keeps calling the same tool in a loop | Loop detection triggers after `REACT_DUPLICATE_CAP` identical calls (default: 3). Lower `REACT_MAX_ITERATIONS` or `REACT_HARD_CEILING` in `.env` for tighter control |
+| Agent keeps calling the same tool in a loop | Loop detection triggers after `REACT_DUPLICATE_CAP` identical calls (default: 3). Lower `REACT_MAX_ITERATIONS` in `.env` for tighter control (max: 25) |
 | `Port 8000 already in use` | Kill the existing process or set `BACKEND_PORT` in `.env` |
 | `CORS error in browser` | Ensure the backend is running on port 8000 |
 | `No tools registered` | Check `apps/api/skills/` for import errors — run `python -c "from apps.api.skills.registry import SkillRegistry"` |
