@@ -217,6 +217,7 @@ interface ObservationRowProps {
 function ObservationRow({ obs, index, expanded, onToggle, compact }: ObservationRowProps) {
   const isFinalAnswer = !obs.tool;
   const status = obs.result?.status;
+  const hasAnnouncement = !!obs.user_announcement && !isFinalAnswer;
 
   return (
     <div className="rounded-md bg-step-row border border-app">
@@ -226,9 +227,15 @@ function ObservationRow({ obs, index, expanded, onToggle, compact }: Observation
       >
         <ObservationStatusIcon status={status} isFinalAnswer={isFinalAnswer} />
         <span className="t-faint text-xs font-mono w-4">{index + 1}</span>
-        <span className="font-mono text-xs t-primary flex-1 truncate">
-          {obs.user_announcement || (isFinalAnswer ? "final_answer" : obs.tool)}
+        <span className="text-xs t-primary flex-1 truncate">
+          {hasAnnouncement ? obs.user_announcement : (isFinalAnswer ? "Done" : obs.tool)}
         </span>
+        {/* Always show tool name badge when announcement replaces it */}
+        {hasAnnouncement && obs.tool && (
+          <span className="text-[10px] font-mono t-faint bg-app-code rounded px-1.5 py-0.5 flex-shrink-0">
+            {obs.tool}
+          </span>
+        )}
         {status === "denied" && (
           <span className="badge badge-medium flex items-center gap-0.5">
             <ShieldOff size={10} /> denied
