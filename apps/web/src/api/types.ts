@@ -44,6 +44,7 @@ export interface Observation {
   tool?: string | null;
   args?: Record<string, unknown> | null;
   reasoning?: string;
+  user_announcement?: string;
   result?: ToolResult | null;
   timestamp: string;
 }

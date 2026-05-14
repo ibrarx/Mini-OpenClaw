@@ -270,6 +270,7 @@ class Orchestrator:
                 obs = Observation(
                     step_id=step_id, iteration=run.iterations,
                     tool=tool_name, args=tool_args, reasoning=reasoning,
+                    user_announcement="I seem to be going in circles. Let me try a different approach...",
                     result=blocked_result, timestamp=now,
                 )
                 run.observations.append(obs)
@@ -288,6 +289,7 @@ class Orchestrator:
                 obs = Observation(
                     step_id=step_id, iteration=run.iterations,
                     tool=tool_name, args=tool_args, reasoning=reasoning,
+                    user_announcement="Hmm, I tried something that didn't work. Let me try another approach...",
                     result=error_result, timestamp=now,
                 )
                 run.observations.append(obs)
@@ -317,6 +319,7 @@ class Orchestrator:
                     obs = Observation(
                         step_id=step_id, iteration=run.iterations,
                         tool=tool_name, args=tool_args, reasoning=reasoning,
+                        user_announcement="That action isn't allowed by the workspace policy. Let me find another way...",
                         result=denied_result, timestamp=now,
                     )
                     run.observations.append(obs)
@@ -338,6 +341,7 @@ class Orchestrator:
                     obs = Observation(
                         step_id=step_id, iteration=run.iterations,
                         tool=tool_name, args=tool_args, reasoning=reasoning,
+                        user_announcement="That action isn't allowed by the workspace policy. Let me find another way...",
                         result=denied_result, timestamp=now,
                     )
                     run.observations.append(obs)
@@ -361,6 +365,7 @@ class Orchestrator:
                 pending_obs = Observation(
                     step_id=step_id, iteration=run.iterations,
                     tool=tool_name, args=tool_args, reasoning=reasoning,
+                    user_announcement=decision.get("user_announcement", ""),
                     timestamp=now,
                 )
                 run.observations.append(pending_obs)
@@ -430,6 +435,15 @@ class Orchestrator:
                 run.plan.steps.append(plan_step)
                 await self._save_run(run)
 
+            # Emit announcement event so the frontend can show it immediately
+            announcement = decision.get("user_announcement", "")
+            if announcement:
+                event_emitter.emit(run.run_id, "step_announced", {
+                    "step_id": step_id,
+                    "user_announcement": announcement,
+                    "tool": tool_name,
+                })
+
             # ACT: execute the tool
             context = ToolContext(
                 workspace_root=str(self._workspace), run_id=run.run_id,
@@ -452,6 +466,7 @@ class Orchestrator:
                 obs = Observation(
                     step_id=step_id, iteration=run.iterations,
                     tool=tool_name, args=tool_args, reasoning=reasoning,
+                    user_announcement=announcement,
                     result=result, timestamp=datetime.now(timezone.utc).isoformat(),
                 )
                 run.observations.append(obs)

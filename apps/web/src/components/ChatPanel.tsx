@@ -43,7 +43,7 @@ export default function ChatPanel({
     onRunUpdate?.(run ?? null);
   }, [run, onRunUpdate]);
 
-  // When a run completes, add the final response as a message
+  // When a run reaches a terminal state, add the final response as a message
   const lastRunRef = useRef<string | null>(null);
   useEffect(() => {
     if (!run) return;
@@ -119,16 +119,6 @@ export default function ChatPanel({
     try {
       const { run_id } = await submitChat(sessionId, text);
       setActiveRunId(run_id);
-      // Append "Planning..." system message after user message
-      onMessagesChange([
-        ...withUser,
-        {
-          id: `msg_${Date.now()}_sys`,
-          role: "system",
-          content: "Planning...",
-          timestamp: new Date().toISOString(),
-        },
-      ]);
     } catch (err) {
       addMessage(
         "system",
@@ -187,11 +177,25 @@ export default function ChatPanel({
 
   const isActive = !!activeRunId;
 
+  // Derive the user-friendly status line from the latest observation
+  const getStatusText = (): string => {
+    if (!run) return "";
+    if (run.status === "planning") return "Planning...";
+    if (run.observations && run.observations.length > 0) {
+      const latest = run.observations[run.observations.length - 1];
+      if (latest.user_announcement && !latest.result) {
+        return latest.user_announcement;
+      }
+    }
+    if (decidedSteps.size > 0) return "Executing approved step...";
+    return `Working on it... (step ${run.iterations ?? 0})`;
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Messages area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {messages.length === 0 && (
+        {messages.length === 0 && !isActive && (
           <div className="flex flex-col items-center justify-center h-full t-muted gap-3">
             <div className="text-5xl mb-1 opacity-30">🦀</div>
             <p className="text-sm t-secondary">Send a message to get started</p>
@@ -256,20 +260,12 @@ export default function ChatPanel({
                 </div>
               ))}
 
-            {/* Active status indicator */}
+            {/* Active status indicator — shows user_announcement from latest observation */}
             {(["planning", "running", "reacting"].includes(run.status) || decidedSteps.size > 0) &&
               !["completed", "failed", "cancelled"].includes(run.status) && (
               <div className="ml-9 flex items-center gap-2 text-xs t-muted">
                 <Loader2 size={14} className="animate-spin text-blue-400" />
-                <span>
-                  {run.status === "planning"
-                    ? "Creating plan..."
-                    : run.status === "reacting"
-                    ? `Thinking… (iteration ${run.iterations ?? 0})`
-                    : decidedSteps.size > 0
-                    ? "Executing approved step..."
-                    : "Executing..."}
-                </span>
+                <span>{getStatusText()}</span>
               </div>
             )}
           </div>

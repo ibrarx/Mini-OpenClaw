@@ -81,6 +81,69 @@ export default function PlanPreview({ plan, compact = false, run }: PlanPreviewP
   );
 }
 
+// ── Step Row (legacy plan-and-execute) ────────────────
+
+interface StepRowProps {
+  step: PlanStep;
+  index: number;
+  expanded: boolean;
+  onToggle: () => void;
+  compact: boolean;
+}
+
+function StepRow({ step, index, expanded, onToggle, compact }: StepRowProps) {
+  return (
+    <div className="rounded-md bg-step-row border border-app">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-sm bg-step-row-hover transition-colors rounded-md"
+      >
+        <StepStatusIcon status={step.status} />
+        <span className="t-faint text-xs font-mono w-4">{index + 1}</span>
+        <span className="font-mono text-xs t-primary flex-1 truncate">
+          {step.tool}
+        </span>
+        <RiskBadge level={step.risk_level} />
+        {!compact && (
+          expanded ? (
+            <ChevronDown size={12} className="t-faint" />
+          ) : (
+            <ChevronRight size={12} className="t-faint" />
+          )
+        )}
+      </button>
+
+      {expanded && !compact && (
+        <div className="px-3 pb-2.5 border-t border-app mt-0.5">
+          {step.reasoning && (
+            <p className="text-xs t-muted mt-2 mb-1.5">{step.reasoning}</p>
+          )}
+          {step.args && Object.keys(step.args).length > 0 && (
+            <div className="text-xs font-mono bg-app-code rounded px-2.5 py-1.5 t-code overflow-x-auto mt-1.5">
+              <pre className="whitespace-pre-wrap">
+                {JSON.stringify(step.args, null, 2)}
+              </pre>
+            </div>
+          )}
+          {step.result && (
+            <div className="mt-2">
+              <span className="text-[10px] uppercase tracking-wider t-faint">Result</span>
+              <div className="text-xs font-mono bg-app-code rounded px-2.5 py-1.5 t-code overflow-x-auto mt-0.5 max-h-32 overflow-y-auto">
+                <pre className="whitespace-pre-wrap">
+                  {JSON.stringify(
+                    step.result.status === "success" ? step.result.output : step.result.error,
+                    null, 2,
+                  )}
+                </pre>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── ReAct Timeline ────────────────────────────────────
 
 interface ReactTimelineProps {
@@ -154,6 +217,7 @@ interface ObservationRowProps {
 function ObservationRow({ obs, index, expanded, onToggle, compact }: ObservationRowProps) {
   const isFinalAnswer = !obs.tool;
   const status = obs.result?.status;
+  const hasAnnouncement = !!obs.user_announcement && !isFinalAnswer;
 
   return (
     <div className="rounded-md bg-step-row border border-app">
@@ -163,9 +227,15 @@ function ObservationRow({ obs, index, expanded, onToggle, compact }: Observation
       >
         <ObservationStatusIcon status={status} isFinalAnswer={isFinalAnswer} />
         <span className="t-faint text-xs font-mono w-4">{index + 1}</span>
-        <span className="font-mono text-xs t-primary flex-1 truncate">
-          {isFinalAnswer ? "final_answer" : obs.tool}
+        <span className="text-xs t-primary flex-1 truncate">
+          {hasAnnouncement ? obs.user_announcement : (isFinalAnswer ? "Done" : obs.tool)}
         </span>
+        {/* Always show tool name badge when announcement replaces it */}
+        {hasAnnouncement && obs.tool && (
+          <span className="text-[10px] font-mono t-faint bg-app-code rounded px-1.5 py-0.5 flex-shrink-0">
+            {obs.tool}
+          </span>
+        )}
         {status === "denied" && (
           <span className="badge badge-medium flex items-center gap-0.5">
             <ShieldOff size={10} /> denied
@@ -187,8 +257,13 @@ function ObservationRow({ obs, index, expanded, onToggle, compact }: Observation
 
       {expanded && !compact && (
         <div className="px-3 pb-2.5 border-t border-app mt-0.5">
+          {obs.user_announcement && (
+            <p className="text-xs t-secondary mt-2 mb-1">{obs.user_announcement}</p>
+          )}
           {obs.reasoning && (
-            <p className="text-xs t-muted mt-2 mb-1.5">{obs.reasoning}</p>
+            <p className="text-xs t-muted mt-1 mb-1.5 italic">
+              Trace: {obs.reasoning}
+            </p>
           )}
           {obs.args && (
             <div className="text-xs font-mono bg-app-code rounded px-2.5 py-1.5 t-code overflow-x-auto mt-1.5">

@@ -93,10 +93,21 @@ CRITICAL: Use the memory context above to personalize your responses and tool ch
 - If memory contains relevant facts, reference them in your reasoning.
 - If memory shows past actions related to this task, learn from them.
 
+USER ANNOUNCEMENTS — IMPORTANT:
+When calling a tool, always include a "user_announcement" field with a short, conversational message (1 sentence) telling the user what you're about to do. Write it as if you're a helpful colleague narrating your actions:
+- list_files → "Let me see what's in your workspace..."
+- read_file → "I'll read [filename] for you..."
+- search_in_files → "Let me search your files for '[query]'..."
+- search_memory → "Let me check my memory for anything about that..."
+- remember_fact → "I'll save that to memory so I remember next time..."
+- write_file → "I'll create [filename] for you..."
+- run_shell_safe → "Let me run a quick command to check that..."
+Never use technical jargon. Never mention tool names. Keep it natural and brief.
+
 Respond with ONLY valid JSON (no markdown, no backticks):
 
 To call a tool:
-{{"action": "tool", "tool": "tool_name", "args": {{...}}, "reasoning": "Why this step"}}
+{{"action": "tool", "tool": "tool_name", "args": {{...}}, "reasoning": "Why this step", "user_announcement": "A short, friendly message telling the user what you're about to do"}}
 
 To give a final answer:
 {{"action": "final_answer", "response": "Your answer to the user", "reasoning": "Why done"}}
@@ -282,6 +293,7 @@ class Planner:
             result.setdefault("tool", "")
             result.setdefault("args", {})
             result.setdefault("reasoning", "")
+            result.setdefault("user_announcement", "")
         else:
             result.setdefault("response", "")
             result.setdefault("reasoning", "")
