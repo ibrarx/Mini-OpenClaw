@@ -81,6 +81,69 @@ export default function PlanPreview({ plan, compact = false, run }: PlanPreviewP
   );
 }
 
+// ── Step Row (legacy plan-and-execute) ────────────────
+
+interface StepRowProps {
+  step: PlanStep;
+  index: number;
+  expanded: boolean;
+  onToggle: () => void;
+  compact: boolean;
+}
+
+function StepRow({ step, index, expanded, onToggle, compact }: StepRowProps) {
+  return (
+    <div className="rounded-md bg-step-row border border-app">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-sm bg-step-row-hover transition-colors rounded-md"
+      >
+        <StepStatusIcon status={step.status} />
+        <span className="t-faint text-xs font-mono w-4">{index + 1}</span>
+        <span className="font-mono text-xs t-primary flex-1 truncate">
+          {step.tool}
+        </span>
+        <RiskBadge level={step.risk_level} />
+        {!compact && (
+          expanded ? (
+            <ChevronDown size={12} className="t-faint" />
+          ) : (
+            <ChevronRight size={12} className="t-faint" />
+          )
+        )}
+      </button>
+
+      {expanded && !compact && (
+        <div className="px-3 pb-2.5 border-t border-app mt-0.5">
+          {step.reasoning && (
+            <p className="text-xs t-muted mt-2 mb-1.5">{step.reasoning}</p>
+          )}
+          {step.args && Object.keys(step.args).length > 0 && (
+            <div className="text-xs font-mono bg-app-code rounded px-2.5 py-1.5 t-code overflow-x-auto mt-1.5">
+              <pre className="whitespace-pre-wrap">
+                {JSON.stringify(step.args, null, 2)}
+              </pre>
+            </div>
+          )}
+          {step.result && (
+            <div className="mt-2">
+              <span className="text-[10px] uppercase tracking-wider t-faint">Result</span>
+              <div className="text-xs font-mono bg-app-code rounded px-2.5 py-1.5 t-code overflow-x-auto mt-0.5 max-h-32 overflow-y-auto">
+                <pre className="whitespace-pre-wrap">
+                  {JSON.stringify(
+                    step.result.status === "success" ? step.result.output : step.result.error,
+                    null, 2,
+                  )}
+                </pre>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── ReAct Timeline ────────────────────────────────────
 
 interface ReactTimelineProps {
