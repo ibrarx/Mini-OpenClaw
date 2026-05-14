@@ -43,73 +43,25 @@ export default function ChatPanel({
     onRunUpdate?.(run ?? null);
   }, [run, onRunUpdate]);
 
-  // When a run completes, add the final response as a message
+  // When a run reaches a terminal state, add the final response as a message
   const lastRunRef = useRef<string | null>(null);
-  const lastAnnouncementRef = useRef<string | null>(null);
   useEffect(() => {
     if (!run) return;
-
-    // Remove the "Planning..." message once we leave planning state
-    if (run.status !== "planning") {
-      const hasPlanningMsg = messages.some(
-        (msg) => msg.role === "system" && msg.content === "Planning..." && msg.run_id === run.run_id
-      );
-      if (hasPlanningMsg) {
-        onMessagesChange(
-          messages.filter(
-            (msg) =>
-              !(msg.role === "system" && msg.content === "Planning..." && msg.run_id === run.run_id)
-          )
-        );
-        return; // let next render cycle handle the rest
-      }
-    }
-
-    // Show the latest user_announcement from observations as a transient system message
-    if (run.observations && run.observations.length > 0) {
-      const latest = run.observations[run.observations.length - 1];
-      if (latest.user_announcement && !latest.result && latest.user_announcement !== lastAnnouncementRef.current) {
-        lastAnnouncementRef.current = latest.user_announcement;
-        const withoutOldAnnouncements = messages.filter(
-          (msg) =>
-            !(msg.role === "system" && msg.run_id === run.run_id && msg.id?.includes("_announce"))
-        );
-        onMessagesChange([
-          ...withoutOldAnnouncements,
-          {
-            id: `msg_${Date.now()}_announce`,
-            role: "system",
-            content: latest.user_announcement,
-            timestamp: new Date().toISOString(),
-            run_id: run.run_id,
-          },
-        ]);
-        return;
-      }
-    }
 
     const terminal: RunStatus[] = ["completed", "failed", "cancelled"];
     if (terminal.includes(run.status) && lastRunRef.current !== run.run_id) {
       lastRunRef.current = run.run_id;
-      lastAnnouncementRef.current = null;
 
-      // Clean up any remaining announcement messages for this run
-      const cleaned = messages.filter(
-        (msg) =>
-          !(msg.role === "system" && msg.run_id === run.run_id && msg.id?.includes("_announce"))
-      );
+      if (run.final_response) {
+        addMessage("assistant", run.final_response, run.run_id);
+      } else if (run.plan?.direct_response) {
+        addMessage("assistant", run.plan.direct_response, run.run_id);
+      } else if (run.status === "failed") {
+        addMessage("system", "Run failed. Check the trace for details.");
+      } else if (run.status === "cancelled") {
+        addMessage("system", "Run cancelled.");
+      }
 
-      const finalMsg: ChatMessage | null = run.final_response
-        ? { id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, role: "assistant", content: run.final_response, timestamp: new Date().toISOString(), run_id: run.run_id }
-        : run.plan?.direct_response
-        ? { id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, role: "assistant", content: run.plan.direct_response, timestamp: new Date().toISOString(), run_id: run.run_id }
-        : run.status === "failed"
-        ? { id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, role: "system", content: "Run failed. Check the trace for details.", timestamp: new Date().toISOString() }
-        : run.status === "cancelled"
-        ? { id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, role: "system", content: "Run cancelled.", timestamp: new Date().toISOString() }
-        : null;
-
-      onMessagesChange(finalMsg ? [...cleaned, finalMsg] : cleaned);
       setActiveRunId(null);
       setDecidedSteps(new Set());
     }
@@ -167,17 +119,6 @@ export default function ChatPanel({
     try {
       const { run_id } = await submitChat(sessionId, text);
       setActiveRunId(run_id);
-      // Append "Planning..." system message tagged with run_id for cleanup
-      onMessagesChange([
-        ...withUser,
-        {
-          id: `msg_${Date.now()}_sys`,
-          role: "system",
-          content: "Planning...",
-          timestamp: new Date().toISOString(),
-          run_id: run_id,
-        },
-      ]);
     } catch (err) {
       addMessage(
         "system",
@@ -236,11 +177,25 @@ export default function ChatPanel({
 
   const isActive = !!activeRunId;
 
+  // Derive the user-friendly status line from the latest observation
+  const getStatusText = (): string => {
+    if (!run) return "";
+    if (run.status === "planning") return "Planning...";
+    if (run.observations && run.observations.length > 0) {
+      const latest = run.observations[run.observations.length - 1];
+      if (latest.user_announcement && !latest.result) {
+        return latest.user_announcement;
+      }
+    }
+    if (decidedSteps.size > 0) return "Executing approved step...";
+    return `Working on it... (step ${run.iterations ?? 0})`;
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Messages area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {messages.length === 0 && (
+        {messages.length === 0 && !isActive && (
           <div className="flex flex-col items-center justify-center h-full t-muted gap-3">
             <div className="text-5xl mb-1 opacity-30">🦀</div>
             <p className="text-sm t-secondary">Send a message to get started</p>
@@ -305,23 +260,12 @@ export default function ChatPanel({
                 </div>
               ))}
 
-            {/* Active status indicator */}
+            {/* Active status indicator — shows user_announcement from latest observation */}
             {(["planning", "running", "reacting"].includes(run.status) || decidedSteps.size > 0) &&
               !["completed", "failed", "cancelled"].includes(run.status) && (
               <div className="ml-9 flex items-center gap-2 text-xs t-muted">
                 <Loader2 size={14} className="animate-spin text-blue-400" />
-                <span>
-                  {run.status === "planning"
-                    ? "Creating plan..."
-                    : (() => {
-                        const latestObs = run.observations?.[run.observations.length - 1];
-                        if (latestObs?.user_announcement && !latestObs?.result) {
-                          return latestObs.user_announcement;
-                        }
-                        if (decidedSteps.size > 0) return "Executing approved step...";
-                        return `Working on it... (step ${run.iterations ?? 0})`;
-                      })()}
-                </span>
+                <span>{getStatusText()}</span>
               </div>
             )}
           </div>
