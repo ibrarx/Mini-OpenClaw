@@ -152,7 +152,7 @@ class Orchestrator:
             run.plan = Plan(task_type="react", reasoning="ReAct loop")
 
         # Loop detection: track consecutive duplicate actions
-        DUPLICATE_CAP = 3  # stop after 3 identical tool+args calls
+        duplicate_cap = self._settings.react_duplicate_cap
 
         while run.iterations < run.max_iterations:
             run.iterations += 1
@@ -172,10 +172,10 @@ class Orchestrator:
             ]
 
             # Loop detection: check if we're stuck repeating the same action.
-            # If the last DUPLICATE_CAP observations all used the same tool+args,
+            # If the last duplicate_cap observations all used the same tool+args,
             # inject a warning so the LLM is forced to try something different.
-            if len(run.observations) >= DUPLICATE_CAP:
-                recent = run.observations[-DUPLICATE_CAP:]
+            if len(run.observations) >= duplicate_cap:
+                recent = run.observations[-duplicate_cap:]
                 if (
                     all(o.tool is not None for o in recent)
                     and len({o.tool for o in recent}) == 1
@@ -184,7 +184,7 @@ class Orchestrator:
                     loop_tool = recent[0].tool
                     logger.warning(
                         "Run %s: loop detected — %s called %d times with same args",
-                        run.run_id, loop_tool, DUPLICATE_CAP,
+                        run.run_id, loop_tool, duplicate_cap,
                     )
                     obs_for_planner.append({
                         "tool": "_system",
@@ -192,7 +192,7 @@ class Orchestrator:
                         "output": None,
                         "error": (
                             f"LOOP DETECTED: You have called '{loop_tool}' "
-                            f"{DUPLICATE_CAP} times in a row with the same arguments "
+                            f"{duplicate_cap} times in a row with the same arguments "
                             f"and gotten the same result each time. You MUST either "
                             f"try a DIFFERENT tool, use DIFFERENT arguments, or give "
                             f"a final_answer with what you have so far. Do NOT call "
@@ -250,19 +250,19 @@ class Orchestrator:
             reasoning = decision.get("reasoning", "")
 
             # Look up tool
-            # Hard block: if this exact tool+args was already called DUPLICATE_CAP
+            # Hard block: if this exact tool+args was already called duplicate_cap
             # times, refuse to execute again — force the LLM to do something else.
             current_key = json.dumps({"tool": tool_name, "args": tool_args}, sort_keys=True)
             recent_keys = [
                 json.dumps({"tool": o.tool, "args": o.args}, sort_keys=True)
-                for o in run.observations[-DUPLICATE_CAP:]
+                for o in run.observations[-duplicate_cap:]
                 if o.tool is not None
             ]
-            if len(recent_keys) >= DUPLICATE_CAP and all(k == current_key for k in recent_keys[-DUPLICATE_CAP:]):
+            if len(recent_keys) >= duplicate_cap and all(k == current_key for k in recent_keys[-duplicate_cap:]):
                 blocked_result = ToolResult(
                     tool_name=tool_name, status="error", input=tool_args,
                     error=(
-                        f"Blocked: '{tool_name}' has been called {DUPLICATE_CAP}+ "
+                        f"Blocked: '{tool_name}' has been called {duplicate_cap}+ "
                         f"times with identical arguments. You must try a different "
                         f"approach or give a final_answer."
                     ),
@@ -276,7 +276,7 @@ class Orchestrator:
                 await self._save_run(run)
                 await self._audit.log("react_loop_blocked", run_id=run.run_id,
                                        step_id=step_id,
-                                       data={"tool": tool_name, "duplicate_count": DUPLICATE_CAP})
+                                       data={"tool": tool_name, "duplicate_count": duplicate_cap})
                 continue
 
             tool = self._registry.get(tool_name)

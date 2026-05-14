@@ -52,16 +52,23 @@ class Settings(BaseSettings):
 
     # ----- ReAct loop -----
     use_react: bool = True
-    react_max_iterations: int = 10  # capped at 25 — see validator below
+    react_max_iterations: int = 10
+    react_hard_ceiling: int = 25       # absolute max, prevents runaway costs
+    react_duplicate_cap: int = 3       # block after N identical tool+args calls
 
     from pydantic import model_validator as _model_validator
 
     @_model_validator(mode="after")
-    def _cap_react_iterations(self) -> "Settings":
-        if self.react_max_iterations > 25:
-            object.__setattr__(self, "react_max_iterations", 25)
-        if self.react_max_iterations < 1:
-            object.__setattr__(self, "react_max_iterations", 1)
+    def _clamp_react_settings(self) -> "Settings":
+        # Ceiling must be at least 1
+        ceiling = max(1, self.react_hard_ceiling)
+        object.__setattr__(self, "react_hard_ceiling", ceiling)
+        # Max iterations clamped to [1, ceiling]
+        iters = max(1, min(self.react_max_iterations, ceiling))
+        object.__setattr__(self, "react_max_iterations", iters)
+        # Duplicate cap must be at least 2 (1 would block on first retry)
+        dup = max(2, self.react_duplicate_cap)
+        object.__setattr__(self, "react_duplicate_cap", dup)
         return self
 
     # ----- Memory summaries -----
