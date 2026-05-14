@@ -55,16 +55,12 @@ class Settings(BaseSettings):
     react_max_iterations: int = 10
     react_duplicate_cap: int = 3       # block after N identical tool+args calls
 
-    # Internal safety ceiling — not configurable via .env.
-    # Prevents accidental runaway costs even if someone sets max_iterations=999.
-    _HARD_CEILING: int = 25
-
     from pydantic import model_validator as _model_validator
 
     @_model_validator(mode="after")
     def _clamp_react_settings(self) -> "Settings":
-        # Max iterations clamped to [1, _HARD_CEILING]
-        iters = max(1, min(self.react_max_iterations, self._HARD_CEILING))
+        # Max iterations must be at least 1
+        iters = max(1, self.react_max_iterations)
         object.__setattr__(self, "react_max_iterations", iters)
         # Duplicate cap must be at least 2 (1 would block on first retry)
         dup = max(2, self.react_duplicate_cap)
