@@ -128,6 +128,22 @@ copy .env.example .env
 # Open http://localhost:5173
 ```
 
+## Seed the Demo Workspace (optional but recommended)
+
+The seed script creates a realistic **WeatherBot** project in the workspace with 18 files across 5 directories — enough to exercise every tool meaningfully. It also pre-populates memory with facts and episodes so the Memory Browser isn't empty on first launch.
+
+```bash
+python scripts/seed_demo.py
+```
+
+| Flag | What it does |
+|------|-------------|
+| *(no flag)* | Creates workspace files (skips existing), replaces seed memory only |
+| `--clean` | Wipes workspace + seed memory, then recreates. Agent-created memory is preserved. |
+| `--clean-all` | Full reset: wipes workspace + ALL memory (seed and agent-created), then recreates. |
+
+The seeded workspace contains TODO/FIXME/BUG markers scattered across 10 files, making `search_in_files` demos immediately interesting. Run `--clean-all` before a screencast recording for a fresh start.
+
 ## Try These Demo Commands
 
 Once the app is running, type these into the chat:
@@ -505,7 +521,7 @@ mini-openclaw/
 ├── apps/web/              # React + TypeScript frontend
 │   └── src/components/    #   ChatPanel, PlanPreview, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser
 ├── tests/                 # pytest test suite (258 tests)
-├── scripts/               # Demo seeding and memory export
+├── scripts/               # seed_demo.py (workspace + memory setup), export_memory.py
 ├── docs/                  # Architecture and design documentation
 └── requirements.txt       # Python dependencies
 ```
