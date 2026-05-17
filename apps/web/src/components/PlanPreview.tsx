@@ -16,8 +16,11 @@ import {
   Brain,
   ShieldOff,
   Ban,
+  Target,
+  SkipForward,
+  RefreshCw,
 } from "lucide-react";
-import type { Plan, PlanStep, StepStatus, RiskLevel, Observation, Run } from "../api/types";
+import type { Plan, PlanStep, StepStatus, RiskLevel, Observation, Run, Goal, GoalStatus } from "../api/types";
 
 interface PlanPreviewProps {
   plan: Plan;
@@ -156,6 +159,8 @@ interface ReactTimelineProps {
 function ReactTimeline({ run, expandedStep, onToggleStep, compact }: ReactTimelineProps) {
   const isActive = run.status === "reacting";
   const maxReached = run.status === "failed" && run.iterations >= run.max_iterations;
+  const goals = run.plan?.goals ?? [];
+  const replanCount = run.plan?.replan_count ?? 0;
 
   return (
     <div className="animate-fade-in">
@@ -174,6 +179,11 @@ function ReactTimeline({ run, expandedStep, onToggleStep, compact }: ReactTimeli
           )}
         </div>
       </div>
+
+      {/* Goal checklist */}
+      {goals.length > 0 && (
+        <GoalChecklist goals={goals} replanCount={replanCount} compact={compact} />
+      )}
 
       {maxReached && (
         <div className="mb-2 px-2.5 py-1.5 rounded-md bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-400 flex items-center gap-1.5">
@@ -202,6 +212,80 @@ function ReactTimeline({ run, expandedStep, onToggleStep, compact }: ReactTimeli
       </div>
     </div>
   );
+}
+
+// ── Goal Checklist ────────────────────────────────────
+
+interface GoalChecklistProps {
+  goals: Goal[];
+  replanCount: number;
+  compact: boolean;
+}
+
+function GoalChecklist({ goals, replanCount, compact }: GoalChecklistProps) {
+  const done = goals.filter((g) => g.status === "done").length;
+  const total = goals.length;
+
+  return (
+    <div className="mb-2 rounded-md bg-step-row border border-app px-2.5 py-2">
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-1.5 text-xs font-medium t-secondary">
+          <Target size={12} className="text-purple-500" />
+          Goals: {done}/{total}
+        </div>
+        {replanCount > 0 && (
+          <span className="flex items-center gap-1 text-[10px] t-muted">
+            <RefreshCw size={10} />
+            {replanCount} replan{replanCount !== 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+      {!compact && (
+        <div className="space-y-0.5">
+          {goals.map((goal) => (
+            <GoalRow key={goal.goal_id} goal={goal} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GoalRow({ goal }: { goal: Goal }) {
+  return (
+    <div className="flex items-center gap-1.5 text-xs py-0.5">
+      <GoalStatusIcon status={goal.status} />
+      <span
+        className={
+          goal.status === "done"
+            ? "t-muted line-through"
+            : goal.status === "skipped"
+              ? "t-faint line-through"
+              : goal.status === "in_progress"
+                ? "t-primary"
+                : "t-secondary"
+        }
+      >
+        {goal.description}
+      </span>
+      <span className="text-[10px] font-mono t-faint ml-auto flex-shrink-0">
+        {goal.goal_id}
+      </span>
+    </div>
+  );
+}
+
+function GoalStatusIcon({ status }: { status: GoalStatus }) {
+  switch (status) {
+    case "done":
+      return <CheckCircle2 size={12} className="text-emerald-500 flex-shrink-0" />;
+    case "in_progress":
+      return <Loader2 size={12} className="text-blue-500 animate-spin flex-shrink-0" />;
+    case "skipped":
+      return <SkipForward size={12} className="text-amber-500 flex-shrink-0" />;
+    default:
+      return <Clock size={12} className="t-faint flex-shrink-0" />;
+  }
 }
 
 // ── Observation Row ───────────────────────────────────
