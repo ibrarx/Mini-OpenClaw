@@ -31,6 +31,7 @@ from apps.api.models.run import (
     Goal, GoalStatus, Observation, Plan, PlanStep, Run, RunStatus, StepStatus, RiskLevel, ToolResult,
 )
 from apps.api.providers import build_provider
+from apps.api.providers.base import LLMMessage
 from apps.api.providers.errors import ProviderConfigError
 from apps.api.skills.base import ToolContext
 from apps.api.skills.registry import SkillRegistry
@@ -606,23 +607,41 @@ class Orchestrator:
                 if replan_enabled:
                     await self._check_auto_replan(run, memory_context, workspace_info)
 
-        # Max iterations reached
+        # Max iterations reached — try to synthesize a real answer first
         logger.warning("Run %s: max iterations (%d) reached", run.run_id, run.max_iterations)
         # Resolve any unfinished goals
         if goals_enabled and run.plan and run.plan.goals:
             for goal in run.plan.goals:
                 if goal.status in (GoalStatus.PENDING, GoalStatus.IN_PROGRESS):
                     goal.status = GoalStatus.SKIPPED
-        run.final_response = await self._summarize_partial(run)
-        run.final_response += "\n\n(Stopped: maximum iterations reached)"
-        run.status = RunStatus.FAILED
-        await self._save_run(run)
-        if run.final_response:
-            await self._store_message(run.session_id, "assistant", run.final_response, run.run_id)
-        await self._audit.log("run_failed", run_id=run.run_id,
-                               data={"reason": "max_iterations_exceeded",
-                                     "iterations": run.iterations})
-        event_emitter.emit(run.run_id, "run_failed")
+
+        # Attempt graceful degradation: give the LLM one last chance to answer
+        final_answer = await self._generate_final_answer(run)
+
+        if final_answer is not None:
+            # Synthesis succeeded — treat as completed (user got a useful answer)
+            run.final_response = final_answer
+            run.status = RunStatus.COMPLETED
+            await self._save_run(run)
+            if run.final_response:
+                await self._store_message(run.session_id, "assistant", run.final_response, run.run_id)
+            await self._audit.log("run_completed", run_id=run.run_id,
+                                   data={"reason": "max_iterations_synthesized",
+                                         "iterations": run.iterations})
+            event_emitter.emit(run.run_id, "run_completed")
+            await self._store_episode_for_run(run)
+        else:
+            # Synthesis failed or no evidence — fall back to partial summary
+            run.final_response = await self._summarize_partial(run)
+            run.final_response += "\n\n(Stopped: maximum iterations reached)"
+            run.status = RunStatus.FAILED
+            await self._save_run(run)
+            if run.final_response:
+                await self._store_message(run.session_id, "assistant", run.final_response, run.run_id)
+            await self._audit.log("run_failed", run_id=run.run_id,
+                                   data={"reason": "max_iterations_exceeded",
+                                         "iterations": run.iterations})
+            event_emitter.emit(run.run_id, "run_failed")
 
     # ------------------------------------------------------------------
     # Hybrid Plan-ReAct helpers (flag-gated)
@@ -769,6 +788,65 @@ class Orchestrator:
             except Exception as exc:
                 logger.warning("Partial summary failed: %s", exc)
         return "Task partially completed. Check tool traces for details."
+
+    async def _generate_final_answer(self, run: Run) -> str | None:
+        """Give the LLM one last chance to answer the user's question using collected evidence.
+
+        Unlike ``_summarize_partial`` (which asks the LLM to summarize actions taken),
+        this method asks the LLM to **answer the original question** using all successful
+        observations as evidence. Returns ``None`` if there is no evidence or if the
+        synthesis call fails, allowing the caller to fall back to ``_summarize_partial``.
+        """
+        # Guard: need a planner with a working provider
+        if not self._planner or not self._planner._provider:
+            return None
+
+        # Collect all successful observations with full output and args
+        evidence_parts: list[str] = []
+        for obs in run.observations:
+            if obs.tool and obs.result and obs.result.status == "success":
+                evidence_parts.append(
+                    f"Tool: {obs.tool}\n"
+                    f"Args: {json.dumps(obs.args, default=str)}\n"
+                    f"Output: {json.dumps(obs.result.output, default=str)}"
+                )
+
+        # No successful evidence at all — fall through to _summarize_partial
+        if not evidence_parts:
+            return None
+
+        evidence_text = "\n\n---\n\n".join(evidence_parts)
+
+        try:
+            response = await asyncio.wait_for(
+                self._planner._provider.generate(
+                    messages=[LLMMessage(
+                        role="user",
+                        content=(
+                            f"The user asked: {run.user_message}\n\n"
+                            f"Here is all the data collected so far:\n\n"
+                            f"{evidence_text}\n\n"
+                            f"Answer the user's question using this data. "
+                            f"If the data is incomplete, say what you found and what's missing. "
+                            f"Don't apologize excessively."
+                        ),
+                    )],
+                    system=(
+                        "You are answering the user's original question based on evidence "
+                        "collected by tool executions. Synthesize a clear, direct answer. "
+                        "Do NOT describe the actions that were taken — just answer the question. "
+                        "If the evidence is partial, provide what you can and note gaps."
+                    ),
+                    max_tokens=2048,
+                    timeout=30.0,
+                ),
+                timeout=35.0,
+            )
+            text = (response.text or "").strip()
+            return text if text else None
+        except Exception as exc:
+            logger.warning("Final answer synthesis failed: %s", exc)
+            return None
 
     async def _store_episode_for_run(self, run: Run) -> None:
         """Store an episodic memory after a run completes successfully.

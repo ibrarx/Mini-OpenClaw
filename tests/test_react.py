@@ -384,7 +384,7 @@ class TestReactMaxIterations:
         settings.react_max_iterations = 3  # Low limit for testing
         orch = Orchestrator(settings, registry)
 
-        # Queue 3 tool actions (no final_answer) + 1 summary response
+        # Queue 3 tool actions (no final_answer) + 1 response for _generate_final_answer
         responses = [
             _react_json({
                 "action": "tool",
@@ -394,16 +394,173 @@ class TestReactMaxIterations:
             })
             for i in range(3)
         ]
-        # The summary generation will also call the provider
-        responses.append("Partial results: listed files 3 times.")
+        # _generate_final_answer calls provider.generate() — queue the synthesis
+        responses.append("Here are the files I found: README.md, src/main.py")
         _install_fake_provider(orch, responses)
 
         run = await orch.handle_message("sess_1", "Keep listing files forever")
         run = await _wait_for_run(orch, run.run_id)
 
-        assert run.status == RunStatus.FAILED
+        # With evidence available, _generate_final_answer succeeds → COMPLETED
+        assert run.status == RunStatus.COMPLETED
         assert run.iterations == 3
+        assert "files" in run.final_response.lower()
+
+
+# ---------------------------------------------------------------------------
+# Graceful max-iterations degradation
+# ---------------------------------------------------------------------------
+
+
+class TestGracefulMaxIterations:
+    """Tests for _generate_final_answer synthesis at max iterations."""
+
+    @pytest.mark.asyncio
+    async def test_final_answer_synthesis_at_limit(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """Agent collects data in 3 iterations, hits max_iterations=3,
+        LLM synthesizes an answer → status is COMPLETED."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings(populated_workspace, tmp_db_path)
+        settings.react_max_iterations = 3
+        orch = Orchestrator(settings, registry)
+
+        # 3 tool calls that collect data + 1 synthesis response
+        responses = [
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "."}, "reasoning": "explore workspace",
+            }),
+            _react_json({
+                "action": "tool", "tool": "read_file",
+                "args": {"path": "README.md"}, "reasoning": "read the readme",
+            }),
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "src"}, "reasoning": "check src dir",
+            }),
+            # _generate_final_answer synthesis
+            "The workspace contains a README.md with 'Hello world' and a src/main.py.",
+        ]
+        _install_fake_provider(orch, responses)
+
+        run = await orch.handle_message("sess_1", "What files are in the workspace?")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        assert run.iterations == 3
+        assert "README" in run.final_response
+        # Should NOT contain the partial-summary boilerplate
+        assert "Task partially completed" not in run.final_response
+
+    @pytest.mark.asyncio
+    async def test_fallback_when_no_evidence(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """Agent hits limit with zero successful observations → falls back
+        to _summarize_partial, status is FAILED."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings(populated_workspace, tmp_db_path)
+        settings.react_max_iterations = 2
+        orch = Orchestrator(settings, registry)
+
+        # 2 tool calls that all fail (unknown tool) → no successful evidence
+        responses = [
+            _react_json({
+                "action": "tool", "tool": "nonexistent_tool",
+                "args": {}, "reasoning": "try something",
+            }),
+            _react_json({
+                "action": "tool", "tool": "another_fake_tool",
+                "args": {}, "reasoning": "try again",
+            }),
+            # No synthesis call expected (no evidence) → _summarize_partial calls generate_summary
+            # But generate_summary also finds no successful results, so it returns the default
+        ]
+        _install_fake_provider(orch, responses)
+
+        run = await orch.handle_message("sess_1", "Do something impossible")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.FAILED
         assert "maximum iterations" in run.final_response.lower()
+
+    @pytest.mark.asyncio
+    async def test_fallback_when_synthesis_fails(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """Agent has evidence but _generate_final_answer raises an exception →
+        falls back to _summarize_partial, status is FAILED."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings(populated_workspace, tmp_db_path)
+        settings.react_max_iterations = 2
+        orch = Orchestrator(settings, registry)
+
+        # 2 successful tool calls + synthesis fails + summary fallback
+        responses = [
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "."}, "reasoning": "explore",
+            }),
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "src"}, "reasoning": "explore more",
+            }),
+            # _generate_final_answer will call provider.generate() → exception
+            RuntimeError("LLM exploded"),
+            # _summarize_partial fallback calls generate_summary → also needs a response
+            "Partial summary: listed some files.",
+        ]
+        _install_fake_provider(orch, responses)
+
+        run = await orch.handle_message("sess_1", "What files exist?")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.FAILED
+        assert "maximum iterations" in run.final_response.lower()
+
+    @pytest.mark.asyncio
+    async def test_episode_stored_on_partial_completion(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """Verify _store_episode_for_run is called when status is COMPLETED at limit."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings(populated_workspace, tmp_db_path)
+        settings.react_max_iterations = 2
+        orch = Orchestrator(settings, registry)
+
+        # 2 tool calls + synthesis response
+        responses = [
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "."}, "reasoning": "explore",
+            }),
+            _react_json({
+                "action": "tool", "tool": "read_file",
+                "args": {"path": "README.md"}, "reasoning": "read readme",
+            }),
+            # _generate_final_answer synthesis
+            "The README says Hello world.",
+        ]
+        _install_fake_provider(orch, responses)
+
+        run = await orch.handle_message("sess_1", "What does the README say?")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+
+        # Verify episode was stored in memory by querying the DB
+        from apps.api.database import get_connection
+        conn = await get_connection(tmp_db_path)
+        try:
+            rows = await conn.execute_fetchall(
+                "SELECT * FROM memory_items WHERE memory_type='episode' AND run_id=?",
+                (run.run_id,),
+            )
+            assert len(rows) >= 1, "Episode should be stored for COMPLETED run at max iterations"
+        finally:
+            await conn.close()
 
 
 class TestReactLoopDetection:
