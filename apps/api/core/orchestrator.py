@@ -251,6 +251,11 @@ class Orchestrator:
                 raise  # let _process_run handle it
             except Exception as exc:
                 logger.error("ReAct planner error at iteration %d: %s", run.iterations, exc, exc_info=True)
+                # Resolve any unfinished goals
+                if goals_enabled and run.plan and run.plan.goals:
+                    for goal in run.plan.goals:
+                        if goal.status in (GoalStatus.PENDING, GoalStatus.IN_PROGRESS):
+                            goal.status = GoalStatus.SKIPPED
                 run.final_response = await self._summarize_partial(run)
                 run.final_response += f"\n\n(Stopped: planner error at iteration {run.iterations})"
                 run.status = RunStatus.FAILED
@@ -272,6 +277,10 @@ class Orchestrator:
                         if goal.goal_id in completed:
                             goal.status = GoalStatus.DONE
                         elif goal.goal_id in skipped:
+                            goal.status = GoalStatus.SKIPPED
+                    # Resolve any remaining unfinished goals
+                    for goal in run.plan.goals:
+                        if goal.status in (GoalStatus.PENDING, GoalStatus.IN_PROGRESS):
                             goal.status = GoalStatus.SKIPPED
 
                 obs = Observation(
@@ -582,6 +591,11 @@ class Orchestrator:
 
         # Max iterations reached
         logger.warning("Run %s: max iterations (%d) reached", run.run_id, run.max_iterations)
+        # Resolve any unfinished goals
+        if goals_enabled and run.plan and run.plan.goals:
+            for goal in run.plan.goals:
+                if goal.status in (GoalStatus.PENDING, GoalStatus.IN_PROGRESS):
+                    goal.status = GoalStatus.SKIPPED
         run.final_response = await self._summarize_partial(run)
         run.final_response += "\n\n(Stopped: maximum iterations reached)"
         run.status = RunStatus.FAILED
