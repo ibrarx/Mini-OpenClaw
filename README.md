@@ -23,6 +23,7 @@ Key features:
 - **Hybrid semantic memory** — 70% vector similarity + 30% keyword matching, powered by local sentence-transformers embeddings (no API cost)
 - **Three memory layers** — durable facts, episodic task history, and auto-generated conversation summaries
 - **Saga compensation** — reject a step and all previous write operations are automatically rolled back
+- **Budget-aware planning** — the agent sees its iteration budget, prefers batch operations, and wraps up gracefully when budget is low instead of hitting the hard limit; a live progress bar in the UI shows budget consumption
 - **Error classification** — transient errors are retried with backoff, permanent errors go straight to the LLM, side-effect errors are surfaced to the user
 - **LLM-provider-agnostic** — swap Claude for Gemini (or add your own) without touching core code
 - **Manifest-driven tool extensibility** — add a tool without rewriting the core agent loop
@@ -278,6 +279,14 @@ If the LLM gets stuck calling the same tool with identical arguments repeatedly 
 
 Combined with `REACT_MAX_ITERATIONS` (default: 10), this prevents runaway loops from burning API credits. Both values are configurable via `.env`.
 
+### Budget awareness
+
+Every ReAct iteration, the orchestrator injects a budget line into the LLM prompt: `"Budget: step 3 of 10 (7 remaining)"`. When remaining steps fall below the configured threshold (`REACT_BUDGET_WARN_PCT`, default 30%), a `⚠ LOW BUDGET` warning is appended, instructing the LLM to synthesize what it has rather than start new explorations.
+
+The frontend shows a matching **progress bar** below the iteration counter. The bar transitions from green → amber → red as budget depletes, pulses while the agent is thinking, and displays a "Low budget" badge when the warning threshold is reached. This gives evaluators a visual sense of where the agent is in its budget without needing to read log output.
+
+To test budget pressure visually, set `REACT_MAX_ITERATIONS=5` in `.env` and ask a multi-step question like *"Read all files in the workspace and summarize the project."*
+
 ## Switching LLM providers
 
 Mini-OpenClaw is LLM-provider-agnostic. The planner talks to an abstract
@@ -423,6 +432,7 @@ All settings are read from the `.env` file (see `.env.example`):
 | `REACT_DUPLICATE_CAP` | Block after N consecutive identical tool+args calls (minimum: 2) | `3` |
 | `REACT_USE_GOALS` | Generate a goal checklist before the ReAct loop (hybrid Plan→ReAct) | `false` |
 | `REACT_MAX_REPLANS` | Maximum mid-loop replans (0 = goals only, no replanning; clamped 0–5) | `2` |
+| `REACT_BUDGET_WARN_PCT` | Warn the LLM when this percentage of the iteration budget remains (clamped 10–80). Triggers the ⚠ LOW BUDGET prompt and the UI progress bar turns red. | `30` |
 | `REACT_READ_FILE_MAX_BATCH` | Maximum files per batch `read_file` call | `10` |
 | `REACT_READ_FILE_MAX_CHARS` | Maximum total output characters per `read_file` call | `50000` |
 | `SUMMARY_INTERVAL` | Auto-generate a summary every N completed runs (0 = disable) | `5` |
@@ -448,7 +458,7 @@ The test suite covers:
 | `test_policy.py` | Path validation, shell blocking, injection detection, risk classification | 38 |
 | `test_providers.py` | Anthropic/Gemini provider translation, factory, JSON extraction | 37 |
 | `test_tools.py` | Each V1 tool in isolation (including batch read_file) | 42 |
-| `test_react.py` | ReAct loop, hybrid Plan-ReAct, goal tracking, replanning, saga compensation, error classification, loop detection, approval flow, batch reads | 55 |
+| `test_react.py` | ReAct loop, hybrid Plan-ReAct, goal tracking, replanning, saga compensation, error classification, loop detection, approval flow, batch reads, budget awareness | 59 |
 | `test_planner.py` | Plan parsing, provider error handling, summary generation | 13 |
 | `test_memory.py` | Memory CRUD, keyword search, retrieval, export | 13 |
 | `test_integration.py` | End-to-end legacy plan-and-execute path, provider switching | 8 |
@@ -493,7 +503,7 @@ mini-openclaw/
 │   └── models/            #   Pydantic models (Run, ToolResult, ErrorKind, etc.)
 ├── apps/web/              # React + TypeScript frontend
 │   └── src/components/    #   ChatPanel, PlanPreview, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser
-├── tests/                 # pytest test suite (250 tests)
+├── tests/                 # pytest test suite (254 tests)
 ├── scripts/               # Demo seeding and memory export
 ├── docs/                  # Architecture and design documentation
 └── requirements.txt       # Python dependencies
