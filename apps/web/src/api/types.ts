@@ -49,12 +49,22 @@ export interface Observation {
   timestamp: string;
 }
 
+export type GoalStatus = "pending" | "in_progress" | "done" | "skipped";
+
+export interface Goal {
+  goal_id: string;
+  description: string;
+  status: GoalStatus;
+}
+
 export interface Plan {
   task_type: string;
   confidence: number;
   reasoning: string;
   steps: PlanStep[];
   direct_response: string | null;
+  goals: Goal[];
+  replan_count: number;
 }
 
 export interface PlanStep {

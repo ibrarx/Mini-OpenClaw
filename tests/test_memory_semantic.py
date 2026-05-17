@@ -490,6 +490,8 @@ class TestPlannerWiring:
             database_path=str(db_path),
             anthropic_api_key="test-key",
             use_react=True,
+            react_use_goals=False,
+            react_max_replans=0,
         )
         registry = SkillRegistry()
         registry.discover()
@@ -499,7 +501,7 @@ class TestPlannerWiring:
         # Mock the planner to capture what it receives
         captured_contexts: list[str] = []
 
-        async def mock_react_step(user_message, observations, memory_context="", workspace_info=""):
+        async def mock_react_step(user_message, observations, memory_context="", workspace_info="", **kwargs):
             captured_contexts.append(memory_context)
             return {"action": "final_answer", "response": "Done", "reasoning": "test"}
 
@@ -533,6 +535,8 @@ class TestPlannerWiring:
             database_path=str(db_path),
             anthropic_api_key="test-key",
             use_react=True,
+            react_use_goals=False,
+            react_max_replans=0,
         )
         registry = SkillRegistry()
         registry.discover()
@@ -542,7 +546,7 @@ class TestPlannerWiring:
         call_count = 0
         captured_contexts: list[str] = []
 
-        async def mock_react_step(user_message, observations, memory_context="", workspace_info=""):
+        async def mock_react_step(user_message, observations, memory_context="", workspace_info="", **kwargs):
             nonlocal call_count
             call_count += 1
             captured_contexts.append(memory_context)
@@ -671,13 +675,15 @@ class TestEpisodeStorage:
             database_path=str(db_path),
             anthropic_api_key="test-key",
             use_react=True,
+            react_use_goals=False,
+            react_max_replans=0,
         )
         registry = SkillRegistry()
         registry.discover()
         orch = Orchestrator(settings, registry)
         await orch.initialize_memory()
 
-        async def mock_react_step(user_message, observations, memory_context="", workspace_info=""):
+        async def mock_react_step(user_message, observations, memory_context="", workspace_info="", **kwargs):
             return {"action": "final_answer", "response": "Here's your answer!", "reasoning": "done"}
 
         orch._planner = MagicMock()
@@ -774,6 +780,8 @@ class TestSummaryGeneration:
             database_path=str(db_path),
             anthropic_api_key="test-key",
             use_react=True,
+            react_use_goals=False,
+            react_max_replans=0,
         )
         registry = SkillRegistry()
         registry.discover()
@@ -782,7 +790,7 @@ class TestSummaryGeneration:
 
         call_counter = 0
 
-        async def mock_react_step(user_message, observations, memory_context="", workspace_info=""):
+        async def mock_react_step(user_message, observations, memory_context="", workspace_info="", **kwargs):
             return {"action": "final_answer", "response": f"Answer to: {user_message}", "reasoning": "done"}
 
         async def mock_generate(messages, system="", max_tokens=1024, timeout=30.0):
@@ -825,13 +833,15 @@ class TestSummaryGeneration:
             database_path=str(db_path),
             anthropic_api_key="test-key",
             use_react=True,
+            react_use_goals=False,
+            react_max_replans=0,
         )
         registry = SkillRegistry()
         registry.discover()
         orch = Orchestrator(settings, registry)
         await orch.initialize_memory()
 
-        async def mock_react_step(user_message, observations, memory_context="", workspace_info=""):
+        async def mock_react_step(user_message, observations, memory_context="", workspace_info="", **kwargs):
             return {"action": "final_answer", "response": "done", "reasoning": "done"}
 
         orch._planner = MagicMock()

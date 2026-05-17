@@ -73,6 +73,8 @@ def _make_settings(workspace: Path, db_path: Path) -> Settings:
         database_path=db_path,
         use_react=True,
         react_max_iterations=10,
+        react_use_goals=False,
+        react_max_replans=0,
     )
 
 
@@ -1057,3 +1059,798 @@ class TestBatchReadFile:
         denied_obs = [o for o in run.observations if o.result and o.result.status == "denied"]
         assert len(denied_obs) == 1
         assert "policy" in denied_obs[0].result.error.lower()
+
+
+# ---------------------------------------------------------------------------
+# Hybrid Plan-ReAct tests
+# ---------------------------------------------------------------------------
+
+
+def _make_settings_with_goals(
+    workspace: Path, db_path: Path,
+    use_goals: bool = True, max_replans: int = 2, max_iterations: int = 10,
+) -> Settings:
+    """Create settings with explicit goal/replan configuration."""
+    return Settings(
+        llm_provider="anthropic",
+        anthropic_api_key="test-fake",
+        workspace_root=workspace,
+        database_path=db_path,
+        use_react=True,
+        react_max_iterations=max_iterations,
+        react_use_goals=use_goals,
+        react_max_replans=max_replans,
+    )
+
+
+class TestHybridPlanReact:
+    """Tests for the hybrid Plan → ReAct → Replan architecture."""
+
+    # ---- Backward Compatibility ----
+
+    @pytest.mark.asyncio
+    async def test_pure_react_when_goals_disabled(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """react_use_goals=False → no generate_goals call, no goals in prompt,
+        replan action causes PlannerError."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(populated_workspace, tmp_db_path, use_goals=False)
+        orch = Orchestrator(settings, registry)
+
+        fake = _install_fake_provider(orch, [
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "."}, "reasoning": "explore",
+            }),
+            _react_json({
+                "action": "final_answer",
+                "response": "Done", "reasoning": "done",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "List files")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        assert run.iterations == 2
+        # Verify no generate_goals call was made (only 2 calls: react_step × 2)
+        assert len(fake.calls) == 2
+        # Verify goals not in prompt
+        for call in fake.calls:
+            content = call["messages"][0].content
+            assert "Goals:" not in content
+            system = call.get("system", "")
+            assert "GOAL TRACKING" not in system
+            assert "REPLANNING" not in system
+        # Verify plan has no goals
+        assert run.plan.goals == []
+
+    @pytest.mark.asyncio
+    async def test_replan_action_raises_when_goals_disabled(
+        self, registry: SkillRegistry,
+    ) -> None:
+        """With goals disabled, 'replan' action is invalid → PlannerError."""
+        provider = FakeProvider()
+        planner = Planner(provider=provider, registry=registry)
+        provider.queue(_react_json({"action": "replan", "reasoning": "want to replan"}))
+        with pytest.raises(PlannerError, match="Invalid action"):
+            await planner.react_step("test", [], goals=None, enable_replan=False)
+
+    @pytest.mark.asyncio
+    async def test_goals_only_no_replan(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """use_goals=True, max_replans=0 → goals generated, but replan action invalid."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(
+            populated_workspace, tmp_db_path, use_goals=True, max_replans=0)
+        orch = Orchestrator(settings, registry)
+
+        fake = _install_fake_provider(orch, [
+            # 1. Goal generation
+            json.dumps([
+                {"goal_id": "goal_1", "description": "Explore workspace"},
+                {"goal_id": "goal_2", "description": "Summarize findings"},
+            ]),
+            # 2. react_step → tool call
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "."}, "reasoning": "exploring",
+                "completed_goals": ["goal_1"],
+            }),
+            # 3. react_step → final answer
+            _react_json({
+                "action": "final_answer",
+                "response": "Found files", "reasoning": "done",
+                "completed_goals": ["goal_2"],
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "List files")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        assert len(run.plan.goals) == 2
+        # Goals should be tracked
+        from apps.api.models.run import GoalStatus
+        assert run.plan.goals[0].status == GoalStatus.DONE
+        # Verify REPLANNING not in system prompt (but GOAL TRACKING is)
+        for call in fake.calls[1:]:  # skip goal generation call
+            system = call.get("system", "")
+            assert "GOAL TRACKING" in system
+            assert "REPLANNING" not in system
+
+    # ---- Goal Checklist Tests ----
+
+    @pytest.mark.asyncio
+    async def test_goals_generated_before_loop(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """generate_goals is called before the first react_step."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(populated_workspace, tmp_db_path, use_goals=True)
+        orch = Orchestrator(settings, registry)
+
+        fake = _install_fake_provider(orch, [
+            # 1. Goal generation
+            json.dumps([
+                {"goal_id": "goal_1", "description": "Check workspace"},
+            ]),
+            # 2. react_step → final answer
+            _react_json({
+                "action": "final_answer",
+                "response": "Done", "reasoning": "done",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "What's in the workspace?")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        assert len(run.plan.goals) == 1
+        assert run.plan.goals[0].goal_id == "goal_1"
+        assert run.plan.goals[0].description == "Check workspace"
+
+    @pytest.mark.asyncio
+    async def test_goals_included_in_react_step_prompt(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """Goals checklist string appears in the LLM prompt."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(populated_workspace, tmp_db_path, use_goals=True)
+        orch = Orchestrator(settings, registry)
+
+        fake = _install_fake_provider(orch, [
+            json.dumps([
+                {"goal_id": "goal_1", "description": "Find all files"},
+                {"goal_id": "goal_2", "description": "Read the README"},
+            ]),
+            _react_json({
+                "action": "final_answer",
+                "response": "Done", "reasoning": "done",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Read workspace")
+        run = await _wait_for_run(orch, run.run_id)
+
+        # Check the react_step call (call index 1, after goal gen at index 0)
+        react_call = fake.calls[1]
+        content = react_call["messages"][0].content
+        assert "goal_1" in content
+        assert "goal_2" in content
+        assert "Find all files" in content
+        assert "Read the README" in content
+
+    @pytest.mark.asyncio
+    async def test_goal_sections_not_in_prompt_when_disabled(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """With goals disabled, no GOAL TRACKING or REPLANNING in system prompt."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(populated_workspace, tmp_db_path, use_goals=False)
+        orch = Orchestrator(settings, registry)
+
+        fake = _install_fake_provider(orch, [
+            _react_json({
+                "action": "final_answer",
+                "response": "Done", "reasoning": "done",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Hello")
+        run = await _wait_for_run(orch, run.run_id)
+
+        for call in fake.calls:
+            system = call.get("system", "")
+            assert "GOAL TRACKING" not in system
+            assert "REPLANNING" not in system
+
+    @pytest.mark.asyncio
+    async def test_goal_status_updated_on_completion(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """LLM returns completed_goals → status is DONE."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(populated_workspace, tmp_db_path, use_goals=True)
+        orch = Orchestrator(settings, registry)
+
+        _install_fake_provider(orch, [
+            json.dumps([
+                {"goal_id": "goal_1", "description": "Check workspace"},
+                {"goal_id": "goal_2", "description": "Summarize"},
+            ]),
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "."}, "reasoning": "explore",
+                "completed_goals": ["goal_1"],
+            }),
+            _react_json({
+                "action": "final_answer",
+                "response": "Done", "reasoning": "done",
+                "completed_goals": ["goal_2"],
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Explore workspace")
+        run = await _wait_for_run(orch, run.run_id)
+
+        from apps.api.models.run import GoalStatus
+        assert run.plan.goals[0].status == GoalStatus.DONE
+        assert run.plan.goals[1].status == GoalStatus.DONE
+
+    @pytest.mark.asyncio
+    async def test_goal_skipped(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """LLM returns skipped_goals → status is SKIPPED."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(populated_workspace, tmp_db_path, use_goals=True)
+        orch = Orchestrator(settings, registry)
+
+        _install_fake_provider(orch, [
+            json.dumps([
+                {"goal_id": "goal_1", "description": "Find tests"},
+                {"goal_id": "goal_2", "description": "Run tests"},
+            ]),
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "."}, "reasoning": "looking for tests",
+                "skipped_goals": ["goal_2"],
+                "completed_goals": ["goal_1"],
+            }),
+            _react_json({
+                "action": "final_answer",
+                "response": "No tests found", "reasoning": "done",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Run tests")
+        run = await _wait_for_run(orch, run.run_id)
+
+        from apps.api.models.run import GoalStatus
+        assert run.plan.goals[0].status == GoalStatus.DONE
+        assert run.plan.goals[1].status == GoalStatus.SKIPPED
+
+    @pytest.mark.asyncio
+    async def test_in_progress_marker(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """After first iteration, the first pending goal should be IN_PROGRESS."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(populated_workspace, tmp_db_path, use_goals=True)
+        orch = Orchestrator(settings, registry)
+
+        fake = _install_fake_provider(orch, [
+            json.dumps([
+                {"goal_id": "goal_1", "description": "Step one"},
+                {"goal_id": "goal_2", "description": "Step two"},
+            ]),
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "."}, "reasoning": "doing step one",
+            }),
+            _react_json({
+                "action": "final_answer",
+                "response": "Done", "reasoning": "done",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Do two things")
+        run = await _wait_for_run(orch, run.run_id)
+
+        # After iter 1 (tool call), goal_1 should have been marked IN_PROGRESS
+        # (and goal_2 still PENDING). After iter 2 (final_answer), the run completes.
+        # We can verify the goals in the prompt of the second react_step call
+        react_call_2 = fake.calls[2]  # calls: [goal_gen, react1, react2]
+        content = react_call_2["messages"][0].content
+        assert "→" in content  # IN_PROGRESS marker
+
+    @pytest.mark.asyncio
+    async def test_goal_generation_failure_graceful(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """Goal generation failure → agent continues without goals, no crash."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(populated_workspace, tmp_db_path, use_goals=True)
+        orch = Orchestrator(settings, registry)
+
+        _install_fake_provider(orch, [
+            # Goal generation will get this exception
+            LLMProviderError("API timeout"),
+            # react_step calls
+            _react_json({
+                "action": "final_answer",
+                "response": "Done without goals", "reasoning": "done",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Hello")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        assert run.plan.goals == []
+        assert run.final_response == "Done without goals"
+
+    @pytest.mark.asyncio
+    async def test_empty_goals_for_simple_query(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """LLM returns [] for goals → no goals stored, runs as pure ReAct."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(populated_workspace, tmp_db_path, use_goals=True)
+        orch = Orchestrator(settings, registry)
+
+        _install_fake_provider(orch, [
+            json.dumps([]),  # empty goals
+            _react_json({
+                "action": "final_answer",
+                "response": "Capital is Paris", "reasoning": "direct answer",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "What is the capital of France?")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        assert run.plan.goals == []
+
+    @pytest.mark.asyncio
+    async def test_goals_persisted_to_db(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """Goals survive a _save_run / get_run round-trip."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(populated_workspace, tmp_db_path, use_goals=True)
+        orch = Orchestrator(settings, registry)
+
+        _install_fake_provider(orch, [
+            json.dumps([
+                {"goal_id": "goal_1", "description": "First thing"},
+                {"goal_id": "goal_2", "description": "Second thing"},
+            ]),
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "."}, "reasoning": "working",
+                "completed_goals": ["goal_1"],
+            }),
+            _react_json({
+                "action": "final_answer",
+                "response": "Done", "reasoning": "done",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Do things")
+        run = await _wait_for_run(orch, run.run_id)
+
+        # Re-fetch from DB
+        reloaded = await orch.get_run(run.run_id)
+        assert len(reloaded.plan.goals) == 2
+        assert reloaded.plan.goals[0].goal_id == "goal_1"
+        from apps.api.models.run import GoalStatus
+        assert reloaded.plan.goals[0].status == GoalStatus.DONE
+
+    # ---- Replanning Tests ----
+
+    @pytest.mark.asyncio
+    async def test_llm_requested_replan(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """LLM returns action=replan → replan_goals called, goals updated, loop continues."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(
+            populated_workspace, tmp_db_path, use_goals=True, max_replans=2)
+        orch = Orchestrator(settings, registry)
+
+        _install_fake_provider(orch, [
+            # 1. Goal generation
+            json.dumps([
+                {"goal_id": "goal_1", "description": "Explore workspace"},
+                {"goal_id": "goal_2", "description": "Find tests"},
+                {"goal_id": "goal_3", "description": "Run tests"},
+            ]),
+            # 2. react_step → tool, completes goal_1
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "."}, "reasoning": "exploring",
+                "completed_goals": ["goal_1"],
+            }),
+            # 3. react_step → replan (no test files found)
+            _react_json({
+                "action": "replan", "reasoning": "No test files found",
+                "skipped_goals": ["goal_2", "goal_3"],
+            }),
+            # 4. Replan goal generation
+            json.dumps([
+                {"goal_id": "goal_4", "description": "Read the README"},
+                {"goal_id": "goal_5", "description": "Summarize project"},
+            ]),
+            # 5. react_step → tool with new goals
+            _react_json({
+                "action": "tool", "tool": "read_file",
+                "args": {"path": "README.md"}, "reasoning": "reading README",
+                "completed_goals": ["goal_4"],
+            }),
+            # 6. react_step → final answer
+            _react_json({
+                "action": "final_answer",
+                "response": "Project is a test app", "reasoning": "done",
+                "completed_goals": ["goal_5"],
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Run the tests")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        assert run.plan.replan_count == 1
+        # Should have preserved goal_1 (DONE) and added goal_4, goal_5
+        goal_ids = [g.goal_id for g in run.plan.goals]
+        assert "goal_1" in goal_ids
+        assert "goal_4" in goal_ids
+        assert "goal_5" in goal_ids
+
+    @pytest.mark.asyncio
+    async def test_replan_preserves_completed_goals(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """After replan, completed goals are preserved, new goals appended."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(
+            populated_workspace, tmp_db_path, use_goals=True, max_replans=1)
+        orch = Orchestrator(settings, registry)
+
+        _install_fake_provider(orch, [
+            json.dumps([
+                {"goal_id": "goal_1", "description": "Step A"},
+                {"goal_id": "goal_2", "description": "Step B"},
+            ]),
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "."}, "reasoning": "step A",
+                "completed_goals": ["goal_1"],
+            }),
+            _react_json({
+                "action": "replan", "reasoning": "Step B is wrong",
+                "skipped_goals": ["goal_2"],
+            }),
+            json.dumps([
+                {"goal_id": "goal_3", "description": "Step C"},
+            ]),
+            _react_json({
+                "action": "final_answer",
+                "response": "Done", "reasoning": "done",
+                "completed_goals": ["goal_3"],
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Do tasks")
+        run = await _wait_for_run(orch, run.run_id)
+
+        from apps.api.models.run import GoalStatus
+        preserved = [g for g in run.plan.goals if g.status == GoalStatus.DONE]
+        assert len(preserved) >= 1
+        assert any(g.goal_id == "goal_1" for g in preserved)
+
+    @pytest.mark.asyncio
+    async def test_replan_count_increments(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """After replan, run.plan.replan_count == 1."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(
+            populated_workspace, tmp_db_path, use_goals=True, max_replans=2)
+        orch = Orchestrator(settings, registry)
+
+        _install_fake_provider(orch, [
+            json.dumps([{"goal_id": "goal_1", "description": "First"}]),
+            _react_json({"action": "replan", "reasoning": "wrong plan"}),
+            json.dumps([{"goal_id": "goal_2", "description": "Second"}]),
+            _react_json({
+                "action": "final_answer",
+                "response": "Done", "reasoning": "done",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Task")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.plan.replan_count == 1
+
+    @pytest.mark.asyncio
+    async def test_replan_limit_enforced(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """max_replans=1, 2 replan requests → second returns exhausted with warning."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(
+            populated_workspace, tmp_db_path, use_goals=True, max_replans=1)
+        orch = Orchestrator(settings, registry)
+
+        _install_fake_provider(orch, [
+            json.dumps([{"goal_id": "goal_1", "description": "A"}]),
+            # First replan — allowed
+            _react_json({"action": "replan", "reasoning": "bad plan"}),
+            json.dumps([{"goal_id": "goal_2", "description": "B"}]),
+            # Second replan — should be rejected (limit=1)
+            _react_json({"action": "replan", "reasoning": "still bad"}),
+            # After exhausted, should continue with a tool or final_answer
+            _react_json({
+                "action": "final_answer",
+                "response": "Done with limits", "reasoning": "done",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Task")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        assert run.plan.replan_count == 1  # only one replan executed
+
+    @pytest.mark.asyncio
+    async def test_auto_replan_on_majority_skipped(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """3 of 4 goals SKIPPED → auto-replan triggers."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(
+            populated_workspace, tmp_db_path, use_goals=True, max_replans=1)
+        orch = Orchestrator(settings, registry)
+
+        _install_fake_provider(orch, [
+            json.dumps([
+                {"goal_id": "goal_1", "description": "A"},
+                {"goal_id": "goal_2", "description": "B"},
+                {"goal_id": "goal_3", "description": "C"},
+                {"goal_id": "goal_4", "description": "D"},
+            ]),
+            # Skip 3 of 4 goals in one tool call
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "."}, "reasoning": "checking",
+                "skipped_goals": ["goal_1", "goal_2", "goal_3"],
+            }),
+            # Auto-replan should fire — this is the replan response
+            json.dumps([
+                {"goal_id": "goal_5", "description": "New plan"},
+            ]),
+            _react_json({
+                "action": "final_answer",
+                "response": "Done", "reasoning": "done",
+                "completed_goals": ["goal_5"],
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Complex task")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        assert run.plan.replan_count == 1
+
+    @pytest.mark.asyncio
+    async def test_auto_replan_at_halfway_with_no_progress(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """Past halfway on iterations with zero goals DONE → auto-replan."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(
+            populated_workspace, tmp_db_path, use_goals=True, max_replans=1, max_iterations=6)
+        orch = Orchestrator(settings, registry)
+
+        responses = [
+            json.dumps([
+                {"goal_id": "goal_1", "description": "Hard thing"},
+                {"goal_id": "goal_2", "description": "Another hard thing"},
+            ]),
+        ]
+        # 3 tool calls with no goals completed (iterations 1-3 → halfway of 6)
+        for i in range(3):
+            responses.append(_react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": f"path_{i}"}, "reasoning": "searching",
+            }))
+        # Auto-replan fires after iteration 3 (>= 6/2)
+        responses.append(json.dumps([
+            {"goal_id": "goal_3", "description": "Easier thing"},
+        ]))
+        responses.append(_react_json({
+            "action": "final_answer",
+            "response": "Done", "reasoning": "done",
+            "completed_goals": ["goal_3"],
+        }))
+
+        _install_fake_provider(orch, responses)
+
+        run = await orch.handle_message("sess_1", "Hard task")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        assert run.plan.replan_count == 1
+
+    @pytest.mark.asyncio
+    async def test_no_auto_replan_when_making_progress(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """Past halfway with goals DONE → no auto-replan."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(
+            populated_workspace, tmp_db_path, use_goals=True, max_replans=1, max_iterations=6)
+        orch = Orchestrator(settings, registry)
+
+        responses = [
+            json.dumps([
+                {"goal_id": "goal_1", "description": "First"},
+                {"goal_id": "goal_2", "description": "Second"},
+                {"goal_id": "goal_3", "description": "Third"},
+            ]),
+        ]
+        # Complete goal_1 and goal_2 before halfway
+        responses.append(_react_json({
+            "action": "tool", "tool": "list_files",
+            "args": {"path": "."}, "reasoning": "first",
+            "completed_goals": ["goal_1"],
+        }))
+        responses.append(_react_json({
+            "action": "tool", "tool": "list_files",
+            "args": {"path": "src"}, "reasoning": "second",
+            "completed_goals": ["goal_2"],
+        }))
+        responses.append(_react_json({
+            "action": "tool", "tool": "read_file",
+            "args": {"path": "README.md"}, "reasoning": "third",
+            "completed_goals": ["goal_3"],
+        }))
+        responses.append(_react_json({
+            "action": "final_answer",
+            "response": "All done", "reasoning": "done",
+        }))
+
+        _install_fake_provider(orch, responses)
+
+        run = await orch.handle_message("sess_1", "Three step task")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        assert run.plan.replan_count == 0  # No replan needed
+
+    @pytest.mark.asyncio
+    async def test_replan_disabled_via_config(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """max_replans=0 → LLM replan action treated as PlannerError, run fails."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(
+            populated_workspace, tmp_db_path, use_goals=True, max_replans=0)
+        orch = Orchestrator(settings, registry)
+
+        _install_fake_provider(orch, [
+            json.dumps([{"goal_id": "goal_1", "description": "A"}]),
+            _react_json({"action": "replan", "reasoning": "want to replan"}),
+        ])
+
+        run = await orch.handle_message("sess_1", "Task")
+        run = await _wait_for_run(orch, run.run_id)
+
+        # replan action with enable_replan=False causes PlannerError → run fails
+        assert run.status == RunStatus.FAILED
+        assert "Invalid action" in (run.final_response or "")
+
+    @pytest.mark.asyncio
+    async def test_replan_failure_graceful(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """replan_goals raises exception → continues with existing goals."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(
+            populated_workspace, tmp_db_path, use_goals=True, max_replans=2)
+        orch = Orchestrator(settings, registry)
+
+        _install_fake_provider(orch, [
+            json.dumps([{"goal_id": "goal_1", "description": "A"}]),
+            _react_json({"action": "replan", "reasoning": "bad plan"}),
+            # Replan call → error (exception)
+            LLMProviderError("API error during replan"),
+            # Should continue — next react_step
+            _react_json({
+                "action": "final_answer",
+                "response": "Done anyway", "reasoning": "done",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Task")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        assert run.plan.goals[0].goal_id == "goal_1"
+
+    @pytest.mark.asyncio
+    async def test_observations_preserved_across_replan(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """After replan, all previous observations still visible."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(
+            populated_workspace, tmp_db_path, use_goals=True, max_replans=1)
+        orch = Orchestrator(settings, registry)
+
+        _install_fake_provider(orch, [
+            json.dumps([{"goal_id": "goal_1", "description": "A"}]),
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "."}, "reasoning": "first obs",
+                "completed_goals": ["goal_1"],
+            }),
+            _react_json({"action": "replan", "reasoning": "changing plan"}),
+            json.dumps([{"goal_id": "goal_2", "description": "B"}]),
+            _react_json({
+                "action": "final_answer",
+                "response": "Done", "reasoning": "done",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Task")
+        run = await _wait_for_run(orch, run.run_id)
+
+        # The list_files observation should still be present
+        tool_obs = [o for o in run.observations if o.tool == "list_files"]
+        assert len(tool_obs) == 1
+
+    @pytest.mark.asyncio
+    async def test_replan_goal_ids_continue_sequence(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """After completing goal_1 and goal_2, new goals start at goal_3."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings_with_goals(
+            populated_workspace, tmp_db_path, use_goals=True, max_replans=1)
+        orch = Orchestrator(settings, registry)
+
+        _install_fake_provider(orch, [
+            json.dumps([
+                {"goal_id": "goal_1", "description": "A"},
+                {"goal_id": "goal_2", "description": "B"},
+            ]),
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "."}, "reasoning": "doing A",
+                "completed_goals": ["goal_1", "goal_2"],
+            }),
+            _react_json({"action": "replan", "reasoning": "need more"}),
+            # Replan returns goals with continued IDs
+            json.dumps([
+                {"goal_id": "goal_3", "description": "C"},
+            ]),
+            _react_json({
+                "action": "final_answer",
+                "response": "Done", "reasoning": "done",
+                "completed_goals": ["goal_3"],
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Multi-step task")
+        run = await _wait_for_run(orch, run.run_id)
+
+        goal_ids = [g.goal_id for g in run.plan.goals]
+        assert "goal_1" in goal_ids
+        assert "goal_3" in goal_ids
