@@ -24,6 +24,7 @@ Key features:
 - **Three memory layers** — durable facts, episodic task history, and auto-generated conversation summaries
 - **Saga compensation** — reject a step and all previous write operations are automatically rolled back
 - **Budget-aware planning** — the agent sees its iteration budget, prefers batch operations, and wraps up gracefully when budget is low instead of hitting the hard limit; a live progress bar in the UI shows budget consumption
+- **Graceful max-iterations degradation** — when the agent exhausts its iteration budget, it synthesizes a direct answer from collected evidence instead of just summarizing what actions were taken; the run completes successfully if evidence is sufficient
 - **Error classification** — transient errors are retried with backoff, permanent errors go straight to the LLM, side-effect errors are surfaced to the user
 - **LLM-provider-agnostic** — swap Claude for Gemini (or add your own) without touching core code
 - **Manifest-driven tool extensibility** — add a tool without rewriting the core agent loop
@@ -458,7 +459,7 @@ The test suite covers:
 | `test_policy.py` | Path validation, shell blocking, injection detection, risk classification | 38 |
 | `test_providers.py` | Anthropic/Gemini provider translation, factory, JSON extraction | 37 |
 | `test_tools.py` | Each V1 tool in isolation (including batch read_file) | 42 |
-| `test_react.py` | ReAct loop, hybrid Plan-ReAct, goal tracking, replanning, saga compensation, error classification, loop detection, approval flow, batch reads, budget awareness | 59 |
+| `test_react.py` | ReAct loop, hybrid Plan-ReAct, goal tracking, replanning, saga compensation, error classification, loop detection, approval flow, batch reads, budget awareness, graceful max-iterations degradation | 63 |
 | `test_planner.py` | Plan parsing, provider error handling, summary generation | 13 |
 | `test_memory.py` | Memory CRUD, keyword search, retrieval, export | 13 |
 | `test_integration.py` | End-to-end legacy plan-and-execute path, provider switching | 8 |
@@ -503,7 +504,7 @@ mini-openclaw/
 │   └── models/            #   Pydantic models (Run, ToolResult, ErrorKind, etc.)
 ├── apps/web/              # React + TypeScript frontend
 │   └── src/components/    #   ChatPanel, PlanPreview, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser
-├── tests/                 # pytest test suite (254 tests)
+├── tests/                 # pytest test suite (258 tests)
 ├── scripts/               # Demo seeding and memory export
 ├── docs/                  # Architecture and design documentation
 └── requirements.txt       # Python dependencies
