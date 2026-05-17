@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     use_react: bool = True
     react_max_iterations: int = 10
     react_duplicate_cap: int = 3       # block after N identical tool+args calls
+    react_use_goals: bool = False      # False = pure ReAct (no goals, no replanning)
+    react_max_replans: int = 2         # 0 = goals but no replanning; >= 1 = full hybrid
 
     from pydantic import model_validator as _model_validator
 
@@ -65,6 +67,9 @@ class Settings(BaseSettings):
         # Duplicate cap must be at least 2 (1 would block on first retry)
         dup = max(2, self.react_duplicate_cap)
         object.__setattr__(self, "react_duplicate_cap", dup)
+        # Replan cap: 0..5
+        replans = max(0, min(5, self.react_max_replans))
+        object.__setattr__(self, "react_max_replans", replans)
         return self
 
     # ----- Tool limits -----

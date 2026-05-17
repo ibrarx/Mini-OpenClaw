@@ -79,12 +79,29 @@ class PlanStep(BaseModel):
     reasoning: str | None = None
 
 
+class GoalStatus(str, Enum):
+    """Status of a single goal in the hybrid Plan-ReAct checklist."""
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    DONE = "done"
+    SKIPPED = "skipped"
+
+
+class Goal(BaseModel):
+    """One goal in the ReAct checklist."""
+    goal_id: str             # "goal_1", "goal_2", etc.
+    description: str         # What to achieve (not which tool to use)
+    status: GoalStatus = GoalStatus.PENDING
+
+
 class Plan(BaseModel):
     task_type: str = "tool_needed"
     confidence: float = 0.0
     reasoning: str = ""
     steps: list[PlanStep] = Field(default_factory=list)
     direct_response: str | None = None
+    goals: list[Goal] = Field(default_factory=list)        # empty when goals disabled
+    replan_count: int = 0                                   # stays 0 when replanning disabled
 
 
 class Observation(BaseModel):

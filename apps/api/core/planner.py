@@ -115,6 +115,89 @@ To give a final answer:
 """
 
 
+# ---------------------------------------------------------------------------
+# Goal / replan prompt constants (appended at runtime, never modify above)
+# ---------------------------------------------------------------------------
+
+GOAL_SYSTEM_PROMPT = """You are a planning assistant for Mini-OpenClaw, a local AI agent.
+Given a user request, break it down into a short checklist of goals (2-6 items).
+
+Rules:
+- Goals describe WHAT to achieve, not HOW (no tool names, no implementation details)
+- Order goals logically — later goals may depend on earlier ones
+- Each goal should be completable in 1-3 tool calls
+- Keep descriptions short (one sentence each)
+- The total number of goals must not exceed {max_goals}
+- For simple requests (single-step), return just 1-2 goals
+- For direct questions that need no tools, return an empty array []
+
+Available tools for context (do NOT reference these in goals):
+{tools_json}
+
+Respond with ONLY a valid JSON array (no markdown, no backticks):
+[
+  {{"goal_id": "goal_1", "description": "..."}},
+  {{"goal_id": "goal_2", "description": "..."}}
+]
+
+For direct questions needing no tools, respond with: []
+"""
+
+REPLAN_SYSTEM_PROMPT = """You are revising the goal checklist for Mini-OpenClaw, a local AI agent.
+The original plan didn't match reality. You now have observation data from tool calls already executed.
+
+Here are the goals that were COMPLETED (keep these, do not regenerate them):
+{completed_goals}
+
+Here is what the agent has observed so far:
+{observations_summary}
+
+Given the original user request and what we now know, generate a REVISED checklist of remaining goals.
+
+Rules:
+- Do NOT include goals that are already completed (listed above)
+- Goals describe WHAT to achieve, not HOW
+- Account for what the observations revealed — adjust the plan to reality
+- The total number of NEW goals must not exceed {max_goals}
+- If the task is actually done based on observations, return an empty array []
+
+Available tools for context (do NOT reference these in goals):
+{tools_json}
+
+Respond with ONLY a valid JSON array of NEW goals (no markdown, no backticks):
+[
+  {{"goal_id": "goal_N", "description": "..."}},
+  {{"goal_id": "goal_N+1", "description": "..."}}
+]
+"""
+
+REACT_GOALS_SECTION = """
+GOAL TRACKING:
+If a goal checklist is provided, use it to stay on track:
+- Work through goals roughly in order
+- Don't get sidetracked on things not in the goals
+- If a goal is already marked done (✓), don't redo the work
+- If a goal becomes unnecessary based on what you've learned, mark it as skipped
+- Include "completed_goals" in your response when you finish a goal
+- Include "skipped_goals" in your response when you skip a goal
+- Goals are a guide, not a constraint — deviate if you discover something unexpected that matters
+"""
+
+REACT_REPLAN_SECTION = """
+REPLANNING:
+If you discover that the remaining goals are WRONG or IRRELEVANT based on what you've observed
+(e.g., the workspace structure is completely different than expected, the task requirements
+changed based on file contents), you can request a replan:
+  {{"action": "replan", "reasoning": "Why the current goals are wrong", "completed_goals": ["goal_1"], "skipped_goals": ["goal_2"]}}
+
+Only request a replan when the goals are fundamentally misaligned with reality — NOT just because
+one step was harder than expected. Replanning costs budget but no iteration.
+
+To request a replan (when goals no longer match reality):
+{{"action": "replan", "reasoning": "Why goals need to change", "completed_goals": [...], "skipped_goals": [...]}}
+"""
+
+
 class Planner:
     """Structured planner that turns user intent into a JSON plan.
 
@@ -215,6 +298,8 @@ class Planner:
         observations: list[dict[str, Any]],
         memory_context: str = "No relevant memories.",
         workspace_info: str = "",
+        goals: list[dict[str, str]] | None = None,       # None when goals disabled
+        enable_replan: bool = False,                       # controls prompt + action validation
     ) -> dict[str, Any]:
         """Run one ReAct iteration: reason about observations, pick next action.
 
@@ -223,6 +308,7 @@ class Planner:
         dict with either:
           {"action": "tool", "tool": "...", "args": {...}, "reasoning": "..."}
           {"action": "final_answer", "response": "...", "reasoning": "..."}
+          {"action": "replan", "reasoning": "...", ...} (only when enable_replan=True)
 
         Raises
         ------
@@ -249,6 +335,12 @@ class Planner:
         if workspace_info:
             system += f"\n\nWorkspace info:\n{workspace_info}"
 
+        # FLAG-GATED: Conditionally add goal tracking instructions
+        if goals:
+            system += REACT_GOALS_SECTION
+        if goals and enable_replan:
+            system += REACT_REPLAN_SECTION
+
         # Build the user message with observations
         if observations:
             obs_text = "\n".join(
@@ -260,10 +352,28 @@ class Planner:
         else:
             obs_text = "  None yet — this is the first step."
 
+        # FLAG-GATED: Include goals checklist in user content only when provided
+        goals_str = ""
+        if goals:
+            goal_lines = []
+            for g in goals:
+                status = g.get("status", "pending")
+                if status == "done":
+                    marker = "✓"
+                elif status == "in_progress":
+                    marker = "→"
+                elif status == "skipped":
+                    marker = "⊘"
+                else:
+                    marker = " "
+                goal_lines.append(f"  [{marker}] {g['goal_id']}: {g['description']}")
+            goals_str = "\n\nGoals:\n" + "\n".join(goal_lines) + "\n  (✓=done, →=in progress, ⊘=skipped)"
+
         content = (
             f"Original request: {user_message}\n"
             f"{workspace_info}\n\n"
-            f"Observations so far:\n{obs_text}\n\n"
+            f"Observations so far:\n{obs_text}"
+            f"{goals_str}\n\n"
             f"What should I do next?"
         )
 
@@ -282,12 +392,16 @@ class Planner:
                 f"Provider returned non-object JSON: {type(result).__name__}"
             )
 
-        # Validate structure
+        # Validate structure — conditionally accept "replan"
+        valid_actions = {"tool", "final_answer"}
+        if enable_replan:
+            valid_actions.add("replan")
+
         action = result.get("action")
-        if action not in ("tool", "final_answer"):
+        if action not in valid_actions:
             raise PlannerError(
                 f"Invalid action in ReAct response: {action!r}. "
-                f"Expected 'tool' or 'final_answer'."
+                f"Expected one of {valid_actions}."
             )
 
         if action == "tool":
@@ -295,12 +409,130 @@ class Planner:
             result.setdefault("args", {})
             result.setdefault("reasoning", "")
             result.setdefault("user_announcement", "")
-        else:
+        elif action == "replan":
+            result.setdefault("reasoning", "")
+            result.setdefault("completed_goals", [])
+            result.setdefault("skipped_goals", [])
+        else:  # final_answer
             result.setdefault("response", "")
             result.setdefault("reasoning", "")
 
         logger.info("ReAct step: action=%s tool=%s", action, result.get("tool", "N/A"))
         return result
+
+    # ------------------------------------------------------------------
+    # Goal generation — Phase 1 of hybrid Plan-ReAct
+    # ------------------------------------------------------------------
+
+    async def generate_goals(
+        self,
+        user_message: str,
+        memory_context: str = "No relevant memories.",
+        workspace_info: str = "",
+        max_iterations: int = 10,
+    ) -> list[dict[str, str]]:
+        """Generate a goal checklist from a user message.
+
+        Returns a list of {"goal_id": ..., "description": ...} dicts,
+        or an empty list on any failure.
+        """
+        if self._provider is None:
+            return []
+
+        tools_json = json.dumps(
+            self._registry.get_planner_descriptions() if self._registry else [],
+            indent=2,
+        )
+        max_goals = min(6, max(1, max_iterations // 2))
+        system = GOAL_SYSTEM_PROMPT.format(tools_json=tools_json, max_goals=max_goals)
+        if workspace_info:
+            system += f"\n\nWorkspace info:\n{workspace_info}"
+
+        try:
+            response = await self._provider.generate(
+                messages=[LLMMessage(role="user", content=user_message)],
+                system=system,
+                max_tokens=1024,
+                timeout=30.0,
+            )
+            text = (response.text or "").strip()
+            # Strip markdown fences if present
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+
+            parsed = json.loads(text)
+            if not isinstance(parsed, list):
+                logger.warning("Goal generation returned non-list: %s", type(parsed).__name__)
+                return []
+            return parsed
+        except Exception as exc:
+            logger.warning("Goal generation failed: %s", exc)
+            return []
+
+    # ------------------------------------------------------------------
+    # Replanning — Phase 3 of hybrid Plan-ReAct
+    # ------------------------------------------------------------------
+
+    async def replan_goals(
+        self,
+        user_message: str,
+        completed_goals: list[dict[str, str]],
+        observations_summary: str,
+        memory_context: str = "No relevant memories.",
+        workspace_info: str = "",
+        remaining_budget: int = 5,
+    ) -> list[dict[str, str]]:
+        """Regenerate the goal checklist, preserving completed goals.
+
+        Returns a list of NEW {"goal_id": ..., "description": ...} dicts,
+        or an empty list on failure.
+        """
+        if self._provider is None:
+            return []
+
+        tools_json = json.dumps(
+            self._registry.get_planner_descriptions() if self._registry else [],
+            indent=2,
+        )
+        max_goals = min(6, max(1, remaining_budget // 2))
+        completed_text = "\n".join(
+            f"  - {g['goal_id']}: {g['description']}" for g in completed_goals
+        ) if completed_goals else "  (none)"
+
+        system = REPLAN_SYSTEM_PROMPT.format(
+            completed_goals=completed_text,
+            observations_summary=observations_summary,
+            max_goals=max_goals,
+            tools_json=tools_json,
+        )
+        if workspace_info:
+            system += f"\n\nWorkspace info:\n{workspace_info}"
+
+        try:
+            response = await self._provider.generate(
+                messages=[LLMMessage(role="user", content=user_message)],
+                system=system,
+                max_tokens=1024,
+                timeout=30.0,
+            )
+            text = (response.text or "").strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+
+            parsed = json.loads(text)
+            if not isinstance(parsed, list):
+                logger.warning("Replan returned non-list: %s", type(parsed).__name__)
+                return []
+            return parsed
+        except Exception as exc:
+            logger.warning("Replan failed: %s", exc)
+            return []
 
     @staticmethod
     def _truncate_observation(obs: dict[str, Any]) -> str:

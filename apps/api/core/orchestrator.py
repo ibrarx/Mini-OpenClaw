@@ -28,7 +28,7 @@ from apps.api.memory.manager import MemoryManager
 from apps.api.memory.retrieval import MemoryRetrieval
 from apps.api.memory.vector_store import VectorStore
 from apps.api.models.run import (
-    Observation, Plan, PlanStep, Run, RunStatus, StepStatus, RiskLevel, ToolResult,
+    Goal, GoalStatus, Observation, Plan, PlanStep, Run, RunStatus, StepStatus, RiskLevel, ToolResult,
 )
 from apps.api.providers import build_provider
 from apps.api.providers.errors import ProviderConfigError
@@ -142,7 +142,12 @@ class Orchestrator:
     # ------------------------------------------------------------------
 
     async def _react_loop(self, run: Run) -> None:
-        """Iterative ReAct loop: think → act → observe, up to max_iterations."""
+        """Iterative ReAct loop: think → act → observe, up to max_iterations.
+
+        When ``react_use_goals`` is enabled, generates a goal checklist before
+        the loop and tracks progress. When ``react_max_replans >= 1``, allows
+        the agent (or auto-triggers) to regenerate goals mid-loop.
+        """
         memory_context = await self._retrieval.get_context_for_planner(
             message=run.user_message, workspace_id=run.workspace_id)
         workspace_info = f"Workspace root: {self._workspace}"
@@ -153,6 +158,32 @@ class Orchestrator:
 
         # Loop detection: track consecutive duplicate actions
         duplicate_cap = self._settings.react_duplicate_cap
+
+        # FLAG-GATED: Determine goal/replan mode
+        goals_enabled = self._settings.react_use_goals
+        replan_enabled = goals_enabled and self._settings.react_max_replans > 0
+
+        # FLAG-GATED: Phase 1 — Generate goal checklist
+        if goals_enabled:
+            try:
+                raw_goals = await self._planner.generate_goals(
+                    user_message=run.user_message,
+                    memory_context=memory_context,
+                    workspace_info=workspace_info,
+                    max_iterations=run.max_iterations,
+                )
+                goals = [
+                    Goal(goal_id=g["goal_id"], description=g["description"])
+                    for g in raw_goals
+                    if "goal_id" in g and "description" in g
+                ]
+                if goals:
+                    run.plan.goals = goals
+                    await self._save_run(run)
+                    logger.info("Run %s: generated %d goals", run.run_id, len(goals))
+            except Exception as exc:
+                logger.warning("Goal generation failed (non-fatal): %s", exc)
+                # Continue without goals — falls back to pure ReAct behavior
 
         while run.iterations < run.max_iterations:
             run.iterations += 1
@@ -172,8 +203,6 @@ class Orchestrator:
             ]
 
             # Loop detection: check if we're stuck repeating the same action.
-            # If the last duplicate_cap observations all used the same tool+args,
-            # inject a warning so the LLM is forced to try something different.
             if len(run.observations) >= duplicate_cap:
                 recent = run.observations[-duplicate_cap:]
                 if (
@@ -200,6 +229,14 @@ class Orchestrator:
                         ),
                     })
 
+            # FLAG-GATED: Build goals for planner (None when disabled)
+            goals_for_planner = None
+            if goals_enabled and run.plan and run.plan.goals:
+                goals_for_planner = [
+                    {"goal_id": g.goal_id, "description": g.description, "status": g.status.value}
+                    for g in run.plan.goals
+                ]
+
             # THINK: ask planner for next action
             try:
                 decision = await self._planner.react_step(
@@ -207,12 +244,13 @@ class Orchestrator:
                     observations=obs_for_planner,
                     memory_context=memory_context,
                     workspace_info=workspace_info,
+                    goals=goals_for_planner,                    # None when goals disabled
+                    enable_replan=replan_enabled,               # False when replanning disabled
                 )
             except PlannerError:
                 raise  # let _process_run handle it
             except Exception as exc:
                 logger.error("ReAct planner error at iteration %d: %s", run.iterations, exc, exc_info=True)
-                # Generate summary of partial results
                 run.final_response = await self._summarize_partial(run)
                 run.final_response += f"\n\n(Stopped: planner error at iteration {run.iterations})"
                 run.status = RunStatus.FAILED
@@ -226,6 +264,16 @@ class Orchestrator:
 
             # FINAL ANSWER
             if action == "final_answer":
+                # FLAG-GATED: Update goal statuses from final_answer response
+                if goals_enabled and run.plan and run.plan.goals:
+                    completed = decision.get("completed_goals", [])
+                    skipped = decision.get("skipped_goals", [])
+                    for goal in run.plan.goals:
+                        if goal.goal_id in completed:
+                            goal.status = GoalStatus.DONE
+                        elif goal.goal_id in skipped:
+                            goal.status = GoalStatus.SKIPPED
+
                 obs = Observation(
                     step_id=step_id, iteration=run.iterations,
                     reasoning=decision.get("reasoning", ""),
@@ -240,9 +288,30 @@ class Orchestrator:
                 await self._audit.log("run_completed", run_id=run.run_id,
                                        data={"iterations": run.iterations})
                 event_emitter.emit(run.run_id, "run_completed")
-                # Store episode in memory for future context
                 await self._store_episode_for_run(run)
                 return
+
+            # FLAG-GATED: REPLAN — agent requests new goals
+            if action == "replan":
+                # This can only happen when enable_replan=True (otherwise PlannerError)
+                replan_result = await self._handle_replan(run, decision, memory_context, workspace_info)
+                if replan_result == "continue":
+                    # Replan does NOT consume an iteration — undo the increment
+                    run.iterations -= 1
+                    continue
+                elif replan_result == "exhausted":
+                    obs_for_planner.append({
+                        "tool": "_system",
+                        "status": "warning",
+                        "output": None,
+                        "error": (
+                            f"REPLAN LIMIT REACHED: You have replanned {run.plan.replan_count} times "
+                            f"(max {self._settings.react_max_replans}). Work with the current goals."
+                        ),
+                    })
+                    # Undo iteration increment — replan overhead shouldn't cost iterations
+                    run.iterations -= 1
+                    continue
 
             # TOOL ACTION
             tool_name = decision.get("tool", "")
@@ -489,6 +558,28 @@ class Orchestrator:
                                          "iteration": run.iterations})
             event_emitter.emit(run.run_id, "step_completed")
 
+            # FLAG-GATED: Update goal statuses from LLM response
+            if goals_enabled and run.plan and run.plan.goals:
+                completed = decision.get("completed_goals", [])
+                skipped = decision.get("skipped_goals", [])
+                for goal in run.plan.goals:
+                    if goal.goal_id in completed:
+                        goal.status = GoalStatus.DONE
+                    elif goal.goal_id in skipped:
+                        goal.status = GoalStatus.SKIPPED
+
+                # Mark first pending goal as in_progress
+                for goal in run.plan.goals:
+                    if goal.status == GoalStatus.PENDING:
+                        goal.status = GoalStatus.IN_PROGRESS
+                        break
+
+                await self._save_run(run)
+
+                # FLAG-GATED: Auto-replan check (only when replanning is enabled)
+                if replan_enabled:
+                    await self._check_auto_replan(run, memory_context, workspace_info)
+
         # Max iterations reached
         logger.warning("Run %s: max iterations (%d) reached", run.run_id, run.max_iterations)
         run.final_response = await self._summarize_partial(run)
@@ -501,6 +592,133 @@ class Orchestrator:
                                data={"reason": "max_iterations_exceeded",
                                      "iterations": run.iterations})
         event_emitter.emit(run.run_id, "run_failed")
+
+    # ------------------------------------------------------------------
+    # Hybrid Plan-ReAct helpers (flag-gated)
+    # ------------------------------------------------------------------
+
+    async def _handle_replan(
+        self, run: Run, decision: dict, memory_context: str, workspace_info: str,
+    ) -> str:
+        """Handle a replan request. Returns 'continue', 'exhausted', or 'disabled'."""
+        if not self._settings.react_use_goals or self._settings.react_max_replans <= 0:
+            return "disabled"
+
+        if run.plan.replan_count >= self._settings.react_max_replans:
+            logger.warning("Run %s: replan limit reached (%d)", run.run_id, run.plan.replan_count)
+            return "exhausted"
+
+        # Apply any completed/skipped goals from the replan request
+        completed = decision.get("completed_goals", [])
+        skipped = decision.get("skipped_goals", [])
+        if run.plan and run.plan.goals:
+            for goal in run.plan.goals:
+                if goal.goal_id in completed:
+                    goal.status = GoalStatus.DONE
+                elif goal.goal_id in skipped:
+                    goal.status = GoalStatus.SKIPPED
+
+        await self._execute_replan(run, memory_context, workspace_info)
+        return "continue"
+
+    async def _check_auto_replan(
+        self, run: Run, memory_context: str, workspace_info: str,
+    ) -> None:
+        """Auto-trigger replan if goals are clearly wrong. Only called when replanning enabled."""
+        if not run.plan or not run.plan.goals:
+            return
+        if run.plan.replan_count >= self._settings.react_max_replans:
+            return
+
+        goals = run.plan.goals
+        total = len(goals)
+        if total == 0:
+            return
+
+        done_count = sum(1 for g in goals if g.status == GoalStatus.DONE)
+        skipped_count = sum(1 for g in goals if g.status == GoalStatus.SKIPPED)
+
+        # Trigger 1: More than half the goals are SKIPPED
+        if skipped_count > total / 2:
+            logger.info("Run %s: auto-replan — %d/%d goals skipped", run.run_id, skipped_count, total)
+            await self._execute_replan(run, memory_context, workspace_info)
+            return
+
+        # Trigger 2: Past halfway on iterations, zero goals DONE
+        halfway = run.max_iterations / 2
+        if run.iterations >= halfway and done_count == 0 and total > 1:
+            logger.info("Run %s: auto-replan — past halfway with 0 goals done", run.run_id)
+            await self._execute_replan(run, memory_context, workspace_info)
+            return
+
+    async def _execute_replan(
+        self, run: Run, memory_context: str, workspace_info: str,
+    ) -> None:
+        """Regenerate goals, preserving completed ones and replacing the rest."""
+        if not self._planner:
+            return
+
+        completed_goals = [
+            {"goal_id": g.goal_id, "description": g.description}
+            for g in run.plan.goals
+            if g.status == GoalStatus.DONE
+        ]
+
+        obs_summary_parts = []
+        for o in run.observations:
+            if o.tool and o.result:
+                status = o.result.status
+                output_preview = json.dumps(o.result.output or o.result.error, default=str)[:300]
+                obs_summary_parts.append(f"- {o.tool}: {status} → {output_preview}")
+        observations_summary = "\n".join(obs_summary_parts) if obs_summary_parts else "No observations yet."
+
+        remaining_budget = run.max_iterations - run.iterations
+
+        try:
+            new_raw_goals = await self._planner.replan_goals(
+                user_message=run.user_message,
+                completed_goals=completed_goals,
+                observations_summary=observations_summary,
+                memory_context=memory_context,
+                workspace_info=workspace_info,
+                remaining_budget=remaining_budget,
+            )
+
+            if not new_raw_goals and not completed_goals:
+                # Replan produced nothing and nothing is completed — keep existing goals
+                logger.warning("Run %s: replan returned empty goals, keeping existing plan", run.run_id)
+                return
+
+            # Continue goal_id numbering from where we left off
+            max_existing = 0
+            for g in run.plan.goals:
+                try:
+                    num = int(g.goal_id.split("_")[-1])
+                    max_existing = max(max_existing, num)
+                except (ValueError, IndexError):
+                    pass
+
+            new_goals = []
+            for i, g in enumerate(new_raw_goals):
+                if "description" in g:
+                    goal_id = g.get("goal_id", f"goal_{max_existing + i + 1}")
+                    new_goals.append(Goal(goal_id=goal_id, description=g["description"]))
+
+            preserved = [g for g in run.plan.goals if g.status == GoalStatus.DONE]
+            run.plan.goals = preserved + new_goals
+            run.plan.replan_count += 1
+
+            await self._save_run(run)
+            await self._audit.log("replan_executed", run_id=run.run_id,
+                                   data={"replan_count": run.plan.replan_count,
+                                         "preserved_goals": len(preserved),
+                                         "new_goals": len(new_goals),
+                                         "remaining_budget": remaining_budget})
+            logger.info("Run %s: replanned — kept %d, added %d (replan #%d)",
+                         run.run_id, len(preserved), len(new_goals), run.plan.replan_count)
+
+        except Exception as exc:
+            logger.warning("Replan failed (non-fatal): %s", exc)
 
     async def _summarize_partial(self, run: Run) -> str:
         """Generate a summary from whatever observations we have so far."""
