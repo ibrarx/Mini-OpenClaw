@@ -490,6 +490,8 @@ class TestPlannerWiring:
             database_path=str(db_path),
             anthropic_api_key="test-key",
             use_react=True,
+            react_use_goals=False,
+            react_max_replans=0,
         )
         registry = SkillRegistry()
         registry.discover()
@@ -533,6 +535,8 @@ class TestPlannerWiring:
             database_path=str(db_path),
             anthropic_api_key="test-key",
             use_react=True,
+            react_use_goals=False,
+            react_max_replans=0,
         )
         registry = SkillRegistry()
         registry.discover()
@@ -671,6 +675,8 @@ class TestEpisodeStorage:
             database_path=str(db_path),
             anthropic_api_key="test-key",
             use_react=True,
+            react_use_goals=False,
+            react_max_replans=0,
         )
         registry = SkillRegistry()
         registry.discover()
@@ -774,6 +780,8 @@ class TestSummaryGeneration:
             database_path=str(db_path),
             anthropic_api_key="test-key",
             use_react=True,
+            react_use_goals=False,
+            react_max_replans=0,
         )
         registry = SkillRegistry()
         registry.discover()
@@ -825,6 +833,8 @@ class TestSummaryGeneration:
             database_path=str(db_path),
             anthropic_api_key="test-key",
             use_react=True,
+            react_use_goals=False,
+            react_max_replans=0,
         )
         registry = SkillRegistry()
         registry.discover()

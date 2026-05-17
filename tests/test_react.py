@@ -73,6 +73,8 @@ def _make_settings(workspace: Path, db_path: Path) -> Settings:
         database_path=db_path,
         use_react=True,
         react_max_iterations=10,
+        react_use_goals=False,
+        react_max_replans=0,
     )
 
 
