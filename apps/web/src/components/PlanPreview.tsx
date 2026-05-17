@@ -252,32 +252,37 @@ function BudgetBar({ iterations, maxIterations, isActive }: BudgetBarProps) {
 
   return (
     <div className="mb-2">
-      {/* A3 bar: filled side shows "X% iteration budget used", empty side shows "Y% left" */}
-      <div className="relative h-7 rounded-lg bg-gray-100 dark:bg-gray-800 overflow-hidden border border-gray-200 dark:border-gray-700">
-        <div
-          className={`absolute inset-y-0 left-0 rounded-l-lg transition-all duration-500 ease-out ${barColor} ${
-            isActive ? "animate-pulse" : ""
-          }`}
-          style={{ width: `${Math.min(pct, 100)}%` }}
-        />
-        {/* "X% iteration budget used" on filled portion */}
-        {showUsedLabel && (
-          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] font-medium text-white whitespace-nowrap">
-            {pct}% iteration budget used
-          </span>
-        )}
-        {/* "Y% left" on empty portion */}
-        {showLeftLabel && remaining > 0 && (
-          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
-            {pctLeft}% left
-          </span>
-        )}
-        {/* Fallback: when bar is too narrow for inner label, show centered */}
-        {!showUsedLabel && !showLeftLabel && (
-          <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">
-            {pct}% used · {pctLeft}% left
-          </span>
-        )}
+      {/* A1: "Iteration budget" label left of bar */}
+      <div className="flex items-center gap-2.5">
+        <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
+          Iteration budget
+        </span>
+        <div className="relative flex-1 h-7 rounded-lg bg-gray-100 dark:bg-gray-800 overflow-hidden border border-gray-200 dark:border-gray-700">
+          <div
+            className={`absolute inset-y-0 left-0 rounded-l-lg transition-all duration-500 ease-out ${barColor} ${
+              isActive ? "animate-pulse" : ""
+            }`}
+            style={{ width: `${Math.min(pct, 100)}%` }}
+          />
+          {/* "X% used" on filled portion */}
+          {showUsedLabel && (
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] font-medium text-white whitespace-nowrap">
+              {pct}% used
+            </span>
+          )}
+          {/* "Y% left" on empty portion */}
+          {showLeftLabel && remaining > 0 && (
+            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
+              {pctLeft}% left
+            </span>
+          )}
+          {/* Fallback: when both sides too narrow */}
+          {!showUsedLabel && !showLeftLabel && (
+            <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">
+              {pct}% used · {pctLeft}% left
+            </span>
+          )}
+        </div>
       </div>
       {/* Low budget warning below the bar */}
       {isLow && remaining > 0 && (
