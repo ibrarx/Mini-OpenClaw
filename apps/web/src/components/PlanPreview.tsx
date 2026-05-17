@@ -231,6 +231,7 @@ function BudgetBar({ iterations, maxIterations, isActive }: BudgetBarProps) {
   const used = iterations;
   const remaining = maxIterations - used;
   const pct = Math.round((used / maxIterations) * 100);
+  const pctLeft = 100 - pct;
 
   // Color thresholds: green < 50%, amber 50-70%, red > 70%
   const barColor =
@@ -240,42 +241,58 @@ function BudgetBar({ iterations, maxIterations, isActive }: BudgetBarProps) {
         ? "bg-amber-500"
         : "bg-red-500";
 
-  const labelColor =
-    pct <= 50
-      ? "text-emerald-600 dark:text-emerald-400"
-      : pct <= 70
-        ? "text-amber-600 dark:text-amber-400"
-        : "text-red-600 dark:text-red-400";
-
   // Warn threshold: 30% of max (matches backend default)
   const warnThreshold = Math.max(1, Math.floor(maxIterations * 0.3));
   const isLow = remaining <= warnThreshold && remaining > 0;
 
+  // Show inner label only when the filled portion is wide enough (≥ 35%)
+  const showUsedLabel = pct >= 35;
+  // Show right label only when unfilled portion is wide enough (≥ 20%)
+  const showLeftLabel = pctLeft >= 20;
+
   return (
     <div className="mb-2">
-      {/* Bar track */}
-      <div className="relative h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
-        <div
-          className={`absolute inset-y-0 left-0 rounded-full transition-all duration-500 ease-out ${barColor} ${
-            isActive ? "animate-pulse" : ""
-          }`}
-          style={{ width: `${Math.min(pct, 100)}%` }}
-        />
-      </div>
-      {/* Label row */}
-      <div className="flex items-center justify-between mt-0.5">
-        <span className={`text-[10px] font-medium ${labelColor}`}>
-          {remaining > 0
-            ? `${remaining} step${remaining !== 1 ? "s" : ""} remaining`
-            : "Budget exhausted"}
+      {/* A1: "Iteration budget" label left of bar */}
+      <div className="flex items-center gap-2.5">
+        <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
+          Iteration budget
         </span>
-        {isLow && remaining > 0 && (
+        <div className="relative flex-1 h-7 rounded-lg bg-gray-100 dark:bg-gray-800 overflow-hidden border border-gray-200 dark:border-gray-700">
+          <div
+            className={`absolute inset-y-0 left-0 rounded-l-lg transition-all duration-500 ease-out ${barColor} ${
+              isActive ? "animate-pulse" : ""
+            }`}
+            style={{ width: `${Math.min(pct, 100)}%` }}
+          />
+          {/* "X% used" on filled portion */}
+          {showUsedLabel && (
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] font-medium text-white whitespace-nowrap">
+              {pct}% used
+            </span>
+          )}
+          {/* "Y% left" on empty portion */}
+          {showLeftLabel && remaining > 0 && (
+            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
+              {pctLeft}% left
+            </span>
+          )}
+          {/* Fallback: when both sides too narrow */}
+          {!showUsedLabel && !showLeftLabel && (
+            <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">
+              {pct}% used · {pctLeft}% left
+            </span>
+          )}
+        </div>
+      </div>
+      {/* Low budget warning below the bar */}
+      {isLow && remaining > 0 && (
+        <div className="flex items-center gap-1 mt-1">
           <span className="text-[10px] font-medium text-red-600 dark:text-red-400 flex items-center gap-0.5">
             <AlertTriangle size={10} />
             Low budget
           </span>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
