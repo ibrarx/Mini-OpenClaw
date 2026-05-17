@@ -398,6 +398,13 @@ class Planner:
             valid_actions.add("replan")
 
         action = result.get("action")
+        # Auto-correct: LLM sometimes puts the tool name as the action
+        if action not in valid_actions and self._registry and self._registry.get(action):
+            logger.info("Auto-correcting action=%r → tool call", action)
+            result["tool"] = action
+            result["action"] = "tool"
+            action = "tool"
+
         if action not in valid_actions:
             raise PlannerError(
                 f"Invalid action in ReAct response: {action!r}. "

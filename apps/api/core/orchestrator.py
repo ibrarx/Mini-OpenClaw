@@ -128,12 +128,22 @@ class Orchestrator:
         except PlannerError as exc:
             run.status = RunStatus.FAILED
             run.final_response = f"Planning failed: {exc}"
+            # Resolve any unfinished goals
+            if run.plan and run.plan.goals:
+                for goal in run.plan.goals:
+                    if goal.status in (GoalStatus.PENDING, GoalStatus.IN_PROGRESS):
+                        goal.status = GoalStatus.SKIPPED
             await self._save_run(run)
             event_emitter.emit(run.run_id, "run_failed")
         except Exception as exc:
             logger.error("Run %s failed: %s", run.run_id, exc, exc_info=True)
             run.status = RunStatus.FAILED
             run.final_response = f"Internal error: {exc}"
+            # Resolve any unfinished goals
+            if run.plan and run.plan.goals:
+                for goal in run.plan.goals:
+                    if goal.status in (GoalStatus.PENDING, GoalStatus.IN_PROGRESS):
+                        goal.status = GoalStatus.SKIPPED
             await self._save_run(run)
             event_emitter.emit(run.run_id, "run_failed")
 
