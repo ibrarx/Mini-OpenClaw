@@ -327,3 +327,143 @@ class TestSearchMemory:
             _ctx(tmp_workspace, tmp_db_path),
         )
         assert r.status == "error"
+
+
+# ── read_file batch ─────────────────────────────────────────────
+
+
+class TestReadFileBatch:
+    @pytest.mark.asyncio
+    async def test_batch_reads_multiple_files(self, populated_workspace: Path) -> None:
+        """Read 3 files in batch, verify all contents returned."""
+        r = await ReadFileTool().execute(
+            {"paths": ["README.md", "src/main.py", "src/utils.py"]},
+            _ctx(populated_workspace),
+        )
+        assert r.status == "success"
+        assert r.output["files_read"] == 3
+        assert r.output["files_failed"] == 0
+        assert "README.md" in r.output["files"]
+        assert "src/main.py" in r.output["files"]
+        assert "src/utils.py" in r.output["files"]
+        assert "Test Project" in r.output["files"]["README.md"]["content"]
+
+    @pytest.mark.asyncio
+    async def test_batch_file_not_found_partial(self, populated_workspace: Path) -> None:
+        """3 paths, 1 doesn't exist → 2 in files, 1 in errors."""
+        r = await ReadFileTool().execute(
+            {"paths": ["README.md", "nonexistent.txt", "src/main.py"]},
+            _ctx(populated_workspace),
+        )
+        assert r.status == "success"
+        assert r.output["files_read"] == 2
+        assert r.output["files_failed"] == 1
+        assert "nonexistent.txt" in r.output["errors"]
+        assert "README.md" in r.output["files"]
+        assert "src/main.py" in r.output["files"]
+
+    @pytest.mark.asyncio
+    async def test_batch_max_files_exceeded(self, populated_workspace: Path) -> None:
+        """Pass 15 paths with max_batch=10 → error status, not partial read."""
+        paths = [f"file_{i}.txt" for i in range(15)]
+        r = await ReadFileTool(max_batch=10).execute(
+            {"paths": paths},
+            _ctx(populated_workspace),
+        )
+        assert r.status == "error"
+        assert "max_batch" in r.error
+
+    @pytest.mark.asyncio
+    async def test_batch_char_budget_exhausted(self, tmp_workspace: Path) -> None:
+        """Create 5 files each 20KB, max_chars=30000 → budget exhaustion."""
+        for i in range(5):
+            (tmp_workspace / f"big_{i}.txt").write_text("x" * 20_000)
+        paths = [f"big_{i}.txt" for i in range(5)]
+        r = await ReadFileTool(max_chars=30_000).execute(
+            {"paths": paths},
+            _ctx(tmp_workspace),
+        )
+        assert r.status == "success"
+        # First 1-2 files should be fully read, rest truncated or skipped
+        assert r.output["files_read"] >= 1
+        assert "budget_note" in r.output
+        # Some files should appear in errors as budget exhausted
+        total_accounted = r.output["files_read"] + r.output.get("files_failed", 0)
+        assert total_accounted == 5
+
+    @pytest.mark.asyncio
+    async def test_single_path_backward_compatible(self, populated_workspace: Path) -> None:
+        """{"path": "foo.py"} returns same shape as before."""
+        r = await ReadFileTool().execute(
+            {"path": "README.md"},
+            _ctx(populated_workspace),
+        )
+        assert r.status == "success"
+        assert "path" in r.output
+        assert "content" in r.output
+        assert "total_lines" in r.output
+        assert "truncated" in r.output
+        # Must NOT have batch keys
+        assert "files" not in r.output
+        assert "files_read" not in r.output
+
+    @pytest.mark.asyncio
+    async def test_paths_overrides_path(self, populated_workspace: Path) -> None:
+        """If both path and paths provided, paths wins."""
+        r = await ReadFileTool().execute(
+            {"path": "README.md", "paths": ["src/main.py"]},
+            _ctx(populated_workspace),
+        )
+        assert r.status == "success"
+        # Should be batch mode output
+        assert "files" in r.output
+        assert "src/main.py" in r.output["files"]
+
+    @pytest.mark.asyncio
+    async def test_neither_path_nor_paths_error(self, populated_workspace: Path) -> None:
+        """{} → error."""
+        r = await ReadFileTool().execute(
+            {},
+            _ctx(populated_workspace),
+        )
+        assert r.status == "error"
+        assert "path" in r.error.lower() or "paths" in r.error.lower()
+
+    @pytest.mark.asyncio
+    async def test_binary_file_in_batch(self, tmp_workspace: Path) -> None:
+        """Batch with 1 binary file → that file in errors, others read normally."""
+        (tmp_workspace / "good.txt").write_text("hello world")
+        (tmp_workspace / "binary.bin").write_bytes(b"\x00\x01\x02" * 100)
+        (tmp_workspace / "also_good.txt").write_text("another file")
+        r = await ReadFileTool().execute(
+            {"paths": ["good.txt", "binary.bin", "also_good.txt"]},
+            _ctx(tmp_workspace),
+        )
+        assert r.status == "success"
+        assert r.output["files_read"] == 2
+        assert r.output["files_failed"] == 1
+        assert "binary.bin" in r.output["errors"]
+        assert "good.txt" in r.output["files"]
+        assert "also_good.txt" in r.output["files"]
+
+    @pytest.mark.asyncio
+    async def test_custom_limits_from_constructor(self, tmp_workspace: Path) -> None:
+        """ReadFileTool(max_batch=3, max_chars=1000) enforces those limits."""
+        for i in range(5):
+            (tmp_workspace / f"f{i}.txt").write_text("content " * 50)
+        # max_batch=3, trying 5 files → error
+        tool = ReadFileTool(max_batch=3, max_chars=1000)
+        r = await tool.execute(
+            {"paths": [f"f{i}.txt" for i in range(5)]},
+            _ctx(tmp_workspace),
+        )
+        assert r.status == "error"
+        assert "max_batch" in r.error
+
+        # 3 files is OK but max_chars=1000 should exhaust budget
+        r2 = await tool.execute(
+            {"paths": [f"f{i}.txt" for i in range(3)]},
+            _ctx(tmp_workspace),
+        )
+        assert r2.status == "success"
+        assert "budget_note" in r2.output

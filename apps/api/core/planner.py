@@ -96,7 +96,8 @@ CRITICAL: Use the memory context above to personalize your responses and tool ch
 USER ANNOUNCEMENTS — IMPORTANT:
 When calling a tool, always include a "user_announcement" field with a short, conversational message (1 sentence) telling the user what you're about to do. Write it as if you're a helpful colleague narrating your actions:
 - list_files → "Let me see what's in your workspace..."
-- read_file → "I'll read [filename] for you..."
+- read_file (single) → "I'll take a look at [filename]..."
+- read_file (batch)  → "Let me read through those files..."
 - search_in_files → "Let me search your files for '[query]'..."
 - search_memory → "Let me check my memory for anything about that..."
 - remember_fact → "I'll save that to memory so I remember next time..."
@@ -253,7 +254,7 @@ class Planner:
             obs_text = "\n".join(
                 f"  [{i+1}] Tool: {o.get('tool', 'N/A')} | "
                 f"Status: {o.get('status', 'N/A')} | "
-                f"Result: {json.dumps(o.get('output') or o.get('error', ''), default=str)[:500]}"
+                f"Result: {self._truncate_observation(o)}"
                 for i, o in enumerate(observations)
             )
         else:
@@ -300,6 +301,54 @@ class Planner:
 
         logger.info("ReAct step: action=%s tool=%s", action, result.get("tool", "N/A"))
         return result
+
+    @staticmethod
+    def _truncate_observation(obs: dict[str, Any]) -> str:
+        """Truncate an observation for the LLM context.
+
+        File reads get more room than other tools since batch reading is
+        pointless if we immediately throw away the content.
+        """
+        output = obs.get("output") or obs.get("error", "")
+        tool = obs.get("tool", "")
+
+        if tool == "read_file" and isinstance(output, dict):
+            return json.dumps(Planner._truncate_file_output(output), default=str)
+        return json.dumps(output, default=str)[:500]
+
+    @staticmethod
+    def _truncate_file_output(output: dict[str, Any]) -> dict[str, Any]:
+        """Truncate read_file output for the planner context.
+
+        Single mode (has ``content`` key): truncate content to 3000 chars.
+        Batch mode (has ``files`` dict): truncate each file's content to 2000 chars.
+        """
+        if "files" in output and isinstance(output["files"], dict):
+            # Batch mode
+            truncated_files: dict[str, Any] = {}
+            for path, info in output["files"].items():
+                if isinstance(info, dict) and "content" in info:
+                    content = info["content"]
+                    trunc = len(content) > 2000
+                    truncated_files[path] = {
+                        **info,
+                        "content": content[:2000],
+                        "truncated": info.get("truncated", False) or trunc,
+                    }
+                else:
+                    truncated_files[path] = info
+            result = {**output, "files": truncated_files}
+            return result
+        elif "content" in output:
+            # Single mode
+            content = output["content"]
+            trunc = len(content) > 3000
+            return {
+                **output,
+                "content": content[:3000],
+                "truncated": output.get("truncated", False) or trunc,
+            }
+        return output
 
     async def generate_summary(
         self, user_message: str, tool_results: list[dict[str, Any]]
