@@ -350,7 +350,7 @@ This context is injected into the LLM system prompt with explicit instructions t
 | Tool | Description | Risk Level | Approval Required |
 |------|-------------|------------|-------------------|
 | `list_files` | List files and directories in the workspace | Safe | No |
-| `read_file` | Read a text file from the workspace | Safe | No |
+| `read_file` | Read text files from the workspace — supports single (`path`) or batch (`paths`) mode with configurable character budgets | Safe | No |
 | `write_file` | Create, overwrite, or append to a file | Medium | Yes |
 | `search_in_files` | Search for patterns across text files | Safe | No |
 | `run_shell_safe` | Execute allowlisted commands (pwd, ls, find, cat, grep) | Medium–High | Yes |
@@ -387,6 +387,8 @@ All settings are read from the `.env` file (see `.env.example`):
 | `USE_REACT` | Use iterative ReAct loop (`true`) or legacy plan-and-execute (`false`) | `true` |
 | `REACT_MAX_ITERATIONS` | Maximum think→act→observe iterations per run | `10` |
 | `REACT_DUPLICATE_CAP` | Block after N consecutive identical tool+args calls (minimum: 2) | `3` |
+| `REACT_READ_FILE_MAX_BATCH` | Maximum files per batch `read_file` call | `10` |
+| `REACT_READ_FILE_MAX_CHARS` | Maximum total output characters per `read_file` call | `50000` |
 | `SUMMARY_INTERVAL` | Auto-generate a summary every N completed runs (0 = disable) | `5` |
 | `MAX_SUMMARIES` | Number of summaries to keep (oldest pruned) | `3` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
@@ -409,8 +411,8 @@ The test suite covers:
 | `test_memory_semantic.py` | Hybrid search, embedding, vector store, planner wiring, summaries | 44 |
 | `test_policy.py` | Path validation, shell blocking, injection detection, risk classification | 38 |
 | `test_providers.py` | Anthropic/Gemini provider translation, factory, JSON extraction | 37 |
-| `test_tools.py` | Each V1 tool in isolation | 33 |
-| `test_react.py` | ReAct loop, saga compensation, error classification, loop detection, approval flow | 30 |
+| `test_tools.py` | Each V1 tool in isolation (including batch read_file) | 42 |
+| `test_react.py` | ReAct loop, saga compensation, error classification, loop detection, approval flow, batch reads | 32 |
 | `test_planner.py` | Plan parsing, provider error handling, summary generation | 13 |
 | `test_memory.py` | Memory CRUD, keyword search, retrieval, export | 13 |
 | `test_integration.py` | End-to-end legacy plan-and-execute path, provider switching | 8 |
@@ -455,7 +457,7 @@ mini-openclaw/
 │   └── models/            #   Pydantic models (Run, ToolResult, ErrorKind, etc.)
 ├── apps/web/              # React + TypeScript frontend
 │   └── src/components/    #   ChatPanel, PlanPreview, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser
-├── tests/                 # pytest test suite (216 tests)
+├── tests/                 # pytest test suite (227 tests)
 ├── scripts/               # Demo seeding and memory export
 ├── docs/                  # Architecture and design documentation
 └── requirements.txt       # Python dependencies
