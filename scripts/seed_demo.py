@@ -17,8 +17,9 @@ non-empty on first launch. Idempotent: clears old seed data before
 re-creating it.
 
 Usage:
-    python scripts/seed_demo.py            # normal run
-    python scripts/seed_demo.py --clean    # remove workspace + seed memory, then recreate
+    python scripts/seed_demo.py                # normal run
+    python scripts/seed_demo.py --clean        # remove workspace + seed memory, then recreate
+    python scripts/seed_demo.py --clean-all    # full reset: workspace + ALL memory + database
 """
 import asyncio
 import shutil
@@ -394,8 +395,20 @@ async def clear_seed_memory(db_path: Path) -> int:
         await conn.close()
 
 
+async def clear_all_memory(db_path: Path) -> int:
+    """Delete ALL memory items regardless of source."""
+    conn = await get_connection(db_path)
+    try:
+        cursor = await conn.execute("DELETE FROM memory_items")
+        await conn.commit()
+        return cursor.rowcount
+    finally:
+        await conn.close()
+
+
 async def main() -> None:
     clean_mode = "--clean" in sys.argv
+    clean_all_mode = "--clean-all" in sys.argv
 
     settings = get_settings()
     workspace = settings.resolved_workspace
@@ -408,8 +421,9 @@ async def main() -> None:
         print(f"   Set it in .env before running the agent.")
         print(f"   (Workspace files and memory will still be created.)\n")
 
-    # ── Clean mode: wipe and recreate ─────────────────────────────
-    if clean_mode and workspace.exists():
+    # ── Clean modes: wipe and recreate ────────────────────────────
+    should_wipe_workspace = clean_mode or clean_all_mode
+    if should_wipe_workspace and workspace.exists():
         shutil.rmtree(workspace)
         print(f"Removed existing workspace: {workspace}")
 
@@ -421,7 +435,7 @@ async def main() -> None:
     for rel_path, content in FILES.items():
         full_path = workspace / rel_path
         full_path.parent.mkdir(parents=True, exist_ok=True)
-        if full_path.exists() and not clean_mode:
+        if full_path.exists() and not should_wipe_workspace:
             skipped += 1
             continue
         full_path.write_text(content, encoding="utf-8")
@@ -432,9 +446,15 @@ async def main() -> None:
 
     # ── Seed memory (idempotent: clear old seed data first) ───────
     await create_tables(settings.resolved_database)
-    deleted = await clear_seed_memory(settings.resolved_database)
-    if deleted:
-        print(f"  Cleared {deleted} old seed memory item(s)")
+
+    if clean_all_mode:
+        deleted = await clear_all_memory(settings.resolved_database)
+        if deleted:
+            print(f"  Cleared ALL {deleted} memory item(s)")
+    else:
+        deleted = await clear_seed_memory(settings.resolved_database)
+        if deleted:
+            print(f"  Cleared {deleted} old seed memory item(s)")
 
     mm = MemoryManager(settings.resolved_database)
 
