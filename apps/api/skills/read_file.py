@@ -34,9 +34,10 @@ class ReadFileTool(BaseTool):
         return ToolManifest(
             name="read_file",
             description=(
-                "Read one or more text files inside the workspace. "
-                "Use 'paths' (array) to read multiple files in one call — preferred for batch reads. "
-                "Use 'path' (string) for a single file."
+                "Read text files inside the workspace. "
+                "For ONE file: use 'path' (string). "
+                "For MULTIPLE files: use 'paths' (array) — ALWAYS prefer this over separate calls. "
+                "Never call read_file multiple times when a single batch call with 'paths' would work."
             ),
             risk_level=RiskLevel.SAFE,
             approval_required=False,
