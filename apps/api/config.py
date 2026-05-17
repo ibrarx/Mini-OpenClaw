@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     react_duplicate_cap: int = 3       # block after N identical tool+args calls
     react_use_goals: bool = False      # False = pure ReAct (no goals, no replanning)
     react_max_replans: int = 2         # 0 = goals but no replanning; >= 1 = full hybrid
+    react_budget_warn_pct: int = 30    # warn LLM when this % of budget remains
 
     from pydantic import model_validator as _model_validator
 
@@ -70,6 +71,9 @@ class Settings(BaseSettings):
         # Replan cap: 0..5
         replans = max(0, min(5, self.react_max_replans))
         object.__setattr__(self, "react_max_replans", replans)
+        # Budget warning percentage: 10..80
+        pct = max(10, min(80, self.react_budget_warn_pct))
+        object.__setattr__(self, "react_budget_warn_pct", pct)
         return self
 
     # ----- Tool limits -----

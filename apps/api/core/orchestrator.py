@@ -248,6 +248,8 @@ class Orchestrator:
                 ]
 
             # THINK: ask planner for next action
+            warn_threshold = max(1, self._settings.react_max_iterations
+                                 * self._settings.react_budget_warn_pct // 100)
             try:
                 decision = await self._planner.react_step(
                     user_message=run.user_message,
@@ -256,6 +258,11 @@ class Orchestrator:
                     workspace_info=workspace_info,
                     goals=goals_for_planner,                    # None when goals disabled
                     enable_replan=replan_enabled,               # False when replanning disabled
+                    iteration_info={
+                        "current": run.iterations,
+                        "max": run.max_iterations,
+                        "warn_threshold": warn_threshold,
+                    },
                 )
             except PlannerError:
                 raise  # let _process_run handle it

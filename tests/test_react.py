@@ -1854,3 +1854,184 @@ class TestHybridPlanReact:
         goal_ids = [g.goal_id for g in run.plan.goals]
         assert "goal_1" in goal_ids
         assert "goal_3" in goal_ids
+
+
+# ---------------------------------------------------------------------------
+# Budget awareness tests
+# ---------------------------------------------------------------------------
+
+
+class TestBudgetAwareness:
+    """Tests for budget-aware planning: iteration_info in prompts and warnings."""
+
+    @pytest.mark.asyncio
+    async def test_budget_info_passed_to_planner(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """Verify the planner receives iteration_info with correct values."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings(populated_workspace, tmp_db_path)
+        settings = Settings(
+            llm_provider="anthropic",
+            anthropic_api_key="test-fake",
+            workspace_root=populated_workspace,
+            database_path=tmp_db_path,
+            use_react=True,
+            react_max_iterations=10,
+            react_budget_warn_pct=30,
+            react_use_goals=False,
+            react_max_replans=0,
+        )
+        orch = Orchestrator(settings, registry)
+
+        fake = _install_fake_provider(orch, [
+            _react_json({
+                "action": "final_answer",
+                "response": "Done",
+                "reasoning": "immediate answer",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "hello")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        # The planner was called once (iteration 1 of 10)
+        assert len(fake.calls) >= 1
+        # Check that the budget string appears in the user message
+        content = fake.calls[0]["messages"][0].content
+        assert "step 1 of 10" in content
+        assert "9 remaining" in content
+
+    @pytest.mark.asyncio
+    async def test_budget_string_in_prompt(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """Verify the LLM prompt includes the iteration budget from step 1."""
+        await create_tables(tmp_db_path)
+        settings = Settings(
+            llm_provider="anthropic",
+            anthropic_api_key="test-fake",
+            workspace_root=populated_workspace,
+            database_path=tmp_db_path,
+            use_react=True,
+            react_max_iterations=8,
+            react_budget_warn_pct=30,
+            react_use_goals=False,
+            react_max_replans=0,
+        )
+        orch = Orchestrator(settings, registry)
+
+        fake = _install_fake_provider(orch, [
+            _react_json({
+                "action": "tool",
+                "tool": "list_files",
+                "args": {"path": "."},
+                "reasoning": "explore",
+            }),
+            _react_json({
+                "action": "final_answer",
+                "response": "Done",
+                "reasoning": "done",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "List files")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        # Step 1: "step 1 of 8 (7 remaining)"
+        content_step1 = fake.calls[0]["messages"][0].content
+        assert "step 1 of 8" in content_step1
+        assert "7 remaining" in content_step1
+        # Step 2: "step 2 of 8 (6 remaining)"
+        content_step2 = fake.calls[1]["messages"][0].content
+        assert "step 2 of 8" in content_step2
+        assert "6 remaining" in content_step2
+
+    @pytest.mark.asyncio
+    async def test_low_budget_warning_fires(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """With max_iterations=5, budget_warn_pct=40 → warn_threshold=2.
+
+        Step 3 of 5 has 2 remaining == warn_threshold → ⚠ should fire.
+        """
+        await create_tables(tmp_db_path)
+        settings = Settings(
+            llm_provider="anthropic",
+            anthropic_api_key="test-fake",
+            workspace_root=populated_workspace,
+            database_path=tmp_db_path,
+            use_react=True,
+            react_max_iterations=5,
+            react_budget_warn_pct=40,
+            react_use_goals=False,
+            react_max_replans=0,
+        )
+        orch = Orchestrator(settings, registry)
+
+        fake = _install_fake_provider(orch, [
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "."}, "reasoning": "step1",
+            }),
+            _react_json({
+                "action": "tool", "tool": "list_files",
+                "args": {"path": "src"}, "reasoning": "step2",
+            }),
+            _react_json({
+                "action": "final_answer",
+                "response": "Done", "reasoning": "wrapping up",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Explore workspace")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        # warn_threshold = max(1, 5 * 40 // 100) = 2
+        # Step 3 of 5: remaining = 2, which == warn_threshold → warning fires
+        content_step3 = fake.calls[2]["messages"][0].content
+        assert "⚠ LOW BUDGET" in content_step3
+
+        # Steps 1 and 2 should NOT have the warning
+        content_step1 = fake.calls[0]["messages"][0].content
+        assert "⚠ LOW BUDGET" not in content_step1
+        content_step2 = fake.calls[1]["messages"][0].content
+        assert "⚠ LOW BUDGET" not in content_step2
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_budget_healthy(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """At step 1 of 10 with 30% threshold, no warning should appear."""
+        await create_tables(tmp_db_path)
+        settings = Settings(
+            llm_provider="anthropic",
+            anthropic_api_key="test-fake",
+            workspace_root=populated_workspace,
+            database_path=tmp_db_path,
+            use_react=True,
+            react_max_iterations=10,
+            react_budget_warn_pct=30,
+            react_use_goals=False,
+            react_max_replans=0,
+        )
+        orch = Orchestrator(settings, registry)
+
+        fake = _install_fake_provider(orch, [
+            _react_json({
+                "action": "final_answer",
+                "response": "Done",
+                "reasoning": "quick answer",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Quick question")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        content = fake.calls[0]["messages"][0].content
+        assert "step 1 of 10" in content
+        assert "⚠ LOW BUDGET" not in content
