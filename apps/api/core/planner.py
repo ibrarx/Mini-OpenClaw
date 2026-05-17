@@ -117,9 +117,11 @@ BUDGET AWARENESS:
 You will be told your current step number, the maximum allowed, and how many remain.
 Use this information to work efficiently:
 - Prefer batch operations (e.g. read multiple files at once) over one-by-one.
-- If you are past the halfway mark and already have useful data, consider giving a final_answer rather than starting new explorations.
-- A good partial answer is always better than hitting the iteration limit.
-- When the budget is marked LOW (⚠), synthesize what you have immediately. Do NOT start new explorations or tool calls unless absolutely necessary to answer the user.
+- When you see a ⚠ LOW BUDGET warning, you still have steps left — USE THEM.
+  But be strategic: prefer high-value actions that directly advance the task
+  over speculative exploration. Batch where possible.
+- If you run out of steps the system will summarize your progress automatically,
+  so do not stop early just to avoid hitting the limit.
 """
 
 
@@ -388,8 +390,9 @@ class Planner:
             budget_str = f"\n\nBudget: step {current} of {maximum} ({remaining} remaining)"
             if remaining <= warn_threshold:
                 budget_str += (
-                    "\n⚠ LOW BUDGET — Wrap up now. Synthesize what you have "
-                    "into a final_answer. Do not start new explorations."
+                    "\n⚠ LOW BUDGET — Be strategic with remaining steps: "
+                    "prioritize actions that directly complete the task "
+                    "over speculative exploration. Batch where possible."
                 )
 
         content = (
