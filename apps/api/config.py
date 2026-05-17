@@ -67,6 +67,10 @@ class Settings(BaseSettings):
         object.__setattr__(self, "react_duplicate_cap", dup)
         return self
 
+    # ----- Tool limits -----
+    react_read_file_max_batch: int = 10     # max files per batch read_file call
+    react_read_file_max_chars: int = 50000  # max total output chars per read_file call
+
     # ----- Memory summaries -----
     # How many completed runs between auto-generated conversation summaries.
     # Set to 0 to disable auto-summarization.

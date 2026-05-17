@@ -24,9 +24,15 @@ class SkillRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, BaseTool] = {}
 
-    def discover(self) -> None:
+    def discover(self, settings=None) -> None:
         for cls in _TOOL_CLASSES:
-            tool = cls()
+            if cls is ReadFileTool and settings is not None:
+                tool = ReadFileTool(
+                    max_batch=settings.react_read_file_max_batch,
+                    max_chars=settings.react_read_file_max_chars,
+                )
+            else:
+                tool = cls()
             self._tools[tool.name] = tool
             logger.info("Registered tool: %s (risk=%s)", tool.name, tool.manifest().risk_level.value)
         logger.info("Tool discovery complete: %d tools", len(self._tools))

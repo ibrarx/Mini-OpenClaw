@@ -308,25 +308,36 @@ class Orchestrator:
 
             # Path validation for file tools
             if tool_name in ("read_file", "write_file", "list_files", "search_in_files"):
-                pc = self._policy.validate_path(
-                    tool_args.get("path", "."),
-                    write=(tool_name == "write_file"))
-                if not pc.allowed:
-                    denied_result = ToolResult(
-                        tool_name=tool_name, status="denied", input=tool_args,
-                        error=f"policy: {pc.reason}",
-                    )
-                    obs = Observation(
-                        step_id=step_id, iteration=run.iterations,
-                        tool=tool_name, args=tool_args, reasoning=reasoning,
-                        user_announcement="That action isn't allowed by the workspace policy. Let me find another way...",
-                        result=denied_result, timestamp=now,
-                    )
-                    run.observations.append(obs)
-                    await self._save_run(run)
-                    await self._audit.log("react_policy_denied", run_id=run.run_id,
-                                           step_id=step_id,
-                                           data={"tool": tool_name, "reason": pc.reason})
+                # For read_file with batch paths, validate each path
+                paths_to_check: list[str] = []
+                if tool_name == "read_file" and "paths" in tool_args:
+                    paths_to_check = tool_args["paths"]
+                else:
+                    paths_to_check = [tool_args.get("path", ".")]
+
+                policy_denied = False
+                for p in paths_to_check:
+                    pc = self._policy.validate_path(
+                        p, write=(tool_name == "write_file"))
+                    if not pc.allowed:
+                        denied_result = ToolResult(
+                            tool_name=tool_name, status="denied", input=tool_args,
+                            error=f"policy: {pc.reason}",
+                        )
+                        obs = Observation(
+                            step_id=step_id, iteration=run.iterations,
+                            tool=tool_name, args=tool_args, reasoning=reasoning,
+                            user_announcement="That action isn't allowed by the workspace policy. Let me find another way...",
+                            result=denied_result, timestamp=now,
+                        )
+                        run.observations.append(obs)
+                        await self._save_run(run)
+                        await self._audit.log("react_policy_denied", run_id=run.run_id,
+                                               step_id=step_id,
+                                               data={"tool": tool_name, "reason": pc.reason})
+                        policy_denied = True
+                        break
+                if policy_denied:
                     continue
 
             # Shell validation

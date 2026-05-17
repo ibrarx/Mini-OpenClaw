@@ -983,3 +983,77 @@ class TestErrorKindClassification:
         assert "step_retrying" not in event_types, (
             f"Permanent error should not be retried, but got: {event_types}"
         )
+
+# ---------------------------------------------------------------------------
+# Batch read_file through orchestrator
+# ---------------------------------------------------------------------------
+
+
+class TestBatchReadFile:
+    """Verify batch read_file works end-to-end through the ReAct loop."""
+
+    @pytest.mark.asyncio
+    async def test_batch_read_file_through_orchestrator(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """A batch read_file call works end-to-end through the ReAct loop."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings(populated_workspace, tmp_db_path)
+        orch = Orchestrator(settings, registry)
+
+        _install_fake_provider(orch, [
+            _react_json({
+                "action": "tool",
+                "tool": "read_file",
+                "args": {"paths": ["README.md", "src/main.py"]},
+                "reasoning": "Reading multiple files at once",
+                "user_announcement": "Let me read through those files...",
+            }),
+            _react_json({
+                "action": "final_answer",
+                "response": "I read both files successfully.",
+                "reasoning": "Both files were read",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Read README and main.py")
+        run = await _wait_for_run(orch, run.run_id)
+
+        assert run.status == RunStatus.COMPLETED
+        # Should have observations: one tool call + final answer
+        tool_obs = [o for o in run.observations if o.tool == "read_file"]
+        assert len(tool_obs) == 1
+        assert tool_obs[0].result.status == "success"
+        assert tool_obs[0].result.output["files_read"] == 2
+
+    @pytest.mark.asyncio
+    async def test_batch_policy_denial(
+        self, registry: SkillRegistry, populated_workspace: Path, tmp_db_path: Path,
+    ) -> None:
+        """Batch with one path outside workspace → denied."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings(populated_workspace, tmp_db_path)
+        orch = Orchestrator(settings, registry)
+
+        _install_fake_provider(orch, [
+            _react_json({
+                "action": "tool",
+                "tool": "read_file",
+                "args": {"paths": ["README.md", "/etc/passwd"]},
+                "reasoning": "Reading files including a bad path",
+                "user_announcement": "Let me read those files...",
+            }),
+            _react_json({
+                "action": "final_answer",
+                "response": "That path was denied by policy.",
+                "reasoning": "Policy denied the request",
+            }),
+        ])
+
+        run = await orch.handle_message("sess_1", "Read README and /etc/passwd")
+        run = await _wait_for_run(orch, run.run_id)
+
+        # The batch should have been denied by policy
+        denied_obs = [o for o in run.observations if o.result and o.result.status == "denied"]
+        assert len(denied_obs) == 1
+        assert "policy" in denied_obs[0].result.error.lower()

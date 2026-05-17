@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI):
         sys.exit(1)
 
     # 4. Discover and register tools
-    skill_registry.discover()
+    skill_registry.discover(settings=settings)
     logger.info("Registered %d tools", skill_registry.tool_count)
 
     # 5. Count existing memory items
