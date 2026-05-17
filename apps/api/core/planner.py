@@ -112,6 +112,14 @@ To call a tool:
 
 To give a final answer:
 {{"action": "final_answer", "response": "Your answer to the user", "reasoning": "Why done"}}
+
+BUDGET AWARENESS:
+You will be told your current step number, the maximum allowed, and how many remain.
+Use this information to work efficiently:
+- Prefer batch operations (e.g. read multiple files at once) over one-by-one.
+- If you are past the halfway mark and already have useful data, consider giving a final_answer rather than starting new explorations.
+- A good partial answer is always better than hitting the iteration limit.
+- When the budget is marked LOW (⚠), synthesize what you have immediately. Do NOT start new explorations or tool calls unless absolutely necessary to answer the user.
 """
 
 
@@ -300,6 +308,7 @@ class Planner:
         workspace_info: str = "",
         goals: list[dict[str, str]] | None = None,       # None when goals disabled
         enable_replan: bool = False,                       # controls prompt + action validation
+        iteration_info: dict[str, int] | None = None,     # budget awareness
     ) -> dict[str, Any]:
         """Run one ReAct iteration: reason about observations, pick next action.
 
@@ -369,11 +378,26 @@ class Planner:
                 goal_lines.append(f"  [{marker}] {g['goal_id']}: {g['description']}")
             goals_str = "\n\nGoals:\n" + "\n".join(goal_lines) + "\n  (✓=done, →=in progress, ⊘=skipped)"
 
+        # Build budget awareness string
+        budget_str = ""
+        if iteration_info is not None:
+            current = iteration_info.get("current", 0)
+            maximum = iteration_info.get("max", 0)
+            warn_threshold = iteration_info.get("warn_threshold", 0)
+            remaining = maximum - current
+            budget_str = f"\n\nBudget: step {current} of {maximum} ({remaining} remaining)"
+            if remaining <= warn_threshold:
+                budget_str += (
+                    "\n⚠ LOW BUDGET — Wrap up now. Synthesize what you have "
+                    "into a final_answer. Do not start new explorations."
+                )
+
         content = (
             f"Original request: {user_message}\n"
             f"{workspace_info}\n\n"
             f"Observations so far:\n{obs_text}"
-            f"{goals_str}\n\n"
+            f"{goals_str}"
+            f"{budget_str}\n\n"
             f"What should I do next?"
         )
 

@@ -165,7 +165,7 @@ function ReactTimeline({ run, expandedStep, onToggleStep, compact }: ReactTimeli
   return (
     <div className="animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2 text-xs t-muted">
           <Brain size={14} className="text-purple-500" />
           <span className="font-medium t-secondary">
@@ -179,6 +179,9 @@ function ReactTimeline({ run, expandedStep, onToggleStep, compact }: ReactTimeli
           )}
         </div>
       </div>
+
+      {/* Budget progress bar */}
+      <BudgetBar iterations={run.iterations} maxIterations={run.max_iterations} isActive={isActive} />
 
       {/* Goal checklist */}
       {goals.length > 0 && (
@@ -208,6 +211,69 @@ function ReactTimeline({ run, expandedStep, onToggleStep, compact }: ReactTimeli
             <Loader2 size={14} className="text-blue-500 animate-spin" />
             <span>Thinking…</span>
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Budget Progress Bar ──────────────────────────────
+
+interface BudgetBarProps {
+  iterations: number;
+  maxIterations: number;
+  isActive: boolean;
+}
+
+function BudgetBar({ iterations, maxIterations, isActive }: BudgetBarProps) {
+  if (maxIterations <= 0) return null;
+
+  const used = iterations;
+  const remaining = maxIterations - used;
+  const pct = Math.round((used / maxIterations) * 100);
+
+  // Color thresholds: green < 50%, amber 50-70%, red > 70%
+  const barColor =
+    pct <= 50
+      ? "bg-emerald-500"
+      : pct <= 70
+        ? "bg-amber-500"
+        : "bg-red-500";
+
+  const labelColor =
+    pct <= 50
+      ? "text-emerald-600 dark:text-emerald-400"
+      : pct <= 70
+        ? "text-amber-600 dark:text-amber-400"
+        : "text-red-600 dark:text-red-400";
+
+  // Warn threshold: 30% of max (matches backend default)
+  const warnThreshold = Math.max(1, Math.floor(maxIterations * 0.3));
+  const isLow = remaining <= warnThreshold && remaining > 0;
+
+  return (
+    <div className="mb-2">
+      {/* Bar track */}
+      <div className="relative h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+        <div
+          className={`absolute inset-y-0 left-0 rounded-full transition-all duration-500 ease-out ${barColor} ${
+            isActive ? "animate-pulse" : ""
+          }`}
+          style={{ width: `${Math.min(pct, 100)}%` }}
+        />
+      </div>
+      {/* Label row */}
+      <div className="flex items-center justify-between mt-0.5">
+        <span className={`text-[10px] font-medium ${labelColor}`}>
+          {remaining > 0
+            ? `${remaining} step${remaining !== 1 ? "s" : ""} remaining`
+            : "Budget exhausted"}
+        </span>
+        {isLow && remaining > 0 && (
+          <span className="text-[10px] font-medium text-red-600 dark:text-red-400 flex items-center gap-0.5">
+            <AlertTriangle size={10} />
+            Low budget
+          </span>
         )}
       </div>
     </div>
