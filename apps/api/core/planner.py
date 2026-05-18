@@ -108,10 +108,12 @@ Never use technical jargon. Never mention tool names. Keep it natural and brief.
 Respond with ONLY valid JSON (no markdown, no backticks):
 
 To call a tool:
-{{"action": "tool", "tool": "tool_name", "args": {{...}}, "reasoning": "Why this step", "user_announcement": "A short, friendly message telling the user what you're about to do"}}
+{{"action": "tool", "tool": "tool_name", "args": {{...}}, "reasoning": "Why this step", "user_announcement": "A short, friendly message telling the user what you're about to do", "completed_goals": ["goal_1"]}}
 
 To give a final answer:
-{{"action": "final_answer", "response": "Your answer to the user", "reasoning": "Why done"}}
+{{"action": "final_answer", "response": "Your answer to the user", "reasoning": "Why done", "completed_goals": ["goal_2", "goal_3"]}}
+
+NOTE: "completed_goals" is a list of goal IDs you have finished in this step. Include it whenever you complete one or more goals. If no goals were completed in this step, omit the field or pass an empty list.
 
 BUDGET AWARENESS:
 You will be told your current step number, the maximum allowed, and how many remain.
@@ -185,10 +187,16 @@ If a goal checklist is provided, use it to stay on track:
 - Work through goals roughly in order
 - Don't get sidetracked on things not in the goals
 - If a goal is already marked done (✓), don't redo the work
-- If a goal becomes unnecessary based on what you've learned, mark it as skipped
-- Include "completed_goals" in your response when you finish a goal
-- Include "skipped_goals" in your response when you skip a goal
+- If a goal becomes unnecessary based on what you've learned, mark it as skipped via "skipped_goals"
+- IMPORTANT: When you finish a goal, you MUST include "completed_goals" with the goal IDs in your JSON response
+- When you skip a goal, include "skipped_goals" with the goal IDs
 - Goals are a guide, not a constraint — deviate if you discover something unexpected that matters
+
+Example — completing a goal while calling a tool:
+  {{"action": "tool", "tool": "read_file", "args": {{"path": "test.py"}}, "reasoning": "Reading the test file to understand tests", "user_announcement": "Let me read the test file...", "completed_goals": ["goal_1"]}}
+
+Example — completing remaining goals in final answer:
+  {{"action": "final_answer", "response": "Here are the results...", "reasoning": "All goals met", "completed_goals": ["goal_2", "goal_3"]}}
 """
 
 REACT_REPLAN_SECTION = """
