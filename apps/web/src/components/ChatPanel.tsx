@@ -64,6 +64,7 @@ export default function ChatPanel({
 
       setActiveRunId(null);
       setDecidedSteps(new Set());
+      inputRef.current?.focus();
     }
   }, [run]);
 
