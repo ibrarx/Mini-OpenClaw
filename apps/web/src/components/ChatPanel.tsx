@@ -64,7 +64,8 @@ export default function ChatPanel({
 
       setActiveRunId(null);
       setDecidedSteps(new Set());
-      inputRef.current?.focus();
+      // Focus after React re-renders (input is disabled until activeRunId clears)
+      setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [run]);
 
