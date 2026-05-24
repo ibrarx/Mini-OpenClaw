@@ -376,7 +376,6 @@ function ContextBar({ run }: { run: Run }) {
       </div>
     </div>
   );
-  );
 }
 
 // ── Goal Checklist ────────────────────────────────────
