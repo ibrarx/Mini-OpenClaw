@@ -20,6 +20,11 @@ from typing import Any
 from apps.api.providers.base import LLMMessage, LLMProvider
 from apps.api.providers.errors import LLMProviderError
 from apps.api.skills.registry import SkillRegistry
+from apps.api.core.token_utils import (
+    estimate_tokens,
+    get_context_window,
+    CONTEXT_RESERVE_PCT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -358,17 +363,6 @@ class Planner:
         if goals and enable_replan:
             system += REACT_REPLAN_SECTION
 
-        # Build the user message with observations
-        if observations:
-            obs_text = "\n".join(
-                f"  [{i+1}] Tool: {o.get('tool', 'N/A')} | "
-                f"Status: {o.get('status', 'N/A')} | "
-                f"Result: {self._truncate_observation(o)}"
-                for i, o in enumerate(observations)
-            )
-        else:
-            obs_text = "  None yet — this is the first step."
-
         # FLAG-GATED: Include goals checklist in user content only when provided
         goals_str = ""
         if goals:
@@ -385,6 +379,15 @@ class Planner:
                     marker = " "
                 goal_lines.append(f"  [{marker}] {g['goal_id']}: {g['description']}")
             goals_str = "\n\nGoals:\n" + "\n".join(goal_lines) + "\n  (✓=done, →=in progress, ⊘=skipped)"
+
+        # Build the user message with observations (progressive summarization)
+        context_result = self._build_observation_context(
+            observations=observations,
+            system_prompt=system,
+            user_message=user_message,
+            goals_str=goals_str,
+        )
+        obs_text = context_result["obs_text"]
 
         # Build budget awareness string
         budget_str = ""
@@ -457,6 +460,11 @@ class Planner:
             result.setdefault("reasoning", "")
 
         logger.info("ReAct step: action=%s tool=%s", action, result.get("tool", "N/A"))
+        result["_context_meta"] = {
+            "tokens_used": context_result["token_estimate"],
+            "context_window": context_result["context_window"],
+            "compression": context_result["compression_level"],
+        }
         return result
 
     # ------------------------------------------------------------------
@@ -572,6 +580,108 @@ class Planner:
         except Exception as exc:
             logger.warning("Replan failed: %s", exc)
             return []
+
+    def _build_observation_context(
+        self,
+        observations: list[dict[str, Any]],
+        system_prompt: str,
+        user_message: str,
+        goals_str: str = "",
+    ) -> dict[str, Any]:
+        """Build observation text with progressive summarization.
+
+        Calculates a token budget and compresses older observations when
+        the total prompt would exceed it. Always preserves the last 2
+        observations in full and the first observation if it exists.
+
+        Returns
+        -------
+        dict with keys:
+            obs_text: formatted observation string for the prompt
+            token_estimate: total estimated tokens for the full prompt
+            context_window: the model's context window
+            compression_level: "none" | "partial" | "aggressive"
+        """
+        model = self._provider.model if self._provider else ""
+        context_window = get_context_window(model)
+
+        if not observations:
+            return {
+                "obs_text": "  None yet — this is the first step.",
+                "token_estimate": estimate_tokens(system_prompt)
+                    + estimate_tokens(user_message)
+                    + estimate_tokens(goals_str),
+                "context_window": context_window,
+                "compression_level": "none",
+            }
+
+        # Calculate fixed-cost tokens (system prompt, user message, goals)
+        fixed_tokens = (
+            estimate_tokens(system_prompt)
+            + estimate_tokens(user_message)
+            + estimate_tokens(goals_str)
+        )
+        available = int(context_window * (1 - CONTEXT_RESERVE_PCT)) - fixed_tokens
+
+        # Build full observation lines
+        full_lines: list[str] = []
+        for i, o in enumerate(observations):
+            line = (
+                f"  [{i+1}] Tool: {o.get('tool', 'N/A')} | "
+                f"Status: {o.get('status', 'N/A')} | "
+                f"Result: {self._truncate_observation(o)}"
+            )
+            full_lines.append(line)
+
+        total_obs_text = "\n".join(full_lines)
+        total_obs_tokens = estimate_tokens(total_obs_text)
+        total_tokens = fixed_tokens + total_obs_tokens
+
+        # Decide compression level
+        if total_obs_tokens < int(available * 0.70):
+            # Everything fits comfortably — no compression
+            return {
+                "obs_text": total_obs_text,
+                "token_estimate": total_tokens,
+                "context_window": context_window,
+                "compression_level": "none",
+            }
+
+        n = len(observations)
+
+        if total_obs_tokens < int(available * 0.90):
+            # Partial compression: summarize observations older than the last 3
+            compression_level = "partial"
+            compressed_lines: list[str] = []
+            for i, o in enumerate(observations):
+                if i < n - 3:
+                    # One-liner summary for old observations
+                    status = o.get("status", "N/A")
+                    tool = o.get("tool", "N/A")
+                    compressed_lines.append(f"  [{i+1}] {tool}: {status}")
+                else:
+                    compressed_lines.append(full_lines[i])
+        else:
+            # Aggressive compression: summarize ALL but last 2
+            compression_level = "aggressive"
+            compressed_lines = []
+            for i, o in enumerate(observations):
+                if i < n - 2:
+                    status = o.get("status", "N/A")
+                    tool = o.get("tool", "N/A")
+                    compressed_lines.append(f"  [{i+1}] {tool}: {status}")
+                else:
+                    compressed_lines.append(full_lines[i])
+
+        obs_text = "\n".join(compressed_lines)
+        total_tokens = fixed_tokens + estimate_tokens(obs_text)
+
+        return {
+            "obs_text": obs_text,
+            "token_estimate": total_tokens,
+            "context_window": context_window,
+            "compression_level": compression_level,
+        }
 
     @staticmethod
     def _truncate_observation(obs: dict[str, Any]) -> str:

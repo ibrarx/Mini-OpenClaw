@@ -22,6 +22,7 @@ from apps.api.core.events import event_emitter
 from apps.api.core.executor import Executor
 from apps.api.core.planner import Planner, PlannerError
 from apps.api.core.policy import PolicyEngine
+from apps.api.core.token_utils import get_context_window
 from apps.api.database import get_connection
 from apps.api.memory.embeddings import EmbeddingProvider
 from apps.api.memory.manager import MemoryManager
@@ -167,6 +168,12 @@ class Orchestrator:
         if run.plan is None:
             run.plan = Plan(task_type="react", reasoning="ReAct loop")
 
+        # Set context window size for this run
+        if self._settings.context_window_override > 0:
+            run.context_window = self._settings.context_window_override
+        else:
+            run.context_window = get_context_window(self._settings.active_provider_model)
+
         # Loop detection: track consecutive duplicate actions
         duplicate_cap = self._settings.react_duplicate_cap
 
@@ -285,6 +292,10 @@ class Orchestrator:
             step_id = f"step_{run.iterations}"
             now = datetime.now(timezone.utc).isoformat()
 
+            # Extract context window metadata for token tracking
+            context_meta = decision.pop("_context_meta", {})
+            tokens_used = context_meta.get("tokens_used", 0)
+
             # FINAL ANSWER
             if action == "final_answer":
                 # FLAG-GATED: Update goal statuses from final_answer response
@@ -305,6 +316,7 @@ class Orchestrator:
                     step_id=step_id, iteration=run.iterations,
                     reasoning=decision.get("reasoning", ""),
                     timestamp=now,
+                    token_estimate=tokens_used,
                 )
                 run.observations.append(obs)
                 run.final_response = decision.get("response", "Task completed.")
@@ -368,6 +380,7 @@ class Orchestrator:
                     tool=tool_name, args=tool_args, reasoning=reasoning,
                     user_announcement="I seem to be going in circles. Let me try a different approach...",
                     result=blocked_result, timestamp=now,
+                    token_estimate=tokens_used,
                 )
                 run.observations.append(obs)
                 await self._save_run(run)
@@ -387,6 +400,7 @@ class Orchestrator:
                     tool=tool_name, args=tool_args, reasoning=reasoning,
                     user_announcement="Hmm, I tried something that didn't work. Let me try another approach...",
                     result=error_result, timestamp=now,
+                    token_estimate=tokens_used,
                 )
                 run.observations.append(obs)
                 await self._save_run(run)
@@ -425,6 +439,7 @@ class Orchestrator:
                             tool=tool_name, args=tool_args, reasoning=reasoning,
                             user_announcement="That action isn't allowed by the workspace policy. Let me find another way...",
                             result=denied_result, timestamp=now,
+                            token_estimate=tokens_used,
                         )
                         run.observations.append(obs)
                         await self._save_run(run)
@@ -450,6 +465,7 @@ class Orchestrator:
                         tool=tool_name, args=tool_args, reasoning=reasoning,
                         user_announcement="That action isn't allowed by the workspace policy. Let me find another way...",
                         result=denied_result, timestamp=now,
+                        token_estimate=tokens_used,
                     )
                     run.observations.append(obs)
                     await self._save_run(run)
@@ -474,6 +490,7 @@ class Orchestrator:
                     tool=tool_name, args=tool_args, reasoning=reasoning,
                     user_announcement=decision.get("user_announcement", ""),
                     timestamp=now,
+                    token_estimate=tokens_used,
                 )
                 run.observations.append(pending_obs)
                 await self._save_run(run)
@@ -575,6 +592,7 @@ class Orchestrator:
                     tool=tool_name, args=tool_args, reasoning=reasoning,
                     user_announcement=announcement,
                     result=result, timestamp=datetime.now(timezone.utc).isoformat(),
+                    token_estimate=tokens_used,
                 )
                 run.observations.append(obs)
 
@@ -1260,17 +1278,20 @@ class Orchestrator:
             if existing:
                 await conn.execute(
                     "UPDATE runs SET status=?, plan=?, final_response=?, updated_at=?, "
-                    "iterations=?, max_iterations=?, observations=? WHERE id=?",
+                    "iterations=?, max_iterations=?, observations=?, context_window=? WHERE id=?",
                     (run.status.value, plan_json, run.final_response, run.updated_at,
-                     run.iterations, run.max_iterations, observations_json, run.run_id))
+                     run.iterations, run.max_iterations, observations_json,
+                     run.context_window, run.run_id))
             else:
                 await conn.execute(
                     "INSERT INTO runs (id,session_id,workspace_id,status,user_message,plan,"
-                    "final_response,created_at,updated_at,iterations,max_iterations,observations) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "final_response,created_at,updated_at,iterations,max_iterations,observations,"
+                    "context_window) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (run.run_id, run.session_id, run.workspace_id, run.status.value,
                      run.user_message, plan_json, run.final_response, run.created_at,
-                     run.updated_at, run.iterations, run.max_iterations, observations_json))
+                     run.updated_at, run.iterations, run.max_iterations, observations_json,
+                     run.context_window))
             await conn.commit()
         finally:
             await conn.close()
@@ -1355,6 +1376,7 @@ class Orchestrator:
                 pass
         iterations = row["iterations"] if "iterations" in row.keys() else 0
         max_iterations = row["max_iterations"] if "max_iterations" in row.keys() else 10
+        context_window = row["context_window"] if "context_window" in row.keys() else 0
         return Run(
             run_id=row["id"], session_id=row["session_id"],
             workspace_id=row["workspace_id"],
@@ -1363,4 +1385,5 @@ class Orchestrator:
             created_at=row["created_at"], updated_at=row["updated_at"],
             iterations=iterations or 0, max_iterations=max_iterations or 10,
             observations=observations,
+            context_window=context_window or 0,
         )

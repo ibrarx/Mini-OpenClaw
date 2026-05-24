@@ -114,6 +114,7 @@ class Observation(BaseModel):
     user_announcement: str = ""     # Friendly message for the UI
     result: ToolResult | None = None
     timestamp: str = ""
+    token_estimate: int = 0         # estimated tokens consumed at this iteration
 
 
 class Run(BaseModel):
@@ -130,3 +131,4 @@ class Run(BaseModel):
     iterations: int = 0
     max_iterations: int = 10
     observations: list[Observation] = Field(default_factory=list)
+    context_window: int = 0         # model's context window size (set at run start)

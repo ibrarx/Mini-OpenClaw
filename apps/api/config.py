@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     react_max_replans: int = 2         # 0 = goals but no replanning; >= 1 = full hybrid
     react_budget_warn_pct: int = 30    # warn LLM when this % of budget remains
 
+    # Context window override (0 = auto-detect from model name)
+    context_window_override: int = 0
+
     from pydantic import model_validator as _model_validator
 
     @_model_validator(mode="after")

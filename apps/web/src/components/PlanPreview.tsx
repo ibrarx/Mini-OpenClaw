@@ -183,6 +183,9 @@ function ReactTimeline({ run, expandedStep, onToggleStep, compact }: ReactTimeli
       {/* Budget progress bar */}
       <BudgetBar iterations={run.iterations} maxIterations={run.max_iterations} isActive={isActive} />
 
+      {/* Context window usage bar */}
+      <ContextBar run={run} />
+
       {/* Goal checklist */}
       {goals.length > 0 && (
         <GoalChecklist goals={goals} replanCount={replanCount} compact={compact} />
@@ -293,6 +296,37 @@ function BudgetBar({ iterations, maxIterations, isActive }: BudgetBarProps) {
           </span>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Context Window Bar ───────────────────────────────
+
+function ContextBar({ run }: { run: Run }) {
+  if (!run.context_window || run.context_window === 0) return null;
+
+  // Sum token estimates from all observations
+  const tokensUsed = run.observations.reduce((sum, obs) => sum + (obs.token_estimate || 0), 0);
+  if (tokensUsed === 0) return null;
+
+  const pct = Math.round((tokensUsed / run.context_window) * 100);
+  const barColor = pct <= 50 ? "bg-blue-500" : pct <= 75 ? "bg-amber-500" : "bg-red-500";
+
+  // Format numbers: 8192 → "8K", 200000 → "200K"
+  const fmt = (n: number) => n >= 1000 ? `${Math.round(n / 1000)}K` : `${n}`;
+
+  return (
+    <div className="flex items-center gap-2 mb-2">
+      <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
+        Context window
+      </span>
+      <div className="relative flex-1 h-4 rounded bg-gray-100 dark:bg-gray-800 overflow-hidden border border-gray-200 dark:border-gray-700">
+        <div className={`absolute inset-y-0 left-0 rounded-l transition-all duration-500 ${barColor}`}
+             style={{ width: `${Math.min(pct, 100)}%` }} />
+        <span className="absolute inset-0 flex items-center justify-center text-[10px] font-medium text-gray-600 dark:text-gray-300">
+          ~{fmt(tokensUsed)} / {fmt(run.context_window)} tokens
+        </span>
+      </div>
     </div>
   );
 }

@@ -36,6 +36,7 @@ export interface Run {
   iterations: number;
   max_iterations: number;
   observations: Observation[];
+  context_window?: number;
 }
 
 export interface Observation {
@@ -47,6 +48,7 @@ export interface Observation {
   user_announcement?: string;
   result?: ToolResult | null;
   timestamp: string;
+  token_estimate?: number;
 }
 
 export type GoalStatus = "pending" | "in_progress" | "done" | "skipped";

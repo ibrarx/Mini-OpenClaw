@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS runs (
     updated_at      TEXT NOT NULL,
     iterations      INTEGER NOT NULL DEFAULT 0,
     max_iterations  INTEGER NOT NULL DEFAULT 10,
-    observations    TEXT NOT NULL DEFAULT '[]'
+    observations    TEXT NOT NULL DEFAULT '[]',
+    context_window  INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS run_steps (
@@ -115,6 +116,7 @@ MIGRATIONS = [
     "ALTER TABLE runs ADD COLUMN iterations INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE runs ADD COLUMN max_iterations INTEGER NOT NULL DEFAULT 10",
     "ALTER TABLE runs ADD COLUMN observations TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE runs ADD COLUMN context_window INTEGER NOT NULL DEFAULT 0",
 ]
 
 
