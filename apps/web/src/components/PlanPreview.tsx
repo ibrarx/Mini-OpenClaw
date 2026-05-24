@@ -305,29 +305,77 @@ function BudgetBar({ iterations, maxIterations, isActive }: BudgetBarProps) {
 function ContextBar({ run }: { run: Run }) {
   if (!run.context_window || run.context_window === 0) return null;
 
-  // Sum token estimates from all observations
-  const tokensUsed = run.observations.reduce((sum, obs) => sum + (obs.token_estimate || 0), 0);
+  // Use the latest (max) token estimate — each observation stores the cumulative prompt size
+  const tokensUsed = Math.max(...run.observations.map((obs) => obs.token_estimate || 0), 0);
   if (tokensUsed === 0) return null;
 
   const pct = Math.round((tokensUsed / run.context_window) * 100);
-  const barColor = pct <= 50 ? "bg-blue-500" : pct <= 75 ? "bg-amber-500" : "bg-red-500";
+  const pctLeft = 100 - pct;
+
+  // Color thresholds: blue < 50%, amber 50-75%, red > 75%
+  const barColor =
+    pct <= 50
+      ? "bg-blue-500"
+      : pct <= 75
+        ? "bg-amber-500"
+        : "bg-red-500";
+
+  const isActive = run.status === "reacting";
 
   // Format numbers: 8192 → "8K", 200000 → "200K"
   const fmt = (n: number) => n >= 1000 ? `${Math.round(n / 1000)}K` : `${n}`;
 
+  // Show inner label only when the filled portion is wide enough (≥ 35%)
+  const showUsedLabel = pct >= 35;
+  // Show right label only when unfilled portion is wide enough (≥ 20%)
+  const showLeftLabel = pctLeft >= 20;
+
+  // Build label: "Context · model-name"
+  const label = run.model_name
+    ? `Context · ${run.model_name}`
+    : "Context window";
+
   return (
-    <div className="flex items-center gap-2 mb-2">
-      <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
-        Context window
-      </span>
-      <div className="relative flex-1 h-4 rounded bg-gray-100 dark:bg-gray-800 overflow-hidden border border-gray-200 dark:border-gray-700">
-        <div className={`absolute inset-y-0 left-0 rounded-l transition-all duration-500 ${barColor}`}
-             style={{ width: `${Math.min(pct, 100)}%` }} />
-        <span className="absolute inset-0 flex items-center justify-center text-[10px] font-medium text-gray-600 dark:text-gray-300">
+    <div className="mb-2">
+      <div className="flex items-center gap-2.5">
+        <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
+          {label}
+        </span>
+        <div className="relative flex-1 h-7 rounded-lg bg-gray-100 dark:bg-gray-800 overflow-hidden border border-gray-200 dark:border-gray-700">
+          <div
+            className={`absolute inset-y-0 left-0 rounded-l-lg transition-all duration-500 ease-out ${barColor} ${
+              isActive ? "animate-pulse" : ""
+            }`}
+            style={{ width: `${Math.min(pct, 100)}%` }}
+          />
+          {/* "X% used" on filled portion */}
+          {showUsedLabel && (
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] font-medium text-white whitespace-nowrap">
+              {pct}% used
+            </span>
+          )}
+          {/* "Y% left" on empty portion */}
+          {showLeftLabel && pctLeft > 0 && (
+            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
+              {pctLeft}% left
+            </span>
+          )}
+          {/* Fallback: when both sides too narrow */}
+          {!showUsedLabel && !showLeftLabel && (
+            <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">
+              {pct}% used · {pctLeft}% left
+            </span>
+          )}
+        </div>
+      </div>
+      {/* Token details below the bar */}
+      <div className="flex items-center justify-end mt-0.5">
+        <span className="text-[10px] text-gray-400 dark:text-gray-500">
           ~{fmt(tokensUsed)} / {fmt(run.context_window)} tokens
         </span>
       </div>
     </div>
+  );
   );
 }
 

@@ -168,7 +168,8 @@ class Orchestrator:
         if run.plan is None:
             run.plan = Plan(task_type="react", reasoning="ReAct loop")
 
-        # Set context window size for this run
+        # Set context window size and model name for this run
+        run.model_name = self._settings.active_provider_model
         if self._settings.context_window_override > 0:
             run.context_window = self._settings.context_window_override
         else:
@@ -1278,20 +1279,21 @@ class Orchestrator:
             if existing:
                 await conn.execute(
                     "UPDATE runs SET status=?, plan=?, final_response=?, updated_at=?, "
-                    "iterations=?, max_iterations=?, observations=?, context_window=? WHERE id=?",
+                    "iterations=?, max_iterations=?, observations=?, context_window=?, "
+                    "model_name=? WHERE id=?",
                     (run.status.value, plan_json, run.final_response, run.updated_at,
                      run.iterations, run.max_iterations, observations_json,
-                     run.context_window, run.run_id))
+                     run.context_window, run.model_name, run.run_id))
             else:
                 await conn.execute(
                     "INSERT INTO runs (id,session_id,workspace_id,status,user_message,plan,"
                     "final_response,created_at,updated_at,iterations,max_iterations,observations,"
-                    "context_window) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "context_window,model_name) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (run.run_id, run.session_id, run.workspace_id, run.status.value,
                      run.user_message, plan_json, run.final_response, run.created_at,
                      run.updated_at, run.iterations, run.max_iterations, observations_json,
-                     run.context_window))
+                     run.context_window, run.model_name))
             await conn.commit()
         finally:
             await conn.close()
@@ -1377,6 +1379,7 @@ class Orchestrator:
         iterations = row["iterations"] if "iterations" in row.keys() else 0
         max_iterations = row["max_iterations"] if "max_iterations" in row.keys() else 10
         context_window = row["context_window"] if "context_window" in row.keys() else 0
+        model_name = row["model_name"] if "model_name" in row.keys() else ""
         return Run(
             run_id=row["id"], session_id=row["session_id"],
             workspace_id=row["workspace_id"],
@@ -1386,4 +1389,5 @@ class Orchestrator:
             iterations=iterations or 0, max_iterations=max_iterations or 10,
             observations=observations,
             context_window=context_window or 0,
+            model_name=model_name or "",
         )

@@ -37,6 +37,7 @@ export interface Run {
   max_iterations: number;
   observations: Observation[];
   context_window?: number;
+  model_name?: string;
 }
 
 export interface Observation {

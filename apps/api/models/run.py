@@ -132,3 +132,4 @@ class Run(BaseModel):
     max_iterations: int = 10
     observations: list[Observation] = Field(default_factory=list)
     context_window: int = 0         # model's context window size (set at run start)
+    model_name: str = ""            # LLM model identifier (for UI display)
