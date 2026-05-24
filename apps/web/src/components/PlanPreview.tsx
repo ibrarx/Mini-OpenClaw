@@ -221,7 +221,7 @@ function ReactTimeline({ run, expandedStep, onToggleStep, compact }: ReactTimeli
 }
 
 // ── Shared label width for bar alignment ─────────────
-const BAR_LABEL = "min-w-[120px] text-[11px] font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap";
+const BAR_LABEL = "w-[170px] shrink-0 text-[11px] font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap truncate";
 const BAR_HEIGHT = "h-4";
 const BAR_OUTER = `relative flex-1 ${BAR_HEIGHT} rounded bg-gray-100 dark:bg-gray-800 overflow-hidden border border-gray-200 dark:border-gray-700`;
 
@@ -270,7 +270,7 @@ function BudgetBar({ iterations, maxIterations, isActive }: BudgetBarProps) {
         </div>
       </div>
       {isLow && remaining > 0 && (
-        <div className="flex items-center gap-1 mt-0.5 ml-[128px]">
+        <div className="flex items-center gap-1 mt-0.5 ml-[178px]">
           <span className="text-[10px] font-medium text-red-600 dark:text-red-400 flex items-center gap-0.5">
             <AlertTriangle size={10} />
             Low budget — {remaining} step{remaining !== 1 ? "s" : ""} left
@@ -338,7 +338,7 @@ function ContextBar({ run }: { run: Run }) {
       </div>
       {/* Subtitle: only appears when compression is active */}
       {latestCompression === "partial" && !isOverflow && (
-        <div className="flex items-center gap-1.5 mt-0.5 ml-[128px] px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 w-fit">
+        <div className="flex items-center gap-1.5 mt-0.5 ml-[178px] px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 w-fit">
           <AlertTriangle size={10} className="text-amber-600 dark:text-amber-400 shrink-0" />
           <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400">
             Older steps summarized to save context
@@ -346,7 +346,7 @@ function ContextBar({ run }: { run: Run }) {
         </div>
       )}
       {latestCompression === "aggressive" && !isOverflow && (
-        <div className="flex items-center gap-1.5 mt-0.5 ml-[128px] px-2 py-0.5 rounded bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 w-fit">
+        <div className="flex items-center gap-1.5 mt-0.5 ml-[178px] px-2 py-0.5 rounded bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 w-fit">
           <AlertTriangle size={10} className="text-red-600 dark:text-red-400 shrink-0" />
           <span className="text-[10px] font-medium text-red-700 dark:text-red-400">
             Only last 2 steps in full detail — earlier steps heavily compressed
@@ -354,7 +354,7 @@ function ContextBar({ run }: { run: Run }) {
         </div>
       )}
       {isOverflow && (
-        <div className="flex items-center gap-1.5 mt-0.5 ml-[128px] px-2 py-0.5 rounded bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 w-fit">
+        <div className="flex items-center gap-1.5 mt-0.5 ml-[178px] px-2 py-0.5 rounded bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 w-fit">
           <AlertTriangle size={10} className="text-red-600 dark:text-red-400 shrink-0" />
           <span className="text-[10px] font-medium text-red-700 dark:text-red-400">
             Context window exceeded — output quality may degrade
