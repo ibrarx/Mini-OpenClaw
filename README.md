@@ -315,7 +315,7 @@ The ReAct loop sends all previous observations to the LLM on every iteration. Wi
 
 Mini-OpenClaw manages this with three mechanisms:
 
-**Token estimation.** A lightweight `char/4` heuristic (in `core/token_utils.py`) estimates token counts without requiring external tokenizers. A built-in lookup table maps model names to their context window sizes (e.g. `claude-sonnet-4` → 200K, `llama3.2` → 8K, `phi3` → 4K). Unknown models fall back to a conservative 8K default.
+**Token estimation.** LLMs process text as tokens (sub-word fragments), not characters. Exact tokenization requires model-specific tokenizers like `tiktoken`, which add dependencies and complexity. Mini-OpenClaw uses a lightweight heuristic instead: **1 token ≈ 4 characters** of English text. This ratio holds reasonably well across most tokenizers (GPT-style BPE averages ~3.5–4.5 chars/token for English prose). The estimate is used only for budget management — deciding when to compress observations — not for billing or exact measurement, so ±20% accuracy is sufficient. The implementation lives in `core/token_utils.py` (`estimate_tokens()`). A built-in lookup table maps model names to their context window sizes (e.g. `claude-sonnet-4` → 200K, `llama3.2` → 8K, `phi3` → 4K). Unknown models fall back to a conservative 8K default.
 
 **Progressive summarization.** Before each ReAct iteration, the planner's `_build_observation_context()` method calculates a token budget (context window minus 30% reserve for the response, minus system prompt and user message), then decides how to format observations:
 
