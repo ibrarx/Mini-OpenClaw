@@ -37,6 +37,7 @@ class ProviderType(str, Enum):
 
     ANTHROPIC = "anthropic"
     GEMINI = "gemini"
+    OLLAMA = "ollama"
 
 
 def build_provider(settings: "Settings") -> "LLMProvider":
@@ -84,6 +85,16 @@ def build_provider(settings: "Settings") -> "LLMProvider":
             model=settings.gemini_model,
         )
         logger.info("LLM provider: gemini (%s)", settings.gemini_model)
+        return provider
+
+    if ptype is ProviderType.OLLAMA:
+        from apps.api.providers.ollama_provider import OllamaProvider
+
+        provider = OllamaProvider(
+            base_url=settings.ollama_base_url,
+            model=settings.ollama_model,
+        )
+        logger.info("LLM provider: ollama (%s at %s)", settings.ollama_model, settings.ollama_base_url)
         return provider
 
     # Defensive — should be unreachable thanks to the Enum check above.

@@ -15,6 +15,7 @@ Public surface:
     ProviderType         — enum of supported provider IDs.
     AnthropicProvider    — concrete Anthropic Claude implementation.
     GeminiProvider       — concrete Google Gemini implementation.
+    OllamaProvider       — concrete Ollama local model implementation.
 
 Adding a new provider is a 3-step recipe — see ``docs/provider-abstraction.md``.
 """

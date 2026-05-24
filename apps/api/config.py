@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
 
+    # ----- Ollama (local models) -----
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3.2"
+
     # ----- Paths — all use Path for cross-platform safety -----
     workspace_root: Path = Path("./workspace")
     database_path: Path = Path("./mini_openclaw.db")
@@ -108,8 +112,12 @@ class Settings(BaseSettings):
 
         Used by ``/health`` and startup logging to report whether the active
         provider has credentials, without leaking the key itself.
+        Ollama runs locally and needs no key — returns ``"local"`` as a
+        sentinel value that always evaluates to truthy.
         """
         provider = (self.llm_provider or "anthropic").strip().lower()
+        if provider == "ollama":
+            return "local"
         if provider == "gemini":
             return self.gemini_api_key
         return self.anthropic_api_key
@@ -118,6 +126,8 @@ class Settings(BaseSettings):
     def active_provider_model(self) -> str:
         """Return the model identifier the active provider will use."""
         provider = (self.llm_provider or "anthropic").strip().lower()
+        if provider == "ollama":
+            return self.ollama_model
         if provider == "gemini":
             return self.gemini_model
         return self.anthropic_model

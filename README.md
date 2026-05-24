@@ -10,7 +10,7 @@ A lightweight local-first AI agent that converts natural-language requests into 
 
 ## Overview
 
-Mini-OpenClaw takes plain-language instructions from a user, routes them through a structured planner (Claude or Gemini), validates every proposed action against a security policy engine, and executes approved steps using a registry of local tools — all within an auditable, inspectable pipeline.
+Mini-OpenClaw takes plain-language instructions from a user, routes them through a structured planner (Claude, Gemini, or a local Ollama model), validates every proposed action against a security policy engine, and executes approved steps using a registry of local tools — all within an auditable, inspectable pipeline.
 
 The agent uses a **Hybrid Plan → ReAct → Replan** architecture as its default execution model: before acting, the LLM generates a goal checklist; then it enters a ReAct loop (reason → act → observe) working toward those goals; if too many goals are skipped or progress stalls, the system automatically replans with fresh goals — all visible in the UI. A pure ReAct mode and a legacy plan-and-execute mode are available for comparison.
 
@@ -26,7 +26,7 @@ Key features:
 - **Budget-aware planning** — the agent sees its iteration budget, prefers batch operations, and works more strategically when budget is low; a live progress bar in the UI shows budget consumption
 - **Graceful max-iterations degradation** — when the agent exhausts its iteration budget, it synthesizes a direct answer from collected evidence instead of just summarizing what actions were taken; the run completes successfully if evidence is sufficient
 - **Error classification** — transient errors are retried with backoff, permanent errors go straight to the LLM, side-effect errors are surfaced to the user
-- **LLM-provider-agnostic** — swap Claude for Gemini (or add your own) without touching core code
+- **LLM-provider-agnostic** — swap Claude for Gemini or a local Ollama model (or add your own) without touching core code
 - **Manifest-driven tool extensibility** — add a tool without rewriting the core agent loop
 - **Multi-layer security** — policy engine, command allowlists, and approval gates for risky operations
 - **Full audit trail** — every decision logged in an append-only audit table
@@ -38,6 +38,7 @@ Key features:
 - **An API key from either**:
   - **Anthropic** (default) — [console.anthropic.com](https://console.anthropic.com/), or
   - **Google Gemini** — [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
+  - **Or no key at all** — use [Ollama](https://ollama.ai) for free local models
 
   See [Switching LLM providers](#switching-llm-providers) below.
 
@@ -308,8 +309,8 @@ To test budget pressure visually, set `REACT_MAX_ITERATIONS=5` in `.env` and ask
 
 Mini-OpenClaw is LLM-provider-agnostic. The planner talks to an abstract
 `LLMProvider` interface (see [`docs/provider-abstraction.md`](docs/provider-abstraction.md));
-concrete providers are plug-in modules. Two are shipped today: **Anthropic
-Claude** (default) and **Google Gemini**.
+concrete providers are plug-in modules. Three are shipped today: **Anthropic
+Claude** (default), **Google Gemini**, and **Ollama** (local models).
 
 To switch, edit `.env`:
 
@@ -323,6 +324,11 @@ ANTHROPIC_API_KEY=sk-ant-...
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=AI...
 # GEMINI_MODEL=gemini-2.5-flash
+
+# OR use Ollama (free, no API key)
+LLM_PROVIDER=ollama
+# OLLAMA_BASE_URL=http://localhost:11434
+# OLLAMA_MODEL=llama3.2
 ```
 
 Restart the backend. Verify with:
@@ -331,8 +337,25 @@ Restart the backend. Verify with:
 curl http://localhost:8000/api/health
 ```
 
-You should see `"llm_provider": "gemini"` (or `"anthropic"`) and
+You should see `"llm_provider": "gemini"` (or `"anthropic"` or `"ollama"`) and
 `"api_key_configured": true`.
+
+### Ollama (Local Models — Free, No API Key)
+
+1. Install Ollama: https://ollama.ai
+2. Pull a model: `ollama pull llama3.2`
+3. Set in `.env`:
+   ```
+   LLM_PROVIDER=ollama
+   OLLAMA_MODEL=llama3.2
+   ```
+4. Start Mini-OpenClaw normally — it connects to `localhost:11434`
+
+Recommended models:
+- `llama3.2` — Best balance of speed and quality for agent tasks
+- `mistral` — Fast, good at following JSON instructions
+- `codellama` — Best for code-heavy workspaces
+- `phi3` — Smallest, runs on 8GB RAM machines
 
 ### Adding another provider
 
@@ -440,6 +463,8 @@ All settings are read from the `.env` file (see `.env.example`):
 | `ANTHROPIC_API_KEY` | Your Anthropic API key | _(required if using Anthropic)_ |
 | `GEMINI_API_KEY` | Your Google Gemini API key | _(required if using Gemini)_ |
 | `LLM_PROVIDER` | Which LLM backend to use | `anthropic` |
+| `OLLAMA_BASE_URL` | Ollama server URL | `http://localhost:11434` |
+| `OLLAMA_MODEL` | Ollama model to use | `llama3.2` |
 | `WORKSPACE_ROOT` | Directory the agent operates in | `./workspace` |
 | `DATABASE_PATH` | SQLite database file path | `./mini_openclaw.db` |
 | `ANTHROPIC_MODEL` | Claude model to use | `claude-sonnet-4-20250514` |
@@ -473,7 +498,7 @@ The test suite covers:
 |-----------|--------------|-------|
 | `test_memory_semantic.py` | Hybrid search, embedding, vector store, planner wiring, summaries | 44 |
 | `test_policy.py` | Path validation, shell blocking, injection detection, risk classification | 38 |
-| `test_providers.py` | Anthropic/Gemini provider translation, factory, JSON extraction | 37 |
+| `test_providers.py` | Anthropic/Gemini/Ollama provider translation, factory, JSON extraction | 48 |
 | `test_tools.py` | Each V1 tool in isolation (including batch read_file) | 42 |
 | `test_react.py` | ReAct loop, hybrid Plan-ReAct, goal tracking, replanning, saga compensation, error classification, loop detection, approval flow, batch reads, budget awareness, graceful max-iterations degradation | 63 |
 | `test_planner.py` | Plan parsing, provider error handling, summary generation | 13 |
@@ -498,6 +523,9 @@ python scripts/export_memory.py
 | `anthropic returned invalid JSON` | The LLM prefixed reasoning text before JSON — this is auto-handled; if persistent, check your API key and model |
 | Agent keeps calling the same tool in a loop | Loop detection triggers after `REACT_DUPLICATE_CAP` identical calls (default: 3). Lower `REACT_MAX_ITERATIONS` in `.env` for tighter control |
 | `Port 8000 already in use` | Kill the existing process or set `BACKEND_PORT` in `.env` |
+| `Cannot connect to Ollama` | Ensure Ollama is running: `ollama serve`. Check `OLLAMA_BASE_URL` in `.env` |
+| `Model 'X' not found` (Ollama) | Pull the model first: `ollama pull X` |
+| Ollama response is slow | First call loads the model into memory — subsequent calls are faster. Try a smaller model like `phi3` |
 | `CORS error in browser` | Ensure the backend is running on port 8000 |
 | `No tools registered` | Check `apps/api/skills/` for import errors — run `python -c "from apps.api.skills.registry import SkillRegistry"` |
 | `Database locked` | Close other server instances accessing the same `.db` file |
@@ -514,13 +542,13 @@ python scripts/export_memory.py
 mini-openclaw/
 ├── apps/api/              # FastAPI backend
 │   ├── core/              #   Orchestrator, planner, policy, executor, audit
-│   ├── providers/         #   LLM provider abstraction (Anthropic, Gemini)
+│   ├── providers/         #   LLM provider abstraction (Anthropic, Gemini, Ollama)
 │   ├── skills/            #   V1 tool implementations + registry
 │   ├── memory/            #   Memory manager, hybrid retrieval, embeddings, vector store
 │   └── models/            #   Pydantic models (Run, ToolResult, ErrorKind, etc.)
 ├── apps/web/              # React + TypeScript frontend
 │   └── src/components/    #   ChatPanel, PlanPreview, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser
-├── tests/                 # pytest test suite (258 tests)
+├── tests/                 # pytest test suite (269 tests)
 ├── scripts/               # seed_demo.py (workspace + memory setup), export_memory.py
 ├── docs/                  # Architecture and design documentation
 └── requirements.txt       # Python dependencies

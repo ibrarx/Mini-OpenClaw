@@ -83,7 +83,19 @@ class TestFactory:
 
     def test_provider_type_enum_values(self) -> None:
         """Whitelist of supported provider IDs is small and stable."""
-        assert set(p.value for p in ProviderType) == {"anthropic", "gemini"}
+        assert set(p.value for p in ProviderType) == {"anthropic", "gemini", "ollama"}
+
+    def test_explicit_ollama(self) -> None:
+        s = Settings(llm_provider="ollama")
+        p = build_provider(s)
+        assert p.name == "ollama"
+        assert p.model == s.ollama_model
+
+    def test_ollama_no_key_needed(self) -> None:
+        """Ollama must not require an API key."""
+        s = Settings(llm_provider="ollama", anthropic_api_key="", gemini_api_key="")
+        p = build_provider(s)
+        assert p.name == "ollama"
 
 
 # ===========================================================================
@@ -446,6 +458,155 @@ class TestGeminiProvider:
         assert len(out.tool_calls) == 1
         assert out.tool_calls[0].name == "list_files"
         assert out.tool_calls[0].arguments == {"path": "."}
+
+
+# ===========================================================================
+# OllamaProvider
+# ===========================================================================
+
+
+def _ollama_response(text: str, finish_reason: str = "stop") -> dict[str, Any]:
+    """Mimic Ollama's OpenAI-compatible response JSON."""
+    return {
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": text},
+                "finish_reason": finish_reason,
+            }
+        ],
+        "model": "llama3.2",
+    }
+
+
+class TestOllamaProvider:
+    def test_instantiation_no_api_key(self) -> None:
+        """OllamaProvider must not require an API key."""
+        from apps.api.providers.ollama_provider import OllamaProvider
+
+        p = OllamaProvider(base_url="http://localhost:11434", model="llama3.2")
+        assert p.name == "ollama"
+        assert p.model == "llama3.2"
+
+    def test_build_messages_includes_system(self) -> None:
+        """System messages go into the messages array (not a separate param)."""
+        from apps.api.providers.ollama_provider import OllamaProvider
+
+        msgs = [
+            LLMMessage(role="user", content="hello"),
+            LLMMessage(role="assistant", content="hi"),
+        ]
+        out = OllamaProvider._build_messages(msgs, system="be brief")
+        assert out[0] == {"role": "system", "content": "be brief"}
+        assert out[1] == {"role": "user", "content": "hello"}
+        assert out[2] == {"role": "assistant", "content": "hi"}
+
+    def test_build_messages_system_from_array_when_no_explicit(self) -> None:
+        """If no explicit system kwarg, system messages from the array survive."""
+        from apps.api.providers.ollama_provider import OllamaProvider
+
+        msgs = [
+            LLMMessage(role="system", content="from array"),
+            LLMMessage(role="user", content="hello"),
+        ]
+        out = OllamaProvider._build_messages(msgs, system=None)
+        assert out[0] == {"role": "system", "content": "from array"}
+        assert out[1] == {"role": "user", "content": "hello"}
+
+    def test_build_messages_no_duplicate_system(self) -> None:
+        """If explicit system is provided, system messages from the array are dropped."""
+        from apps.api.providers.ollama_provider import OllamaProvider
+
+        msgs = [
+            LLMMessage(role="system", content="old"),
+            LLMMessage(role="user", content="hello"),
+        ]
+        out = OllamaProvider._build_messages(msgs, system="new")
+        roles = [m["role"] for m in out]
+        # Only one system message (the explicit one), not two.
+        assert roles.count("system") == 1
+        assert out[0]["content"] == "new"
+
+    @pytest.mark.asyncio
+    async def test_connection_error(self) -> None:
+        """ConnectError maps to ProviderConfigError with helpful message."""
+        import httpx
+        from apps.api.providers.ollama_provider import OllamaProvider
+
+        p = OllamaProvider(base_url="http://localhost:99999", model="test")
+
+        with patch("httpx.AsyncClient.post", side_effect=httpx.ConnectError("refused")):
+            with pytest.raises(ProviderConfigError, match="Cannot connect to Ollama"):
+                await p.generate(messages=[LLMMessage(role="user", content="hi")])
+
+    @pytest.mark.asyncio
+    async def test_model_not_found(self) -> None:
+        """404 response maps to ProviderConfigError with pull instructions."""
+        from apps.api.providers.ollama_provider import OllamaProvider
+
+        p = OllamaProvider(model="nonexistent-model")
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 404
+        mock_resp.text = "model not found"
+
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp):
+            with pytest.raises(ProviderConfigError, match="ollama pull nonexistent-model"):
+                await p.generate(messages=[LLMMessage(role="user", content="hi")])
+
+    @pytest.mark.asyncio
+    async def test_json_mode_adds_format(self) -> None:
+        """generate_json must add 'format': 'json' to the request body."""
+        from apps.api.providers.ollama_provider import OllamaProvider
+
+        p = OllamaProvider(model="llama3.2")
+        payload = {"task_type": "direct_answer", "steps": []}
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = _ollama_response(json.dumps(payload))
+
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp) as mock_post:
+            out = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
+            assert out == payload
+            # Verify the request body included format: json.
+            call_kwargs = mock_post.call_args
+            body = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
+            assert body["format"] == "json"
+
+    @pytest.mark.asyncio
+    async def test_timeout_handling(self) -> None:
+        """Timeout maps to ProviderTimeoutError."""
+        import httpx
+        from apps.api.providers.ollama_provider import OllamaProvider
+
+        p = OllamaProvider(model="llama3.2")
+
+        with patch("httpx.AsyncClient.post", side_effect=httpx.ReadTimeout("timed out")):
+            with pytest.raises(ProviderTimeoutError, match="timed out"):
+                await p.generate(
+                    messages=[LLMMessage(role="user", content="hi")],
+                    timeout=1.0,
+                )
+
+    @pytest.mark.asyncio
+    async def test_generate_happy_path(self) -> None:
+        """Successful generate returns normalized LLMResponse."""
+        from apps.api.providers.ollama_provider import OllamaProvider
+
+        p = OllamaProvider(model="llama3.2")
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = _ollama_response("hello from ollama")
+
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp):
+            resp = await p.generate(
+                messages=[LLMMessage(role="user", content="hi")],
+                system="be brief",
+            )
+            assert resp.text == "hello from ollama"
+            assert resp.finish_reason == "stop"
+            assert resp.tool_calls == []
 
 
 # ===========================================================================
