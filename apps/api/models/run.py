@@ -115,6 +115,7 @@ class Observation(BaseModel):
     result: ToolResult | None = None
     timestamp: str = ""
     token_estimate: int = 0         # estimated tokens consumed at this iteration
+    compression_level: str = ""     # "none" | "partial" | "aggressive" — context compression state
 
 
 class Run(BaseModel):

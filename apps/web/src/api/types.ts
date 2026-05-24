@@ -50,6 +50,7 @@ export interface Observation {
   result?: ToolResult | null;
   timestamp: string;
   token_estimate?: number;
+  compression_level?: string;
 }
 
 export type GoalStatus = "pending" | "in_progress" | "done" | "skipped";

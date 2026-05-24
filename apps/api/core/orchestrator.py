@@ -296,6 +296,7 @@ class Orchestrator:
             # Extract context window metadata for token tracking
             context_meta = decision.pop("_context_meta", {})
             tokens_used = context_meta.get("tokens_used", 0)
+            compression_level = context_meta.get("compression", "")
 
             # FINAL ANSWER
             if action == "final_answer":
@@ -317,7 +318,7 @@ class Orchestrator:
                     step_id=step_id, iteration=run.iterations,
                     reasoning=decision.get("reasoning", ""),
                     timestamp=now,
-                    token_estimate=tokens_used,
+                    token_estimate=tokens_used, compression_level=compression_level,
                 )
                 run.observations.append(obs)
                 run.final_response = decision.get("response", "Task completed.")
@@ -381,7 +382,7 @@ class Orchestrator:
                     tool=tool_name, args=tool_args, reasoning=reasoning,
                     user_announcement="I seem to be going in circles. Let me try a different approach...",
                     result=blocked_result, timestamp=now,
-                    token_estimate=tokens_used,
+                    token_estimate=tokens_used, compression_level=compression_level,
                 )
                 run.observations.append(obs)
                 await self._save_run(run)
@@ -401,7 +402,7 @@ class Orchestrator:
                     tool=tool_name, args=tool_args, reasoning=reasoning,
                     user_announcement="Hmm, I tried something that didn't work. Let me try another approach...",
                     result=error_result, timestamp=now,
-                    token_estimate=tokens_used,
+                    token_estimate=tokens_used, compression_level=compression_level,
                 )
                 run.observations.append(obs)
                 await self._save_run(run)
@@ -440,7 +441,7 @@ class Orchestrator:
                             tool=tool_name, args=tool_args, reasoning=reasoning,
                             user_announcement="That action isn't allowed by the workspace policy. Let me find another way...",
                             result=denied_result, timestamp=now,
-                            token_estimate=tokens_used,
+                            token_estimate=tokens_used, compression_level=compression_level,
                         )
                         run.observations.append(obs)
                         await self._save_run(run)
@@ -466,7 +467,7 @@ class Orchestrator:
                         tool=tool_name, args=tool_args, reasoning=reasoning,
                         user_announcement="That action isn't allowed by the workspace policy. Let me find another way...",
                         result=denied_result, timestamp=now,
-                        token_estimate=tokens_used,
+                        token_estimate=tokens_used, compression_level=compression_level,
                     )
                     run.observations.append(obs)
                     await self._save_run(run)
@@ -491,7 +492,7 @@ class Orchestrator:
                     tool=tool_name, args=tool_args, reasoning=reasoning,
                     user_announcement=decision.get("user_announcement", ""),
                     timestamp=now,
-                    token_estimate=tokens_used,
+                    token_estimate=tokens_used, compression_level=compression_level,
                 )
                 run.observations.append(pending_obs)
                 await self._save_run(run)
@@ -593,7 +594,7 @@ class Orchestrator:
                     tool=tool_name, args=tool_args, reasoning=reasoning,
                     user_announcement=announcement,
                     result=result, timestamp=datetime.now(timezone.utc).isoformat(),
-                    token_estimate=tokens_used,
+                    token_estimate=tokens_used, compression_level=compression_level,
                 )
                 run.observations.append(obs)
 

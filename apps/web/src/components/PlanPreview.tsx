@@ -314,6 +314,12 @@ function ContextBar({ run }: { run: Run }) {
     : "";
   const label = modelShort ? `Context (${modelShort})` : "Context window";
 
+  // Get the latest compression level from the most recent observation that has one
+  const latestCompression = [...run.observations]
+    .reverse()
+    .find((obs) => obs.compression_level && obs.compression_level !== "none")
+    ?.compression_level || "none";
+
   return (
     <div className="mb-1.5">
       <div className="flex items-center gap-2">
@@ -330,11 +336,28 @@ function ContextBar({ run }: { run: Run }) {
           </span>
         </div>
       </div>
+      {/* Subtitle: only appears when compression is active */}
+      {latestCompression === "partial" && !isOverflow && (
+        <div className="flex items-center gap-1.5 mt-0.5 ml-[128px] px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 w-fit">
+          <AlertTriangle size={10} className="text-amber-600 dark:text-amber-400 shrink-0" />
+          <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400">
+            Older steps summarized to save context
+          </span>
+        </div>
+      )}
+      {latestCompression === "aggressive" && !isOverflow && (
+        <div className="flex items-center gap-1.5 mt-0.5 ml-[128px] px-2 py-0.5 rounded bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 w-fit">
+          <AlertTriangle size={10} className="text-red-600 dark:text-red-400 shrink-0" />
+          <span className="text-[10px] font-medium text-red-700 dark:text-red-400">
+            Only last 2 steps in full detail — earlier steps heavily compressed
+          </span>
+        </div>
+      )}
       {isOverflow && (
-        <div className="flex items-center gap-1 mt-0.5 ml-[128px]">
-          <span className="text-[10px] font-medium text-red-600 dark:text-red-400 flex items-center gap-0.5">
-            <AlertTriangle size={10} />
-            Context window exceeded — compression active
+        <div className="flex items-center gap-1.5 mt-0.5 ml-[128px] px-2 py-0.5 rounded bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 w-fit">
+          <AlertTriangle size={10} className="text-red-600 dark:text-red-400 shrink-0" />
+          <span className="text-[10px] font-medium text-red-700 dark:text-red-400">
+            Context window exceeded — output quality may degrade
           </span>
         </div>
       )}
