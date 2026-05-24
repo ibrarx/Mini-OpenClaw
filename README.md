@@ -309,6 +309,34 @@ The frontend shows a matching **progress bar** below the iteration counter. The 
 
 To test budget pressure visually, set `REACT_MAX_ITERATIONS=5` in `.env` and ask a multi-step question like *"Read all files in the workspace and summarize the project."*
 
+### Context window management
+
+The ReAct loop sends all previous observations to the LLM on every iteration. Without limits, the prompt grows unboundedly and can exceed the model's context window — especially critical for local models with 4K–8K context limits.
+
+Mini-OpenClaw manages this with three mechanisms:
+
+**Token estimation.** A lightweight `char/4` heuristic (in `core/token_utils.py`) estimates token counts without requiring external tokenizers. A built-in lookup table maps model names to their context window sizes (e.g. `claude-sonnet-4` → 200K, `llama3.2` → 8K, `phi3` → 4K). Unknown models fall back to a conservative 8K default.
+
+**Progressive summarization.** Before each ReAct iteration, the planner's `_build_observation_context()` method calculates a token budget (context window minus 30% reserve for the response, minus system prompt and user message), then decides how to format observations:
+
+| Context pressure | Strategy | What the LLM sees |
+|-----------------|----------|--------------------|
+| < 70% of budget | **Full context** — no compression | All observations with complete tool output |
+| 70–90% of budget | **Partial compression** — summarize old steps | Observations older than the last 3 reduced to one-liners (`[N] tool: status`), last 3 kept in full |
+| > 90% of budget | **Aggressive compression** — preserve only recent context | All but the last 2 observations reduced to one-liners, last 2 kept in full |
+
+The last 2 observations are always preserved in full, ensuring the LLM has immediate context for its next decision.
+
+**UI visibility.** The frontend shows a context window progress bar alongside the iteration budget bar. The bar displays the model name, token usage, and context window size. When compression activates, a subtitle appears below the bar:
+
+- **Partial compression** — amber: *"Older steps summarized to save context"*
+- **Aggressive compression** — red: *"Only last 2 steps in full detail — earlier steps heavily compressed"*
+- **Overflow** — red: *"Context window exceeded — output quality may degrade"*
+
+The context bar is silent during normal operation (the common case for Claude's 200K window) and only surfaces when it matters.
+
+**Testing compression.** To see compression in action with a large-context model, set `CONTEXT_WINDOW_OVERRIDE=4096` in `.env` and run a multi-step query. The override forces the planner to treat the model as if it has a 4K context window, triggering progressive summarization within a few iterations.
+
 ## Switching LLM providers
 
 Mini-OpenClaw is LLM-provider-agnostic. The planner talks to an abstract
@@ -479,6 +507,7 @@ All settings are read from the `.env` file (see `.env.example`):
 | `REACT_USE_GOALS` | Generate a goal checklist before the ReAct loop (hybrid Plan→ReAct) | `false` |
 | `REACT_MAX_REPLANS` | Maximum mid-loop replans (0 = goals only, no replanning; clamped 0–5) | `2` |
 | `REACT_BUDGET_WARN_PCT` | Warn the LLM when this percentage of the iteration budget remains (clamped 10–80). Nudges the agent toward efficiency (not a hard stop). Triggers the UI progress bar turning red. | `30` |
+| `CONTEXT_WINDOW_OVERRIDE` | Override the auto-detected context window size (in tokens). `0` = auto-detect from model name. Set to e.g. `4096` to test compression behavior with large-context models. | `0` |
 | `REACT_READ_FILE_MAX_BATCH` | Maximum files per batch `read_file` call | `10` |
 | `REACT_READ_FILE_MAX_CHARS` | Maximum total output characters per `read_file` call | `50000` |
 | `SUMMARY_INTERVAL` | Auto-generate a summary every N completed runs (0 = disable) | `5` |
@@ -500,6 +529,7 @@ The test suite covers:
 
 | Test file | What it tests | Count |
 |-----------|--------------|-------|
+| `test_context.py` | Token estimation, context window lookup, progressive summarization, compression levels | 22 |
 | `test_memory_semantic.py` | Hybrid search, embedding, vector store, planner wiring, summaries | 44 |
 | `test_policy.py` | Path validation, shell blocking, injection detection, risk classification | 38 |
 | `test_providers.py` | Anthropic/Gemini/Ollama provider translation, factory, JSON extraction | 48 |
