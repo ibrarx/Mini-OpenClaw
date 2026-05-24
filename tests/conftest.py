@@ -5,6 +5,7 @@ Provides temporary workspace directories, test database paths,
 and common test helpers.
 """
 
+import os
 from pathlib import Path
 
 import aiosqlite
@@ -13,6 +14,24 @@ import pytest_asyncio
 
 from apps.api.database import create_tables, get_connection
 from apps.api.skills.base import ToolContext
+
+
+@pytest.fixture(autouse=True)
+def _isolate_from_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prevent the local .env file from polluting test Settings.
+
+    pydantic-settings reads .env from CWD automatically.  If a developer has
+    e.g. LLM_PROVIDER=ollama in their .env, it overrides the code default
+    inside the test suite, causing spurious failures.
+
+    Environment variables take precedence over .env values in pydantic-settings,
+    so we set the critical ones to their code defaults.  Individual tests that
+    need a different provider pass it explicitly to Settings(...).
+    """
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    # Clear API keys so tests must supply them explicitly
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
 
 @pytest.fixture
