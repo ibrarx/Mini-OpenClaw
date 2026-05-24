@@ -220,6 +220,11 @@ function ReactTimeline({ run, expandedStep, onToggleStep, compact }: ReactTimeli
   );
 }
 
+// ── Shared label width for bar alignment ─────────────
+const BAR_LABEL = "min-w-[120px] text-[11px] font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap";
+const BAR_HEIGHT = "h-4";
+const BAR_OUTER = `relative flex-1 ${BAR_HEIGHT} rounded bg-gray-100 dark:bg-gray-800 overflow-hidden border border-gray-200 dark:border-gray-700`;
+
 // ── Budget Progress Bar ──────────────────────────────
 
 interface BudgetBarProps {
@@ -248,51 +253,27 @@ function BudgetBar({ iterations, maxIterations, isActive }: BudgetBarProps) {
   const warnThreshold = Math.max(1, Math.floor(maxIterations * 0.3));
   const isLow = remaining <= warnThreshold && remaining > 0;
 
-  // Show inner label only when the filled portion is wide enough (≥ 35%)
-  const showUsedLabel = pct >= 35;
-  // Show right label only when unfilled portion is wide enough (≥ 20%)
-  const showLeftLabel = pctLeft >= 20;
-
   return (
-    <div className="mb-2">
-      {/* A1: "Iteration budget" label left of bar */}
-      <div className="flex items-center gap-2.5">
-        <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
-          Iteration budget
-        </span>
-        <div className="relative flex-1 h-7 rounded-lg bg-gray-100 dark:bg-gray-800 overflow-hidden border border-gray-200 dark:border-gray-700">
+    <div className="mb-1.5">
+      <div className="flex items-center gap-2">
+        <span className={BAR_LABEL}>Iteration budget</span>
+        <div className={BAR_OUTER}>
           <div
-            className={`absolute inset-y-0 left-0 rounded-l-lg transition-all duration-500 ease-out ${barColor} ${
+            className={`absolute inset-y-0 left-0 rounded-l transition-all duration-500 ease-out ${barColor} ${
               isActive ? "animate-pulse" : ""
             }`}
             style={{ width: `${Math.min(pct, 100)}%` }}
           />
-          {/* "X% used" on filled portion */}
-          {showUsedLabel && (
-            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] font-medium text-white whitespace-nowrap">
-              {pct}% used
-            </span>
-          )}
-          {/* "Y% left" on empty portion */}
-          {showLeftLabel && remaining > 0 && (
-            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
-              {pctLeft}% left
-            </span>
-          )}
-          {/* Fallback: when both sides too narrow */}
-          {!showUsedLabel && !showLeftLabel && (
-            <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">
-              {pct}% used · {pctLeft}% left
-            </span>
-          )}
+          <span className="absolute inset-0 flex items-center justify-center text-[10px] font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">
+            {used} / {maxIterations} — {pct}% used
+          </span>
         </div>
       </div>
-      {/* Low budget warning below the bar */}
       {isLow && remaining > 0 && (
-        <div className="flex items-center gap-1 mt-1">
+        <div className="flex items-center gap-1 mt-0.5 ml-[128px]">
           <span className="text-[10px] font-medium text-red-600 dark:text-red-400 flex items-center gap-0.5">
             <AlertTriangle size={10} />
-            Low budget
+            Low budget — {remaining} step{remaining !== 1 ? "s" : ""} left
           </span>
         </div>
       )}
@@ -309,71 +290,54 @@ function ContextBar({ run }: { run: Run }) {
   const tokensUsed = Math.max(...run.observations.map((obs) => obs.token_estimate || 0), 0);
   if (tokensUsed === 0) return null;
 
-  const pct = Math.round((tokensUsed / run.context_window) * 100);
-  const pctLeft = 100 - pct;
+  // Cap percentage at 100 for display, but track overflow
+  const rawPct = Math.round((tokensUsed / run.context_window) * 100);
+  const pct = Math.min(rawPct, 100);
+  const isOverflow = rawPct > 100;
 
-  // Color thresholds: blue < 50%, amber 50-75%, red > 75%
+  // Color thresholds: blue < 50%, amber 50-75%, red > 75% or overflow
   const barColor =
-    pct <= 50
-      ? "bg-blue-500"
-      : pct <= 75
-        ? "bg-amber-500"
-        : "bg-red-500";
+    isOverflow || pct > 75
+      ? "bg-red-500"
+      : pct <= 50
+        ? "bg-blue-500"
+        : "bg-amber-500";
 
   const isActive = run.status === "reacting";
 
   // Format numbers: 8192 → "8K", 200000 → "200K"
   const fmt = (n: number) => n >= 1000 ? `${Math.round(n / 1000)}K` : `${n}`;
 
-  // Show inner label only when the filled portion is wide enough (≥ 35%)
-  const showUsedLabel = pct >= 35;
-  // Show right label only when unfilled portion is wide enough (≥ 20%)
-  const showLeftLabel = pctLeft >= 20;
-
-  // Build label: "Context · model-name"
-  const label = run.model_name
-    ? `Context · ${run.model_name}`
-    : "Context window";
+  // Build label: "Context (model)" — short and clean
+  const modelShort = run.model_name
+    ? run.model_name.replace(/-\d{8}$/, "")  // strip date suffix like -20250514
+    : "";
+  const label = modelShort ? `Context (${modelShort})` : "Context window";
 
   return (
-    <div className="mb-2">
-      <div className="flex items-center gap-2.5">
-        <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
-          {label}
-        </span>
-        <div className="relative flex-1 h-7 rounded-lg bg-gray-100 dark:bg-gray-800 overflow-hidden border border-gray-200 dark:border-gray-700">
+    <div className="mb-1.5">
+      <div className="flex items-center gap-2">
+        <span className={BAR_LABEL}>{label}</span>
+        <div className={BAR_OUTER}>
           <div
-            className={`absolute inset-y-0 left-0 rounded-l-lg transition-all duration-500 ease-out ${barColor} ${
+            className={`absolute inset-y-0 left-0 rounded-l transition-all duration-500 ease-out ${barColor} ${
               isActive ? "animate-pulse" : ""
             }`}
-            style={{ width: `${Math.min(pct, 100)}%` }}
+            style={{ width: `${pct}%` }}
           />
-          {/* "X% used" on filled portion */}
-          {showUsedLabel && (
-            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] font-medium text-white whitespace-nowrap">
-              {pct}% used
-            </span>
-          )}
-          {/* "Y% left" on empty portion */}
-          {showLeftLabel && pctLeft > 0 && (
-            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
-              {pctLeft}% left
-            </span>
-          )}
-          {/* Fallback: when both sides too narrow */}
-          {!showUsedLabel && !showLeftLabel && (
-            <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">
-              {pct}% used · {pctLeft}% left
-            </span>
-          )}
+          <span className="absolute inset-0 flex items-center justify-center text-[10px] font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">
+            ~{fmt(tokensUsed)} / {fmt(run.context_window)} tokens{isOverflow ? " ⚠ overflow" : ""}
+          </span>
         </div>
       </div>
-      {/* Token details below the bar */}
-      <div className="flex items-center justify-end mt-0.5">
-        <span className="text-[10px] text-gray-400 dark:text-gray-500">
-          ~{fmt(tokensUsed)} / {fmt(run.context_window)} tokens
-        </span>
-      </div>
+      {isOverflow && (
+        <div className="flex items-center gap-1 mt-0.5 ml-[128px]">
+          <span className="text-[10px] font-medium text-red-600 dark:text-red-400 flex items-center gap-0.5">
+            <AlertTriangle size={10} />
+            Context window exceeded — compression active
+          </span>
+        </div>
+      )}
     </div>
   );
 }
