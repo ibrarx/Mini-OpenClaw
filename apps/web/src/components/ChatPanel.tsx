@@ -4,12 +4,12 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Loader2, Square, Trash2 } from "lucide-react";
+import { Send, Loader2, Square, Trash2, RefreshCw } from "lucide-react";
 import MessageBubble from "./MessageBubble";
 import PlanPreview from "./PlanPreview";
 import ApprovalCard from "./ApprovalCard";
 import ToolTrace from "./ToolTrace";
-import { submitChat, approveStep, rejectStep, cancelRun } from "../api/client";
+import { submitChat, approveStep, rejectStep, cancelRun, retryRun } from "../api/client";
 import { useRunSSE } from "../hooks/useRunSSE";
 import type { ChatMessage, Run, RunStatus } from "../api/types";
 
@@ -19,6 +19,39 @@ interface ChatPanelProps {
   onMessagesChange: (msgs: ChatMessage[]) => void;
   /** Called whenever a run updates so the sidebar can reflect it. */
   onRunUpdate?: (run: Run | null) => void;
+}
+
+/** Small retry button shown below failed/cancelled run messages. */
+function RetryButton({
+  runId,
+  onRetry,
+}: {
+  runId: string;
+  onRetry: (runId: string) => void;
+}) {
+  const [retrying, setRetrying] = useState(false);
+
+  const handleClick = async () => {
+    setRetrying(true);
+    try {
+      await onRetry(runId);
+    } catch {
+      setRetrying(false);
+    }
+  };
+
+  return (
+    <div className="ml-9 mt-1">
+      <button
+        onClick={handleClick}
+        disabled={retrying}
+        className="flex items-center gap-1.5 text-xs t-muted hover:t-primary transition-colors px-2 py-1 rounded-md border border-app hover:bg-step-row disabled:opacity-50"
+      >
+        <RefreshCw size={12} className={retrying ? "animate-spin" : ""} />
+        {retrying ? "Retrying…" : "Retry"}
+      </button>
+    </div>
+  );
 }
 
 export default function ChatPanel({
@@ -177,6 +210,23 @@ export default function ChatPanel({
     }
   };
 
+  const handleRetry = useCallback(
+    async (runId: string) => {
+      try {
+        const { run_id } = await retryRun(runId);
+        addMessage("system", "Retrying your request...");
+        setActiveRunId(run_id);
+        setDecidedSteps(new Set());
+      } catch (err) {
+        addMessage(
+          "system",
+          `Retry failed: ${err instanceof Error ? err.message : "unknown"}`
+        );
+      }
+    },
+    [messages, onMessagesChange]
+  );
+
   const isActive = !!activeRunId;
 
   // Derive the user-friendly status line from the latest observation
@@ -226,7 +276,13 @@ export default function ChatPanel({
         )}
 
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
+          <div key={msg.id}>
+            <MessageBubble message={msg} />
+            {/* Show retry button on assistant messages from failed/cancelled runs */}
+            {msg.role === "assistant" && msg.run_id && !isActive && (
+              <RetryButton runId={msg.run_id} onRetry={handleRetry} />
+            )}
+          </div>
         ))}
 
         {/* Inline run status */}

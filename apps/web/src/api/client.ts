@@ -47,6 +47,13 @@ export async function submitChat(
   });
 }
 
+/** Retry a failed or cancelled run by re-submitting its original message. */
+export async function retryRun(
+  runId: string
+): Promise<{ run_id: string; status: string }> {
+  return apiFetch(`/chat/retry/${runId}`, { method: "POST" });
+}
+
 // ── Runs ──────────────────────────────────────────────
 
 export async function getRun(runId: string): Promise<Run> {

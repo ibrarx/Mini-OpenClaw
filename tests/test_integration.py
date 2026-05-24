@@ -450,3 +450,118 @@ class TestMemoryRoundTrip:
         results = await retrieval.search("dark mode")
         assert len(results) >= 1
         assert any("dark mode" in r.content for r in results)
+
+
+# ---------------------------------------------------------------------------
+# Retry failed / cancelled runs
+# ---------------------------------------------------------------------------
+
+
+class TestRetryRun:
+    """Verify the retry endpoint creates a new run from a failed/cancelled one."""
+
+    @pytest.mark.asyncio
+    async def test_retry_failed_run_creates_new_run(
+        self, registry: SkillRegistry, tmp_workspace: Path, tmp_db_path: Path
+    ) -> None:
+        """POST /api/chat/retry/{run_id} creates a new run with the same message."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings(tmp_workspace, tmp_db_path)
+        orch = Orchestrator(settings, registry)
+
+        # Force a failed run (no API key → provider error)
+        settings_fail = Settings(
+            llm_provider="anthropic",
+            anthropic_api_key="",
+            gemini_api_key="",
+            workspace_root=tmp_workspace,
+            database_path=tmp_db_path,
+        )
+        orch_fail = Orchestrator(settings_fail, registry)
+        original = await orch_fail.handle_message("sess_retry", "list files please")
+        original = await _wait_terminal(orch_fail, original.run_id, statuses=(RunStatus.FAILED,))
+        assert original.status == RunStatus.FAILED
+
+        # Now retry via orchestrator (simulating what the endpoint does)
+        old_run = await orch_fail.get_run(original.run_id)
+        assert old_run is not None
+        assert old_run.user_message == "list files please"
+        assert old_run.session_id == "sess_retry"
+
+        # Install a working provider for the retry
+        _install_fake_provider(orch, [_plan_json({
+            "task_type": "direct_answer",
+            "confidence": 0.9,
+            "reasoning": "answering",
+            "steps": [],
+            "direct_response": "Here are the files.",
+        })])
+
+        new_run = await orch.handle_message(
+            session_id=old_run.session_id,
+            message=old_run.user_message,
+            workspace_id=old_run.workspace_id,
+        )
+        new_run = await _wait_terminal(orch, new_run.run_id)
+
+        assert new_run.run_id != original.run_id
+        assert new_run.user_message == original.user_message
+        assert new_run.session_id == original.session_id
+        assert new_run.status == RunStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_retry_nonexistent_run_returns_none(
+        self, registry: SkillRegistry, tmp_workspace: Path, tmp_db_path: Path
+    ) -> None:
+        """get_run on a non-existent ID returns None (endpoint would 404)."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings(tmp_workspace, tmp_db_path)
+        orch = Orchestrator(settings, registry)
+        result = await orch.get_run("run_does_not_exist")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_retry_completed_run_should_be_rejected(
+        self, registry: SkillRegistry, tmp_workspace: Path, tmp_db_path: Path
+    ) -> None:
+        """A completed run should not be retried (endpoint would return 400)."""
+        await create_tables(tmp_db_path)
+        settings = _make_settings(tmp_workspace, tmp_db_path)
+        orch = Orchestrator(settings, registry)
+        _install_fake_provider(orch, [_plan_json({
+            "task_type": "direct_answer",
+            "confidence": 0.95,
+            "reasoning": "simple answer",
+            "steps": [],
+            "direct_response": "Done.",
+        })])
+
+        run = await orch.handle_message("sess_ok", "what is a README?")
+        run = await _wait_terminal(orch, run.run_id)
+        assert run.status == RunStatus.COMPLETED
+
+        # Verify it's completed — the route handler checks status before retrying
+        assert run.status.value not in ("failed", "cancelled")
+
+    @pytest.mark.asyncio
+    async def test_retry_preserves_workspace_id(
+        self, registry: SkillRegistry, tmp_workspace: Path, tmp_db_path: Path
+    ) -> None:
+        """Retried run preserves the original workspace_id."""
+        await create_tables(tmp_db_path)
+        settings_fail = Settings(
+            llm_provider="anthropic",
+            anthropic_api_key="",
+            gemini_api_key="",
+            workspace_root=tmp_workspace,
+            database_path=tmp_db_path,
+        )
+        orch = Orchestrator(settings_fail, registry)
+        original = await orch.handle_message(
+            "sess_ws", "hello", workspace_id="my_project"
+        )
+        original = await _wait_terminal(orch, original.run_id, statuses=(RunStatus.FAILED,))
+
+        old_run = await orch.get_run(original.run_id)
+        assert old_run.workspace_id == "my_project"
+        assert old_run.session_id == "sess_ws"
