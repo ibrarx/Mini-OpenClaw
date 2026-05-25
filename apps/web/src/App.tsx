@@ -105,7 +105,9 @@ function AppContent() {
   const [page, setPage] = useState<Page>("chat");
   const [backendUp, setBackendUp] = useState<boolean | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [schedulerBadge, setSchedulerBadge] = useState(0); // count of recently fired tasks
+  // Track the last run_count the user has "seen" per task
+  const [seenRunCounts, setSeenRunCounts] = useState<Record<string, number>>({});
+  const [schedulerBadge, setSchedulerBadge] = useState(0);
 
   useEffect(() => {
     const check = () =>
@@ -117,22 +119,32 @@ function AppContent() {
     return () => clearInterval(id);
   }, []);
 
-  // Poll scheduler for recent activity (badge on nav)
+  // Poll scheduler for new runs (badge = unseen run count)
   useEffect(() => {
     const poll = () =>
       getScheduledTasks()
         .then((tasks) => {
-          const recent = tasks.filter((t) => {
-            if (!t.last_run_at) return false;
-            return Date.now() - new Date(t.last_run_at).getTime() < 120_000;
-          });
-          setSchedulerBadge(recent.length);
+          // If user is on the scheduler page, mark all as seen
+          if (page === "scheduler") {
+            const counts: Record<string, number> = {};
+            for (const t of tasks) counts[t.id] = t.run_count;
+            setSeenRunCounts(counts);
+            setSchedulerBadge(0);
+            return;
+          }
+          // Count new runs since last seen
+          let unseen = 0;
+          for (const t of tasks) {
+            const seen = seenRunCounts[t.id] ?? 0;
+            if (t.run_count > seen) unseen += t.run_count - seen;
+          }
+          setSchedulerBadge(unseen);
         })
         .catch(() => {});
     poll();
     const id = setInterval(poll, 10_000);
     return () => clearInterval(id);
-  }, []);
+  }, [page, seenRunCounts]);
 
   const navItems: { id: Page; label: string; icon: typeof MessageSquare }[] = [
     { id: "chat", label: "Chat", icon: MessageSquare },
@@ -172,9 +184,9 @@ function AppContent() {
             >
               <Icon size={14} />
               <span className="hidden sm:inline">{label}</span>
-              {id === "scheduler" && schedulerBadge > 0 && page !== "scheduler" && (
+              {id === "scheduler" && schedulerBadge > 0 && (
                 <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-emerald-500 text-[8px] font-bold text-white animate-pulse">
-                  {schedulerBadge}
+                  {schedulerBadge > 9 ? "9+" : schedulerBadge}
                 </span>
               )}
             </button>
