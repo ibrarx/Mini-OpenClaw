@@ -245,10 +245,14 @@ class Planner:
         provider: LLMProvider | None,
         registry: SkillRegistry | None = None,
         observation_max_chars: int = 1000,
+        read_file_obs_single: int = 3000,
+        read_file_obs_batch: int = 2000,
     ) -> None:
         self._provider = provider
         self._registry = registry
         self._observation_max_chars = observation_max_chars
+        self._read_file_obs_single = read_file_obs_single
+        self._read_file_obs_batch = read_file_obs_batch
 
     # ------------------------------------------------------------------
     # Public API — unchanged shape so the orchestrator does not care which
@@ -699,26 +703,28 @@ class Planner:
         tool = obs.get("tool", "")
 
         if tool == "read_file" and isinstance(output, dict):
-            return json.dumps(Planner._truncate_file_output(output), default=str)
+            return json.dumps(self._truncate_file_output(output), default=str)
         return json.dumps(output, default=str)[:self._observation_max_chars]
 
-    @staticmethod
-    def _truncate_file_output(output: dict[str, Any]) -> dict[str, Any]:
+    def _truncate_file_output(self, output: dict[str, Any]) -> dict[str, Any]:
         """Truncate read_file output for the planner context.
 
-        Single mode (has ``content`` key): truncate content to 3000 chars.
-        Batch mode (has ``files`` dict): truncate each file's content to 2000 chars.
+        Single mode (has ``content`` key): truncate to ``_read_file_obs_single``.
+        Batch mode (has ``files`` dict): truncate each file to ``_read_file_obs_batch``.
         """
+        batch_limit = self._read_file_obs_batch
+        single_limit = self._read_file_obs_single
+
         if "files" in output and isinstance(output["files"], dict):
             # Batch mode
             truncated_files: dict[str, Any] = {}
             for path, info in output["files"].items():
                 if isinstance(info, dict) and "content" in info:
                     content = info["content"]
-                    trunc = len(content) > 2000
+                    trunc = len(content) > batch_limit
                     truncated_files[path] = {
                         **info,
-                        "content": content[:2000],
+                        "content": content[:batch_limit],
                         "truncated": info.get("truncated", False) or trunc,
                     }
                 else:
@@ -728,10 +734,10 @@ class Planner:
         elif "content" in output:
             # Single mode
             content = output["content"]
-            trunc = len(content) > 3000
+            trunc = len(content) > single_limit
             return {
                 **output,
-                "content": content[:3000],
+                "content": content[:single_limit],
                 "truncated": output.get("truncated", False) or trunc,
             }
         return output

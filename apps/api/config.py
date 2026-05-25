@@ -88,9 +88,14 @@ class Settings(BaseSettings):
     react_read_file_max_chars: int = 50000  # max total output chars per read_file call
 
     # Max characters kept per tool observation when fed back to the planner.
-    # Applies to all tools except read_file (which has its own limits above).
+    # Applies to all tools except read_file (which has its own limits below).
     # Increase if the planner is missing data from search_in_files, run_shell_safe, etc.
     react_observation_max_chars: int = 1000
+
+    # Max characters kept per read_file observation when fed back to the planner.
+    # Single = one file read; batch = per-file limit in a multi-file read.
+    react_read_file_obs_single: int = 3000
+    react_read_file_obs_batch: int = 2000
 
     # ----- Self-reflection -----
     # Critique the agent's final answer before delivering it to the user.
