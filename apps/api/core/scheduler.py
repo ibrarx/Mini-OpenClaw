@@ -142,6 +142,22 @@ class TaskScheduler:
                 # Fire all due tasks
                 await self._fire_due_tasks()
 
+                # Safeguard: if active tasks exist but heap is empty
+                # (all entries were stale/popped), rebuild the heap so
+                # tasks don't get orphaned.
+                if not self._heap and not self._inflight:
+                    active = [
+                        t for t in self._tasks.values()
+                        if t.status == TaskStatus.ACTIVE
+                    ]
+                    if active:
+                        for t in active:
+                            heapq.heappush(self._heap, (t.next_run_at, t.id))
+                        logger.warning(
+                            "Scheduler: rebuilt heap with %d orphaned active task(s)",
+                            len(active),
+                        )
+
             except asyncio.CancelledError:
                 return
             except Exception as exc:
