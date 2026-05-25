@@ -31,10 +31,17 @@ async def _export_async(db_path: Path, export_dir: Path) -> None:
     export_dir.mkdir(parents=True, exist_ok=True)
     mm = MemoryManager(db_path)
 
-    for mem_type in ("fact", "episode", "summary"):
+    type_to_filename = {
+        "fact": "facts",
+        "episode": "episodes",
+        "summary": "summaries",
+        "strategy": "strategies",
+        "preference": "preferences",
+    }
+    for mem_type, filename in type_to_filename.items():
         items = await mm.list_items(memory_type=mem_type, limit=10000)
         data = [i.model_dump() for i in items]
-        out = export_dir / f"{mem_type}s.json"
+        out = export_dir / f"{filename}.json"
         out.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
         print(f"Exported {len(data)} {mem_type}(s) to {out}")
 

@@ -121,6 +121,34 @@ export async function deleteMemoryItem(id: string): Promise<void> {
   await apiFetch(`/memory/${id}`, { method: "DELETE" });
 }
 
+/** Trigger a dream cycle to extract strategies and preferences. */
+export async function triggerDream(
+  workspaceId: string = "default"
+): Promise<{ strategies: number; preferences: number; skipped?: string; error?: string }> {
+  return apiFetch(`/memory/dream?workspace_id=${encodeURIComponent(workspaceId)}`, {
+    method: "POST",
+  });
+}
+
+/** Get pending dream insights awaiting user review. */
+export async function getPendingInsights(
+  workspaceId: string = "default"
+): Promise<MemoryItem[]> {
+  return apiFetch(`/memory/pending?workspace_id=${encodeURIComponent(workspaceId)}`);
+}
+
+/** Accept or reject a pending dream insight. */
+export async function reviewInsight(
+  itemId: string,
+  accepted: boolean,
+  editedContent?: string
+): Promise<MemoryItem> {
+  return apiFetch(`/memory/${itemId}/review`, {
+    method: "POST",
+    body: JSON.stringify({ accepted, edited_content: editedContent }),
+  });
+}
+
 // ── Tools ─────────────────────────────────────────────
 
 export async function getTools(): Promise<ToolManifest[]> {

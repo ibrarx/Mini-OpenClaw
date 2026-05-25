@@ -25,6 +25,7 @@ from apps.api.core.policy import PolicyEngine
 from apps.api.core.token_utils import get_context_window
 from apps.api.database import get_connection
 from apps.api.memory.embeddings import EmbeddingProvider
+from apps.api.memory.dreamer import Dreamer
 from apps.api.memory.manager import MemoryManager
 from apps.api.memory.retrieval import MemoryRetrieval
 from apps.api.memory.vector_store import VectorStore
@@ -74,6 +75,16 @@ class Orchestrator:
         except ProviderConfigError as exc:
             logger.warning("LLM provider not configured: %s", exc)
             self._planner = None
+
+        # Agent Dreams — post-run memory consolidation
+        self._dreamer: Dreamer | None = None
+        if self._planner and self._planner._provider:
+            self._dreamer = Dreamer(
+                self._planner._provider, self._memory, self._retrieval,
+                max_strategies=settings.dream_max_strategies,
+                max_preferences=settings.dream_max_preferences,
+                confidence_threshold=settings.dream_confidence_threshold,
+            )
 
     async def initialize_memory(self) -> None:
         """Create vector table and reindex. Call once at startup."""
@@ -999,6 +1010,9 @@ class Orchestrator:
             # Auto-generate conversation summary periodically
             await self._maybe_generate_summary(run.workspace_id)
 
+            # Agent Dreams — mine episodes for strategies and preferences
+            await self._maybe_dream(run.workspace_id)
+
         except Exception as exc:
             logger.warning("Failed to store episode for run %s: %s", run.run_id, exc)
 
@@ -1080,6 +1094,26 @@ class Orchestrator:
 
         except Exception as exc:
             logger.warning("Summary generation check failed: %s", exc)
+
+    async def _maybe_dream(self, workspace_id: str) -> None:
+        """Trigger a dream cycle if enough episodes have accumulated.
+
+        Runs as a fire-and-forget background task so the user never waits.
+        Controlled by ``settings.dream_interval`` (0 = disabled).
+        """
+        interval = self._settings.dream_interval
+        if interval <= 0 or not self._dreamer:
+            return
+        try:
+            ep_count = await self._memory.episode_count(workspace_id)
+            if ep_count < interval or ep_count % interval != 0:
+                return
+            # Fire-and-forget: don't block the run response
+            task = asyncio.create_task(self._dreamer.dream(workspace_id))
+            task.add_done_callback(self._task_done)
+            self._pending_tasks.append(task)
+        except Exception as exc:
+            logger.warning("Dream trigger check failed: %s", exc)
 
     async def _compensate_completed_steps(self, run: Run) -> list[ToolResult]:
         """Run saga compensation on all successfully completed mutating steps.

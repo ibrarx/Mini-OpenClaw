@@ -110,6 +110,17 @@ class Settings(BaseSettings):
     # Maximum number of summaries to keep. Oldest are deleted when exceeded.
     max_summaries: int = 3
 
+    # ----- Agent Dreams (memory consolidation) -----
+    # Dream every N episodes (0 = disabled). Dreams mine episodes for
+    # strategies and preferences, proposing them for user review.
+    dream_interval: int = 5
+    # Max active strategies and preferences to keep. When at cap, the
+    # lowest-confidence item is evicted if a new insight scores higher.
+    dream_max_strategies: int = 10
+    dream_max_preferences: int = 10
+    # Minimum confidence threshold for dream-generated insights.
+    dream_confidence_threshold: float = 0.6
+
     # ----- Derived -----
     @property
     def temp_dir(self) -> Path:

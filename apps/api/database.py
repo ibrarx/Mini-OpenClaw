@@ -85,12 +85,13 @@ CREATE TABLE IF NOT EXISTS audit_events (
 CREATE TABLE IF NOT EXISTS memory_items (
     id            TEXT PRIMARY KEY,
     workspace_id  TEXT NOT NULL DEFAULT 'default',
-    memory_type   TEXT NOT NULL CHECK (memory_type IN ('fact', 'episode', 'summary')),
+    memory_type   TEXT NOT NULL CHECK (memory_type IN ('fact', 'episode', 'summary', 'strategy', 'preference')),
     content       TEXT NOT NULL,
     summary       TEXT,
     source        TEXT,
     confidence    REAL DEFAULT 0.5,
     visibility    TEXT NOT NULL DEFAULT 'user_visible',
+    status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending_review', 'rejected')),
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL,
     run_id        TEXT
@@ -121,6 +122,7 @@ MIGRATIONS = [
     "ALTER TABLE runs ADD COLUMN context_window INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE runs ADD COLUMN model_name TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE runs ADD COLUMN reflection TEXT",
+    "ALTER TABLE memory_items ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
 ]
 
 

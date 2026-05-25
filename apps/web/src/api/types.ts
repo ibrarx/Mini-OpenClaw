@@ -23,7 +23,9 @@ export type StepStatus =
 
 export type RiskLevel = "safe" | "medium" | "high";
 
-export type MemoryType = "fact" | "episode" | "summary";
+export type MemoryType = "fact" | "episode" | "summary" | "strategy" | "preference";
+
+export type MemoryStatus = "active" | "pending_review" | "rejected";
 
 export interface ReflectionResult {
   overall_score: number;
@@ -116,6 +118,7 @@ export interface MemoryItem {
   source: string | null;
   confidence: number;
   visibility: string;
+  status: MemoryStatus;
   created_at: string;
   updated_at: string;
   /** Similarity score from search (0-1). Only present in search results. */

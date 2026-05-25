@@ -130,6 +130,8 @@ class MemoryRetrieval:
         """Build a rich context string for injection into the planner prompt.
 
         1. ALL stored facts (they're small and always relevant)
+        1b. Active strategies (inferred workflow patterns)
+        1c. Active preferences (inferred user traits)
         2. Top relevant episodes via hybrid search
         3. Most recent conversation summary if exists
         """
@@ -141,6 +143,22 @@ class MemoryRetrieval:
             fact_lines = [f"- {f.content}" for f in facts]
             sections.append(
                 "## Known Facts About User\n" + "\n".join(fact_lines)
+            )
+
+        # 1b. Strategies (inferred workflow patterns) — active only
+        strategies = await self._get_active_items(workspace_id, "strategy")
+        if strategies:
+            strat_lines = [f"- {s.content}" for s in strategies]
+            sections.append(
+                "## Known Strategies (how the user works)\n" + "\n".join(strat_lines)
+            )
+
+        # 1c. Preferences (inferred user traits) — active only
+        preferences = await self._get_active_items(workspace_id, "preference")
+        if preferences:
+            pref_lines = [f"- {p.content}" for p in preferences]
+            sections.append(
+                "## Inferred Preferences\n" + "\n".join(pref_lines)
             )
 
         # 2. Relevant episodes via hybrid search
@@ -443,6 +461,29 @@ class MemoryRetrieval:
         finally:
             await conn.close()
 
+    async def _get_active_items(
+        self,
+        workspace_id: str,
+        memory_type: str,
+        limit: int = 100,
+    ) -> list[MemoryItem]:
+        """Fetch only active (user-confirmed) items of a given type.
+
+        Used for strategies and preferences in planner context — pending
+        and rejected items are excluded.
+        """
+        conn = await get_connection(self._db_path)
+        try:
+            rows = await conn.execute_fetchall(
+                "SELECT * FROM memory_items "
+                "WHERE workspace_id = ? AND memory_type = ? AND status = 'active' "
+                "ORDER BY confidence DESC, created_at DESC LIMIT ?",
+                (workspace_id, memory_type, limit),
+            )
+            return [self._row_to_item(row) for row in rows]
+        finally:
+            await conn.close()
+
     async def _get_items_by_ids(self, item_ids: list[str]) -> list[MemoryItem]:
         """Fetch multiple memory items by their IDs."""
         if not item_ids:
@@ -460,6 +501,7 @@ class MemoryRetrieval:
 
     @staticmethod
     def _row_to_item(row: aiosqlite.Row) -> MemoryItem:
+        status_val = row["status"] if "status" in row.keys() else "active"
         return MemoryItem(
             id=row["id"],
             workspace_id=row["workspace_id"],
@@ -469,6 +511,7 @@ class MemoryRetrieval:
             source=row["source"],
             confidence=row["confidence"],
             visibility=row["visibility"],
+            status=status_val,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             run_id=row["run_id"],

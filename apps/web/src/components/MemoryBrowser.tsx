@@ -2,11 +2,12 @@
  * MemoryBrowser — browse, search (hybrid/keyword/vector), and test memory.
  *
  * Features:
- *  - Tab filter: All / Facts / Episodes / Summaries
+ *  - Tab filter: All / Facts / Episodes / Summaries / Strategies / Preferences
  *  - Search mode toggle: Hybrid (default) / Keyword / Vector
  *  - Similarity scores next to search results
  *  - "Test Memory" mode: see what the planner would receive for a query
  *  - Delete individual items
+ *  - Agent Dreams: trigger dream cycle, review pending insights
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -22,9 +23,21 @@ import {
   Zap,
   Type,
   Cpu,
-  FlaskConical,
+  Lightbulb,
+  Heart,
+  Sparkles,
+  Check,
+  X,
+  Pencil,
 } from "lucide-react";
-import { getMemory, searchMemory, deleteMemoryItem } from "../api/client";
+import {
+  getMemory,
+  searchMemory,
+  deleteMemoryItem,
+  triggerDream,
+  getPendingInsights,
+  reviewInsight,
+} from "../api/client";
 import type { MemoryItem, MemoryType } from "../api/types";
 import type { SearchMode } from "../api/client";
 
@@ -37,6 +50,8 @@ const TYPE_TABS: { label: string; value: MemoryType | "all"; icon: typeof Brain 
   { label: "Facts", value: "fact", icon: Brain },
   { label: "Episodes", value: "episode", icon: BookOpen },
   { label: "Summaries", value: "summary", icon: FileText },
+  { label: "Strategies", value: "strategy", icon: Lightbulb },
+  { label: "Preferences", value: "preference", icon: Heart },
 ];
 
 const SEARCH_MODES: { label: string; value: SearchMode; icon: typeof Zap; tip: string }[] = [
@@ -53,8 +68,12 @@ export default function MemoryBrowser({ workspaceId = "default" }: MemoryBrowser
   const [searchQuery, setSearchQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchMode, setSearchMode] = useState<SearchMode>("hybrid");
-  const [showSearchModes, setShowSearchModes] = useState(false);
   const [isSearchResult, setIsSearchResult] = useState(false);
+
+  // Dream state
+  const [pendingInsights, setPendingInsights] = useState<MemoryItem[]>([]);
+  const [dreaming, setDreaming] = useState(false);
+  const [dreamResult, setDreamResult] = useState<string | null>(null);
 
   const fetchItems = useCallback(async () => {
     setLoading(true);
@@ -71,9 +90,22 @@ export default function MemoryBrowser({ workspaceId = "default" }: MemoryBrowser
     }
   }, [workspaceId, activeTab]);
 
+  const fetchPending = useCallback(async () => {
+    try {
+      const data = await getPendingInsights(workspaceId);
+      setPendingInsights(data);
+    } catch {
+      // Non-critical, silently ignore
+    }
+  }, [workspaceId]);
+
   useEffect(() => {
     if (!searchQuery) fetchItems();
   }, [fetchItems, searchQuery]);
+
+  useEffect(() => {
+    fetchPending();
+  }, [fetchPending]);
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
@@ -103,6 +135,41 @@ export default function MemoryBrowser({ workspaceId = "default" }: MemoryBrowser
     }
   };
 
+  const handleDream = async () => {
+    setDreaming(true);
+    setDreamResult(null);
+    try {
+      const result = await triggerDream(workspaceId);
+      if (result.skipped) {
+        setDreamResult(`Skipped: ${result.skipped}`);
+      } else if (result.error) {
+        setDreamResult(`Error: ${result.error}`);
+      } else {
+        setDreamResult(
+          `Proposed ${result.strategies} strategies and ${result.preferences} preferences`
+        );
+        fetchPending();
+      }
+    } catch (err) {
+      setDreamResult(err instanceof Error ? err.message : "Dream failed");
+    } finally {
+      setDreaming(false);
+    }
+  };
+
+  const handleReview = async (id: string, accepted: boolean, editedContent?: string) => {
+    try {
+      await reviewInsight(id, accepted, editedContent);
+      setPendingInsights((prev) => prev.filter((item) => item.id !== id));
+      if (accepted) {
+        // Refresh main list to show newly active item
+        fetchItems();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Review failed");
+    }
+  };
+
   const clearSearch = () => {
     setSearchQuery("");
     setIsSearchResult(false);
@@ -112,10 +179,52 @@ export default function MemoryBrowser({ workspaceId = "default" }: MemoryBrowser
     <div className="p-4 h-full flex flex-col">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-medium t-secondary">Memory Browser</h2>
-        <button onClick={fetchItems} className="btn btn-ghost text-xs p-1" title="Refresh">
-          <RefreshCw size={12} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleDream}
+            disabled={dreaming}
+            className="btn btn-ghost text-xs p-1 flex items-center gap-1"
+            title="Trigger Agent Dream — analyse recent runs for patterns"
+          >
+            {dreaming ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <Sparkles size={12} />
+            )}
+            <span className="hidden sm:inline">Dream</span>
+          </button>
+          <button onClick={() => { fetchItems(); fetchPending(); }} className="btn btn-ghost text-xs p-1" title="Refresh">
+            <RefreshCw size={12} />
+          </button>
+        </div>
       </div>
+
+      {/* Dream result banner */}
+      {dreamResult && (
+        <div className="text-xs px-3 py-1.5 rounded mb-2 bg-purple-500/10 text-purple-600 border border-purple-500/20 flex items-center justify-between">
+          <span>🧠 {dreamResult}</span>
+          <button onClick={() => setDreamResult(null)} className="ml-2 hover:text-purple-800">
+            <X size={10} />
+          </button>
+        </div>
+      )}
+
+      {/* Pending insights review */}
+      {pendingInsights.length > 0 && (
+        <div className="mb-3 space-y-2">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-purple-600">
+            <Sparkles size={12} />
+            <span>{pendingInsights.length} insight{pendingInsights.length !== 1 ? "s" : ""} to review</span>
+          </div>
+          {pendingInsights.map((item) => (
+            <InsightReviewCard
+              key={item.id}
+              item={item}
+              onReview={handleReview}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Search bar */}
       <div className="flex gap-2 mb-2">
@@ -166,7 +275,7 @@ export default function MemoryBrowser({ workspaceId = "default" }: MemoryBrowser
       </div>
 
       {/* Type tabs */}
-      <div className="flex gap-1 mb-3">
+      <div className="flex gap-1 mb-3 flex-wrap">
         {TYPE_TABS.map(({ label, value, icon: Icon }) => (
           <button
             key={value}
@@ -209,6 +318,13 @@ export default function MemoryBrowser({ workspaceId = "default" }: MemoryBrowser
                 Use the chat to run a few tasks first!
               </p>
             )}
+            {!isSearchResult && (activeTab === "strategy" || activeTab === "preference") && (
+              <p className="text-xs t-faint text-center max-w-xs">
+                {activeTab === "strategy" ? "Strategies" : "Preferences"} are discovered
+                by Agent Dreams after enough completed tasks. Click the ✨ Dream button
+                or let them generate automatically.
+              </p>
+            )}
           </div>
         )}
 
@@ -234,6 +350,74 @@ export default function MemoryBrowser({ workspaceId = "default" }: MemoryBrowser
   );
 }
 
+/** Card for reviewing a pending dream insight. */
+function InsightReviewCard({
+  item,
+  onReview,
+}: {
+  item: MemoryItem;
+  onReview: (id: string, accepted: boolean, editedContent?: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState(item.content);
+
+  const typeIcon = item.memory_type === "strategy" ? Lightbulb : Heart;
+  const TypeIcon = typeIcon;
+  const typeColor =
+    item.memory_type === "strategy"
+      ? "border-purple-500 bg-purple-500/5"
+      : "border-pink-500 bg-pink-500/5";
+
+  return (
+    <div className={`card border-l-2 ${typeColor} p-3 animate-fade-in`}>
+      <div className="flex items-start gap-2">
+        <TypeIcon size={14} className="mt-0.5 flex-shrink-0 text-purple-500" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 mb-1">
+            <span className="badge bg-purple-500/20 text-purple-600 text-[10px]">
+              {item.memory_type} suggestion
+            </span>
+            <ConfidenceDot confidence={item.confidence} />
+          </div>
+          {editing ? (
+            <textarea
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              className="input-field text-sm w-full resize-none"
+              rows={2}
+            />
+          ) : (
+            <p className="text-sm t-primary leading-relaxed">{item.content}</p>
+          )}
+          <div className="flex items-center gap-1.5 mt-2">
+            <button
+              onClick={() => onReview(item.id, true, editing ? editText : undefined)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-600 hover:bg-emerald-500/30 transition-colors"
+              title="Accept this insight"
+            >
+              <Check size={10} /> Accept
+            </button>
+            <button
+              onClick={() => onReview(item.id, false)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-red-500/20 text-red-600 hover:bg-red-500/30 transition-colors"
+              title="Dismiss this insight"
+            >
+              <X size={10} /> Dismiss
+            </button>
+            <button
+              onClick={() => setEditing(!editing)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-600 hover:bg-amber-500/30 transition-colors"
+              title="Edit before accepting"
+            >
+              <Pencil size={10} /> {editing ? "Cancel" : "Edit"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MemoryCard({
   item,
   onDelete,
@@ -247,7 +431,19 @@ function MemoryCard({
     fact: "border-l-blue-500",
     episode: "border-l-purple-500",
     summary: "border-l-teal-500",
+    strategy: "border-l-violet-500",
+    preference: "border-l-pink-500",
   };
+
+  const statusBadge = item.status === "pending_review" ? (
+    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600">
+      pending review
+    </span>
+  ) : item.status === "rejected" ? (
+    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-500">
+      rejected
+    </span>
+  ) : null;
 
   return (
     <div
@@ -260,6 +456,7 @@ function MemoryCard({
               {item.memory_type}
             </span>
             <ConfidenceDot confidence={item.confidence} />
+            {statusBadge}
             {showScore && item.score !== undefined && item.score > 0 && (
               <span
                 className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 font-mono"
