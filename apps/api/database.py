@@ -125,6 +125,71 @@ MIGRATIONS = [
     "ALTER TABLE memory_items ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
 ]
 
+# ---------------------------------------------------------------------------
+# Heavy migration: recreate memory_items if the CHECK constraint is outdated.
+# SQLite cannot ALTER CHECK constraints, so we must copy-and-replace.
+# ---------------------------------------------------------------------------
+
+_RECREATE_MEMORY_ITEMS_SQL = """
+CREATE TABLE IF NOT EXISTS memory_items_new (
+    id            TEXT PRIMARY KEY,
+    workspace_id  TEXT NOT NULL DEFAULT 'default',
+    memory_type   TEXT NOT NULL CHECK (memory_type IN ('fact', 'episode', 'summary', 'strategy', 'preference')),
+    content       TEXT NOT NULL,
+    summary       TEXT,
+    source        TEXT,
+    confidence    REAL DEFAULT 0.5,
+    visibility    TEXT NOT NULL DEFAULT 'user_visible',
+    status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending_review', 'rejected')),
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    run_id        TEXT
+);
+
+INSERT OR IGNORE INTO memory_items_new
+    SELECT id, workspace_id, memory_type, content, summary, source,
+           confidence, visibility,
+           COALESCE(status, 'active'),
+           created_at, updated_at, run_id
+    FROM memory_items;
+
+DROP TABLE memory_items;
+
+ALTER TABLE memory_items_new RENAME TO memory_items;
+"""
+
+
+async def _maybe_recreate_memory_items(conn: aiosqlite.Connection) -> None:
+    """Recreate memory_items if its CHECK constraint doesn't support new types.
+
+    Detects the old constraint by trying to insert a temporary 'strategy' row.
+    If the insert fails with a CHECK constraint violation, we need to recreate.
+    """
+    needs_recreate = False
+    try:
+        # Probe: can we insert a strategy type?
+        await conn.execute(
+            "INSERT INTO memory_items (id, workspace_id, memory_type, content, "
+            "created_at, updated_at) VALUES ('__probe__', 'default', 'strategy', "
+            "'probe', '2000-01-01', '2000-01-01')"
+        )
+        # If it succeeded, the constraint is already updated — clean up
+        await conn.execute("DELETE FROM memory_items WHERE id = '__probe__'")
+        await conn.commit()
+    except Exception:
+        # CHECK constraint violation → old schema, needs recreation
+        needs_recreate = True
+        try:
+            await conn.rollback()
+        except Exception:
+            pass
+
+    if needs_recreate:
+        logger.info("Recreating memory_items table to support new memory types")
+        await conn.executescript(_RECREATE_MEMORY_ITEMS_SQL)
+        await conn.commit()
+        logger.info("memory_items table recreated successfully")
+
 
 async def get_connection(db_path: Path) -> aiosqlite.Connection:
     """Open an async SQLite connection with WAL mode enabled."""
@@ -151,6 +216,8 @@ async def create_tables(db_path: Path) -> None:
                 # Column already exists — expected for fresh or migrated DBs.
                 pass
         await conn.commit()
+        # Recreate memory_items if the CHECK constraint is outdated
+        await _maybe_recreate_memory_items(conn)
         logger.info("Database tables created successfully")
     finally:
         await conn.close()

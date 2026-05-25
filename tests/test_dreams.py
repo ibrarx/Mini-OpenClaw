@@ -505,3 +505,83 @@ async def test_store_dream_insight_rejects_invalid_type(db_path: Path) -> None:
 
     with pytest.raises(ValueError, match="strategy or preference"):
         await mm.store_dream_insight(MemoryType.EPISODE, "Not allowed", 0.8)
+
+
+# ── Database migration ───────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_migration_recreates_old_memory_items_table(tmp_path: Path) -> None:
+    """Simulate an old DB with the original CHECK constraint and verify migration."""
+    from apps.api.database import get_connection, create_tables as full_create_tables
+
+    db_path = tmp_path / "old.db"
+
+    # 1. Create the OLD schema manually (original CHECK constraint, no status column)
+    conn = await get_connection(db_path)
+    try:
+        await conn.executescript("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, metadata TEXT DEFAULT '{}'
+            );
+            CREATE TABLE IF NOT EXISTS messages (
+                id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL,
+                content TEXT NOT NULL, created_at TEXT NOT NULL, run_id TEXT
+            );
+            CREATE TABLE IF NOT EXISTS runs (
+                id TEXT PRIMARY KEY, session_id TEXT NOT NULL, workspace_id TEXT NOT NULL DEFAULT 'default',
+                status TEXT NOT NULL DEFAULT 'idle', user_message TEXT NOT NULL,
+                plan TEXT, final_response TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS run_steps (
+                id TEXT PRIMARY KEY, run_id TEXT NOT NULL, step_index INTEGER NOT NULL,
+                tool TEXT NOT NULL, args TEXT NOT NULL DEFAULT '{}', risk_level TEXT NOT NULL DEFAULT 'safe',
+                status TEXT NOT NULL DEFAULT 'pending', result TEXT, error TEXT, started_at TEXT, finished_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS approvals (
+                id TEXT PRIMARY KEY, run_id TEXT NOT NULL, step_id TEXT NOT NULL,
+                payload TEXT NOT NULL, approved INTEGER, decided_at TEXT, created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS audit_events (
+                id TEXT PRIMARY KEY, event_type TEXT NOT NULL, run_id TEXT, step_id TEXT,
+                data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS memory_items (
+                id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT 'default',
+                memory_type TEXT NOT NULL CHECK (memory_type IN ('fact', 'episode', 'summary')),
+                content TEXT NOT NULL, summary TEXT, source TEXT, confidence REAL DEFAULT 0.5,
+                visibility TEXT NOT NULL DEFAULT 'user_visible',
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL, run_id TEXT
+            );
+            CREATE TABLE IF NOT EXISTS tool_manifests (
+                name TEXT PRIMARY KEY, description TEXT NOT NULL, risk_level TEXT NOT NULL,
+                approval_required INTEGER NOT NULL DEFAULT 0, input_schema TEXT NOT NULL DEFAULT '{}',
+                output_schema TEXT NOT NULL DEFAULT '{}', registered_at TEXT NOT NULL
+            );
+        """)
+        await conn.commit()
+
+        # Insert a fact using the old schema
+        await conn.execute(
+            "INSERT INTO memory_items (id, workspace_id, memory_type, content, "
+            "created_at, updated_at) VALUES ('old_fact', 'default', 'fact', "
+            "'I existed before migration', '2025-01-01', '2025-01-01')"
+        )
+        await conn.commit()
+    finally:
+        await conn.close()
+
+    # 2. Run the full create_tables (which includes migration)
+    await full_create_tables(db_path)
+
+    # 3. Verify we can now insert strategy/preference types
+    mm = MemoryManager(db_path)
+    item = await mm.store_dream_insight(MemoryType.STRATEGY, "New strategy", 0.8)
+    assert item.memory_type == MemoryType.STRATEGY
+    assert item.status == MemoryStatus.PENDING_REVIEW
+
+    # 4. Verify old data survived the migration
+    items = await mm.list_items(memory_type="fact")
+    assert len(items) == 1
+    assert items[0].content == "I existed before migration"
+    assert items[0].status == MemoryStatus.ACTIVE  # default from migration
