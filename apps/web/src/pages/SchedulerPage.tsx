@@ -221,7 +221,7 @@ export default function SchedulerPage() {
 
   useEffect(() => {
     fetchTasks();
-    const interval = setInterval(fetchTasks, 5_000); // 5s for faster feedback
+    const interval = setInterval(fetchTasks, 15_000); // 15s refresh
     return () => clearInterval(interval);
   }, [fetchTasks]);
 
@@ -315,9 +315,11 @@ export default function SchedulerPage() {
             <Clock size={32} className="t-faint" />
             <p className="t-muted text-sm">No scheduled tasks yet.</p>
             <p className="t-faint text-xs max-w-xs text-center">
-              Ask the agent to schedule something — try{" "}
+              Ask the agent to schedule something.
+              <br />
+              Try:{" "}
               <span className="font-mono text-blue-400/70">
-                "check my workspace for new files every 5 minutes"
+                "Every 2 minutes, list all files in the workspace and tell me the total count"
               </span>
             </p>
           </div>
