@@ -227,7 +227,7 @@ function ReactTimeline({ run, expandedStep, onToggleStep, compact }: ReactTimeli
 
       {/* Self-reflection: live spinner while reviewing */}
       {isReflecting && (
-        <div className="mt-1.5 rounded-md bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800 px-2.5 py-2 flex items-center gap-2 text-xs text-violet-700 dark:text-violet-400 animate-fade-in">
+        <div className="mt-1.5 rounded-md bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800 px-2.5 py-1 flex items-center gap-2 text-xs text-violet-700 dark:text-violet-400 animate-fade-in">
           <ScanEye size={14} className="flex-shrink-0" />
           <span>Reviewing answer quality…</span>
           <Loader2 size={12} className="animate-spin ml-auto" />
@@ -611,7 +611,7 @@ function ReflectionBadge({ reflection }: { reflection: ReflectionResult }) {
   ];
 
   return (
-    <div className={`mt-1.5 rounded-md px-2.5 py-2 ${bgColor} border ${borderColor} animate-fade-in`}>
+    <div className={`mt-1.5 rounded-md px-2.5 py-1 ${bgColor} border ${borderColor} animate-fade-in`}>
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-2 text-xs text-left"
