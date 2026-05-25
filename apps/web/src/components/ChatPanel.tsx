@@ -86,13 +86,13 @@ export default function ChatPanel({
       lastRunRef.current = run.run_id;
 
       if (run.final_response) {
-        addMessage("assistant", run.final_response, run.run_id);
+        addMessage("assistant", run.final_response, run.run_id, run.status);
       } else if (run.plan?.direct_response) {
-        addMessage("assistant", run.plan.direct_response, run.run_id);
+        addMessage("assistant", run.plan.direct_response, run.run_id, run.status);
       } else if (run.status === "failed") {
-        addMessage("system", "Run failed. Check the trace for details.");
+        addMessage("assistant", "Run failed. Check the trace for details.", run.run_id, run.status);
       } else if (run.status === "cancelled") {
-        addMessage("system", "Run cancelled.");
+        addMessage("assistant", "Run cancelled.", run.run_id, run.status);
       }
 
       setActiveRunId(null);
@@ -113,7 +113,8 @@ export default function ChatPanel({
   const addMessage = (
     role: ChatMessage["role"],
     content: string,
-    runId?: string
+    runId?: string,
+    runStatus?: RunStatus
   ) => {
     const msg: ChatMessage = {
       id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -121,6 +122,7 @@ export default function ChatPanel({
       content,
       timestamp: new Date().toISOString(),
       run_id: runId,
+      run_status: runStatus,
     };
     onMessagesChange([...messages, msg]);
   };
@@ -279,9 +281,12 @@ export default function ChatPanel({
           <div key={msg.id}>
             <MessageBubble message={msg} />
             {/* Show retry button on assistant messages from failed/cancelled runs */}
-            {msg.role === "assistant" && msg.run_id && !isActive && (
-              <RetryButton runId={msg.run_id} onRetry={handleRetry} />
-            )}
+            {msg.role === "assistant" &&
+              msg.run_id &&
+              (msg.run_status === "failed" || msg.run_status === "cancelled") &&
+              !isActive && (
+                <RetryButton runId={msg.run_id} onRetry={handleRetry} />
+              )}
           </div>
         ))}
 

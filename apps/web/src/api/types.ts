@@ -125,6 +125,8 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   run_id?: string;
+  /** Terminal status of the associated run (e.g. "completed", "failed"). */
+  run_status?: RunStatus;
   /** Embedded run data for inline plan/approval rendering. */
   run?: Run;
 }
