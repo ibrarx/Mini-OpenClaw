@@ -332,7 +332,14 @@ class TaskScheduler:
 
         self._tasks[task.id] = task
         heapq.heappush(self._heap, (task.next_run_at, task.id))
-        await self._save_task(task)
+        try:
+            await self._save_task(task)
+        except Exception as exc:
+            # Roll back in-memory state on DB failure
+            self._tasks.pop(task.id, None)
+            # Can't easily remove from heap, but stale entries are
+            # cleaned lazily in _seconds_until_next / _fire_due_tasks
+            raise ValueError(f"Failed to persist task: {exc}") from exc
         self._wake_event.set()  # wake the loop to recalculate sleep
 
         logger.info(

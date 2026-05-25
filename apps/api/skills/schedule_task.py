@@ -153,7 +153,7 @@ class ScheduleTaskTool(BaseTool):
             task = await context.schedule_fn(
                 session_id=f"scheduled_from_{context.run_id}",
                 message=message,
-                workspace_id=context.workspace_root,
+                workspace_id="default",
                 delay_minutes=delay_minutes,
                 interval_minutes=interval_minutes,
                 max_runs=max_runs,

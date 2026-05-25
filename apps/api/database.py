@@ -148,6 +148,9 @@ MIGRATIONS = [
     "ALTER TABLE runs ADD COLUMN parent_run_id TEXT",
     "ALTER TABLE runs ADD COLUMN depth INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE memory_items ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+    # Scheduled tasks — added in feat/scheduled-tasks
+    "ALTER TABLE scheduled_tasks ADD COLUMN pre_approved_tools TEXT DEFAULT '[]'",
+    "ALTER TABLE scheduled_tasks ADD COLUMN approve_all_runs INTEGER DEFAULT 0",
 ]
 
 # ---------------------------------------------------------------------------
