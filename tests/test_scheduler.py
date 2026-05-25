@@ -302,3 +302,120 @@ class TestHeapMechanics:
         secs = scheduler._seconds_until_next()
         assert secs is not None
         assert secs == 0.0
+
+
+# ------------------------------------------------------------------
+# Pre-approval
+# ------------------------------------------------------------------
+
+class TestPreApproval:
+    @pytest.mark.asyncio
+    async def test_create_task_with_pre_approved_tools(self, scheduler: TaskScheduler):
+        task = await scheduler.create_task(
+            session_id="s1",
+            message="Write a status report",
+            delay_minutes=5,
+            pre_approved_tools=["write_file"],
+        )
+        assert task.pre_approved_tools == ["write_file"]
+        assert task.approve_all_runs is False
+
+    @pytest.mark.asyncio
+    async def test_create_recurring_with_approve_all(self, scheduler: TaskScheduler):
+        task = await scheduler.create_task(
+            session_id="s1",
+            message="Update status file",
+            interval_minutes=10,
+            pre_approved_tools=["write_file"],
+            approve_all_runs=True,
+        )
+        assert task.pre_approved_tools == ["write_file"]
+        assert task.approve_all_runs is True
+
+    @pytest.mark.asyncio
+    async def test_execute_once_passes_pre_approved(
+        self, scheduler: TaskScheduler, mock_orchestrator
+    ):
+        """One-time task always passes pre_approved_tools to handle_message."""
+        task = await scheduler.create_task(
+            session_id="s1",
+            message="Create report",
+            delay_minutes=0,
+            pre_approved_tools=["write_file"],
+        )
+        await scheduler._execute_task(task)
+
+        call_kwargs = mock_orchestrator.handle_message.call_args.kwargs
+        assert call_kwargs["pre_approved_tools"] == ["write_file"]
+
+    @pytest.mark.asyncio
+    async def test_execute_recurring_approve_all_passes_tools(
+        self, scheduler: TaskScheduler, mock_orchestrator
+    ):
+        """Recurring task with approve_all_runs=True passes tools every run."""
+        task = await scheduler.create_task(
+            session_id="s1",
+            message="Update file",
+            interval_minutes=5,
+            pre_approved_tools=["write_file"],
+            approve_all_runs=True,
+        )
+        # Simulate a completed first run
+        task.run_count = 3
+        scheduler._tasks[task.id] = task
+
+        await scheduler._execute_task(task)
+
+        call_kwargs = mock_orchestrator.handle_message.call_args.kwargs
+        assert call_kwargs["pre_approved_tools"] == ["write_file"]
+
+    @pytest.mark.asyncio
+    async def test_execute_recurring_first_run_only(
+        self, scheduler: TaskScheduler, mock_orchestrator
+    ):
+        """Recurring task with approve_all_runs=False only pre-approves first run."""
+        task = await scheduler.create_task(
+            session_id="s1",
+            message="Update file",
+            interval_minutes=5,
+            pre_approved_tools=["write_file"],
+            approve_all_runs=False,
+        )
+
+        # First run (run_count=0) — should get pre-approval
+        await scheduler._execute_task(task)
+        call_kwargs = mock_orchestrator.handle_message.call_args.kwargs
+        assert call_kwargs["pre_approved_tools"] == ["write_file"]
+
+        mock_orchestrator.handle_message.reset_mock()
+
+        # Simulate the task having completed one run
+        task.run_count = 1
+        scheduler._tasks[task.id] = task
+        scheduler._inflight.pop(task.id, None)
+
+        # Second run — should NOT get pre-approval
+        await scheduler._execute_task(task)
+        call_kwargs = mock_orchestrator.handle_message.call_args.kwargs
+        assert call_kwargs["pre_approved_tools"] == []
+
+    @pytest.mark.asyncio
+    async def test_persistence_roundtrip_pre_approval(
+        self, db_path: Path, mock_orchestrator
+    ):
+        """Pre-approved tools survive a save/load cycle."""
+        s1 = TaskScheduler(db_path, mock_orchestrator, max_tasks=10)
+        await s1.create_task(
+            session_id="s1",
+            message="persistent pre-approval",
+            delay_minutes=5,
+            pre_approved_tools=["write_file", "run_shell_safe"],
+            approve_all_runs=True,
+        )
+
+        s2 = TaskScheduler(db_path, mock_orchestrator, max_tasks=10)
+        await s2._load_from_db()
+        tasks = await s2.list_tasks()
+        assert len(tasks) == 1
+        assert tasks[0].pre_approved_tools == ["write_file", "run_shell_safe"]
+        assert tasks[0].approve_all_runs is True

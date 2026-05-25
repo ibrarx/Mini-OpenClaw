@@ -37,3 +37,8 @@ class ScheduledTask(BaseModel):
     max_runs: int = 0  # 0 = unlimited (for interval)
     last_run_id: str | None = None
     error: str | None = None
+    # Pre-approval: tools the user approved at schedule-creation time
+    pre_approved_tools: list[str] = []
+    # For recurring tasks: True = pre-approval covers all future runs,
+    # False = ask for approval each time (pre_approved_tools ignored after first run)
+    approve_all_runs: bool = False

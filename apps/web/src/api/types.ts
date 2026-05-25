@@ -179,4 +179,6 @@ export interface ScheduledTask {
   max_runs: number;
   last_run_id: string | null;
   error: string | null;
+  pre_approved_tools: string[];
+  approve_all_runs: boolean;
 }

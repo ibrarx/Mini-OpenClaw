@@ -249,6 +249,26 @@ export default function SchedulerPage() {
                   </span>
                 </div>
 
+                {/* Pre-approved tools */}
+                {task.pre_approved_tools.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+                    <span className="t-faint">Pre-approved:</span>
+                    {task.pre_approved_tools.map((tool) => (
+                      <span
+                        key={tool}
+                        className="px-1.5 py-0.5 rounded bg-amber-400/10 text-amber-400 font-mono"
+                      >
+                        {tool}
+                      </span>
+                    ))}
+                    {task.schedule_type === "interval" && (
+                      <span className={task.approve_all_runs ? "text-emerald-400" : "text-yellow-400"}>
+                        ({task.approve_all_runs ? "all runs" : "first run only"})
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 {/* Error */}
                 {task.error && (
                   <div className="mt-2 px-2 py-1.5 rounded bg-red-500/10 text-red-400 text-[11px] truncate" title={task.error}>

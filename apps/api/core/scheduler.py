@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import heapq
+import json
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -180,16 +181,32 @@ class TaskScheduler:
 
     async def _execute_task(self, task: ScheduledTask) -> None:
         """Fire-and-forget: create a run via the orchestrator."""
+        # Determine which tools are pre-approved for this run
+        pre_approved: list[str] = []
+        if task.pre_approved_tools:
+            if task.schedule_type == ScheduleType.ONCE:
+                # One-time tasks always use pre-approval
+                pre_approved = task.pre_approved_tools
+            elif task.approve_all_runs:
+                # Recurring task with blanket approval
+                pre_approved = task.pre_approved_tools
+            elif task.run_count == 0:
+                # First run of a recurring task without blanket approval
+                pre_approved = task.pre_approved_tools
+            # else: subsequent runs without approve_all_runs → no pre-approval
+
         try:
             run = await self._orchestrator.handle_message(
                 session_id=f"scheduled_{task.id}",
                 message=task.message,
                 workspace_id=task.workspace_id,
                 is_scheduled=True,
+                pre_approved_tools=pre_approved,
             )
             self._inflight[task.id] = run.run_id
             logger.info(
-                "Scheduled task %s fired → run %s", task.id, run.run_id
+                "Scheduled task %s fired → run %s (pre_approved=%s)",
+                task.id, run.run_id, pre_approved,
             )
         except Exception as exc:
             logger.error("Failed to fire scheduled task %s: %s", task.id, exc)
@@ -269,6 +286,8 @@ class TaskScheduler:
         delay_minutes: int = 0,
         interval_minutes: int = 0,
         max_runs: int = 0,
+        pre_approved_tools: list[str] | None = None,
+        approve_all_runs: bool = False,
     ) -> ScheduledTask:
         """Create a new scheduled task and push it onto the heap."""
         # Enforce max active tasks
@@ -307,6 +326,8 @@ class TaskScheduler:
             created_at=now_str,
             updated_at=now_str,
             max_runs=max_runs,
+            pre_approved_tools=pre_approved_tools or [],
+            approve_all_runs=approve_all_runs,
         )
 
         self._tasks[task.id] = task
@@ -416,8 +437,8 @@ class TaskScheduler:
                    (id, workspace_id, session_id, message, schedule_type,
                     run_at, interval_seconds, last_run_at, next_run_at,
                     status, created_at, updated_at, run_count, max_runs,
-                    last_run_id, error)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    last_run_id, error, pre_approved_tools, approve_all_runs)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(id) DO UPDATE SET
                      workspace_id=excluded.workspace_id,
                      session_id=excluded.session_id,
@@ -432,7 +453,9 @@ class TaskScheduler:
                      run_count=excluded.run_count,
                      max_runs=excluded.max_runs,
                      last_run_id=excluded.last_run_id,
-                     error=excluded.error
+                     error=excluded.error,
+                     pre_approved_tools=excluded.pre_approved_tools,
+                     approve_all_runs=excluded.approve_all_runs
                 """,
                 (
                     task.id, task.workspace_id, task.session_id, task.message,
@@ -440,6 +463,8 @@ class TaskScheduler:
                     task.last_run_at, task.next_run_at, task.status.value,
                     task.created_at, task.updated_at, task.run_count,
                     task.max_runs, task.last_run_id, task.error,
+                    json.dumps(task.pre_approved_tools),
+                    1 if task.approve_all_runs else 0,
                 ),
             )
             await conn.commit()
@@ -474,6 +499,13 @@ class TaskScheduler:
     @staticmethod
     def _row_to_task(row: aiosqlite.Row) -> ScheduledTask:
         """Convert a database row to a ScheduledTask model."""
+        # Deserialize pre_approved_tools from JSON string
+        raw_tools = row["pre_approved_tools"]
+        try:
+            pre_approved = json.loads(raw_tools) if raw_tools else []
+        except (json.JSONDecodeError, TypeError):
+            pre_approved = []
+
         return ScheduledTask(
             id=row["id"],
             workspace_id=row["workspace_id"],
@@ -491,4 +523,6 @@ class TaskScheduler:
             max_runs=row["max_runs"],
             last_run_id=row["last_run_id"],
             error=row["error"],
+            pre_approved_tools=pre_approved,
+            approve_all_runs=bool(row["approve_all_runs"]),
         )

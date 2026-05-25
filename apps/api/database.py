@@ -125,7 +125,9 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
     run_count         INTEGER DEFAULT 0,
     max_runs          INTEGER DEFAULT 0,
     last_run_id       TEXT,
-    error             TEXT
+    error             TEXT,
+    pre_approved_tools TEXT DEFAULT '[]',
+    approve_all_runs  INTEGER DEFAULT 0
 );
 """
 
