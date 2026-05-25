@@ -2,18 +2,24 @@
 from __future__ import annotations
 import abc
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable, Coroutine
 from pydantic import BaseModel
 from apps.api.models.run import ErrorKind, RetryPolicy, RiskLevel, ToolResult
 from apps.api.models.tool_manifest import ToolManifest
 
+# Type alias for the delegation callback.
+# Signature: (parent_run_id, task, workspace_id, max_iterations) -> Run
+DelegateFn = Callable[..., Coroutine[Any, Any, Any]]
+
 
 class ToolContext(BaseModel):
+    model_config = {"arbitrary_types_allowed": True}
     workspace_root: str
     run_id: str = ""
     step_id: str = ""
     db_path: str = ""
     execution_id: str = ""
+    delegate_fn: DelegateFn | None = None  # set by orchestrator for delegation
 
 
 class BaseTool(abc.ABC):

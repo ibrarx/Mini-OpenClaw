@@ -20,7 +20,9 @@ import {
   SkipForward,
   RefreshCw,
   ScanEye,
+  Users,
 } from "lucide-react";
+import { useChildRunSSE } from "../hooks/useChildRunSSE";
 import type { Plan, PlanStep, StepStatus, RiskLevel, Observation, Run, Goal, GoalStatus, ReflectionResult } from "../api/types";
 
 interface PlanPreviewProps {
@@ -491,6 +493,12 @@ function ObservationRow({ obs, index, expanded, onToggle, compact }: Observation
             {obs.tool}
           </span>
         )}
+        {/* Sub-agent indicator for delegate_task */}
+        {obs.tool === "delegate_task" && obs.result?.output?.child_run_id && (
+          <span className="text-[10px] font-medium text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/20 rounded px-1.5 py-0.5 flex items-center gap-1 flex-shrink-0">
+            <Users size={10} /> sub-agent
+          </span>
+        )}
         {status === "denied" && (
           <span className="badge badge-medium flex items-center gap-0.5">
             <ShieldOff size={10} /> denied
@@ -539,6 +547,10 @@ function ObservationRow({ obs, index, expanded, onToggle, compact }: Observation
                 </pre>
               </div>
             </div>
+          )}
+          {/* Inline child run for delegate_task */}
+          {obs.tool === "delegate_task" && obs.result?.output?.child_run_id && (
+            <ChildRunCard childRunId={obs.result.output.child_run_id as string} />
           )}
         </div>
       )}
@@ -679,6 +691,113 @@ function ReflectionBadge({ reflection }: { reflection: ReflectionResult }) {
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Child Run Card (sub-agent delegation, SSE-streamed) ──────────
+
+function ChildRunCard({ childRunId }: { childRunId: string }) {
+  const { childRun } = useChildRunSSE(childRunId);
+  const [expanded, setExpanded] = useState(true);
+
+  if (!childRun) {
+    return (
+      <div className="mt-2 ml-2 pl-3 border-l-2 border-purple-300 dark:border-purple-700">
+        <div className="flex items-center gap-2 text-xs t-muted py-1">
+          <Users size={12} className="text-purple-500" />
+          <span>Sub-agent: {childRunId}</span>
+          <Loader2 size={12} className="animate-spin text-purple-500" />
+        </div>
+      </div>
+    );
+  }
+
+  const isActive = childRun.status === "reacting" || childRun.status === "planning";
+  const isDone = ["completed", "failed", "cancelled"].includes(childRun.status);
+  const statusColor = childRun.status === "completed"
+    ? "text-emerald-500"
+    : childRun.status === "failed"
+      ? "text-red-500"
+      : "text-purple-500";
+
+  return (
+    <div className="mt-2 ml-2 pl-3 border-l-2 border-purple-300 dark:border-purple-700 animate-fade-in">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-2 text-xs text-left py-1"
+      >
+        <Users size={12} className="text-purple-500 flex-shrink-0" />
+        <span className="font-medium t-secondary">Sub-agent</span>
+        <span className="t-faint">•</span>
+        <span className={`font-medium ${statusColor}`}>{childRun.status}</span>
+        <span className="t-faint">•</span>
+        <span className="t-muted">{childRun.iterations}/{childRun.max_iterations} iterations</span>
+        {isActive && <Loader2 size={10} className="animate-spin text-purple-500" />}
+        <span className="ml-auto">
+          {expanded ? <ChevronDown size={10} className="t-faint" /> : <ChevronRight size={10} className="t-faint" />}
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="space-y-0.5 mt-1 mb-1">
+          {/* Child task description */}
+          <div className="text-[11px] t-muted mb-1 italic">
+            Task: {childRun.user_message}
+          </div>
+
+          {/* Child observations */}
+          {childRun.observations.map((obs, i) => (
+            <ChildObservationRow key={obs.step_id + "-" + obs.iteration} obs={obs} index={i} />
+          ))}
+
+          {/* Active spinner */}
+          {isActive && (
+            <div className="flex items-center gap-2 text-[11px] t-muted py-0.5">
+              <Loader2 size={10} className="text-purple-500 animate-spin" />
+              <span>
+                {childRun.observations.length > 0 &&
+                 childRun.observations[childRun.observations.length - 1].user_announcement &&
+                 !childRun.observations[childRun.observations.length - 1].result
+                  ? childRun.observations[childRun.observations.length - 1].user_announcement
+                  : "Thinking…"}
+              </span>
+            </div>
+          )}
+
+          {/* Final response */}
+          {isDone && childRun.final_response && (
+            <div className="text-[11px] t-secondary bg-app-code rounded px-2 py-1 mt-1 max-h-20 overflow-y-auto">
+              {childRun.final_response.slice(0, 500)}
+              {childRun.final_response.length > 500 && "…"}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Compact observation row for child runs — no expand, minimal chrome. */
+function ChildObservationRow({ obs, index }: { obs: Observation; index: number }) {
+  const isFinalAnswer = !obs.tool;
+  const status = obs.result?.status;
+
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] py-0.5">
+      <ObservationStatusIcon status={status} isFinalAnswer={isFinalAnswer} />
+      <span className="t-faint font-mono w-3">{index + 1}</span>
+      <span className="t-secondary truncate flex-1">
+        {obs.user_announcement || (isFinalAnswer ? "Done" : obs.tool)}
+      </span>
+      {obs.tool && obs.user_announcement && (
+        <span className="text-[9px] font-mono t-faint bg-app-code rounded px-1 py-0.5 flex-shrink-0">
+          {obs.tool}
+        </span>
+      )}
+      {status === "error" && (
+        <span className="text-[9px] text-red-500">error</span>
       )}
     </div>
   );

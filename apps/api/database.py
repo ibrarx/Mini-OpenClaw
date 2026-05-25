@@ -46,7 +46,9 @@ CREATE TABLE IF NOT EXISTS runs (
     observations    TEXT NOT NULL DEFAULT '[]',
     context_window  INTEGER NOT NULL DEFAULT 0,
     model_name      TEXT NOT NULL DEFAULT '',
-    reflection      TEXT
+    reflection      TEXT,
+    parent_run_id   TEXT,
+    depth           INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS run_steps (
@@ -122,6 +124,8 @@ MIGRATIONS = [
     "ALTER TABLE runs ADD COLUMN context_window INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE runs ADD COLUMN model_name TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE runs ADD COLUMN reflection TEXT",
+    "ALTER TABLE runs ADD COLUMN parent_run_id TEXT",
+    "ALTER TABLE runs ADD COLUMN depth INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE memory_items ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
 ]
 

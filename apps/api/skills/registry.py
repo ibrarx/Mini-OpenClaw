@@ -11,6 +11,7 @@ from apps.api.skills.search_in_files import SearchInFilesTool
 from apps.api.skills.run_shell_safe import RunShellSafeTool
 from apps.api.skills.remember_fact import RememberFactTool
 from apps.api.skills.search_memory import SearchMemoryTool
+from apps.api.skills.delegate_task import DelegateTaskTool
 
 logger = logging.getLogger(__name__)
 
@@ -19,13 +20,19 @@ _TOOL_CLASSES: list[type[BaseTool]] = [
     RunShellSafeTool, RememberFactTool, SearchMemoryTool,
 ]
 
+# Delegation tool is registered separately — excluded in child runs
+_DELEGATION_TOOL_CLASS: type[BaseTool] = DelegateTaskTool
+
 
 class SkillRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, BaseTool] = {}
 
-    def discover(self, settings=None) -> None:
+    def discover(self, settings=None, *, is_child_run: bool = False) -> None:
         for cls in _TOOL_CLASSES:
+            # Skip memory-writing tools in child runs
+            if is_child_run and cls in (RememberFactTool,):
+                continue
             if cls is ReadFileTool and settings is not None:
                 tool = ReadFileTool(
                     max_batch=settings.react_read_file_max_batch,
@@ -35,6 +42,13 @@ class SkillRegistry:
                 tool = cls()
             self._tools[tool.name] = tool
             logger.info("Registered tool: %s (risk=%s)", tool.name, tool.manifest().risk_level.value)
+
+        # Register delegation tool only for top-level runs when enabled
+        if not is_child_run and settings and getattr(settings, "delegate_enabled", True):
+            dt = _DELEGATION_TOOL_CLASS()
+            self._tools[dt.name] = dt
+            logger.info("Registered tool: %s (risk=%s)", dt.name, dt.manifest().risk_level.value)
+
         logger.info("Tool discovery complete: %d tools", len(self._tools))
 
     def get(self, name: str) -> BaseTool | None:

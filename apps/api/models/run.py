@@ -148,3 +148,6 @@ class Run(BaseModel):
     context_window: int = 0         # model's context window size (set at run start)
     model_name: str = ""            # LLM model identifier (for UI display)
     reflection: ReflectionResult | None = None  # self-reflection critique result
+    # Sub-agent delegation fields
+    parent_run_id: str | None = None  # links child runs to parent
+    depth: int = 0                    # 0=top-level, 1=child, 2=grandchild

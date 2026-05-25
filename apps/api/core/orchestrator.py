@@ -113,6 +113,103 @@ class Orchestrator:
         self._pending_tasks = [t for t in self._pending_tasks if not t.done()]
         return run
 
+    # ------------------------------------------------------------------
+    # Sub-agent delegation
+    # ------------------------------------------------------------------
+
+    async def handle_child_message(
+        self,
+        parent_run_id: str,
+        task: str,
+        workspace_id: str = "",
+        max_iterations: int = 5,
+    ) -> Run:
+        """Create and execute a child run synchronously.
+
+        The child run:
+        - Inherits workspace_id from the parent (if not specified)
+        - Has depth = parent.depth + 1
+        - Runs with a restricted tool set (no delegation, no memory writes)
+        - Skips self-reflection and Agent Dreams
+        - Emits SSE events on its own run_id for real-time UI streaming
+        """
+        # Fetch parent to inherit workspace and check limits
+        parent = await self.get_run(parent_run_id)
+        if parent is None:
+            raise ValueError(f"Parent run not found: {parent_run_id}")
+
+        effective_workspace = workspace_id or parent.workspace_id
+        child_depth = parent.depth + 1
+
+        # Enforce depth limit
+        if child_depth > self._settings.delegate_max_depth:
+            raise ValueError(
+                f"Delegation depth limit reached ({self._settings.delegate_max_depth})"
+            )
+
+        # Enforce max children per parent
+        children = await self._get_child_runs(parent_run_id)
+        if len(children) >= self._settings.delegate_max_children:
+            raise ValueError(
+                f"Max child runs per parent reached ({self._settings.delegate_max_children})"
+            )
+
+        # Cap iterations
+        max_iter = min(max_iterations, self._settings.delegate_max_child_iterations)
+
+        run_id = f"run_{uuid.uuid4().hex[:12]}"
+        now = datetime.now(timezone.utc).isoformat()
+        run = Run(
+            run_id=run_id,
+            session_id=f"child_{parent_run_id}",
+            workspace_id=effective_workspace,
+            status=RunStatus.PLANNING,
+            user_message=task,
+            created_at=now,
+            updated_at=now,
+            max_iterations=max_iter,
+            parent_run_id=parent_run_id,
+            depth=child_depth,
+        )
+        await self._save_run(run)
+        await self._audit.log(
+            "child_run_created", run_id=run_id,
+            data={"parent": parent_run_id, "message": task, "depth": child_depth},
+        )
+        event_emitter.emit(run_id, "run_created")
+
+        # Process synchronously so the parent can await the result
+        await self._process_run(run, is_child=True)
+
+        return await self.get_run(run_id) or run
+
+    async def _get_child_runs(self, parent_run_id: str) -> list[Run]:
+        """Fetch all child runs of a given parent."""
+        conn = await get_connection(self._db_path)
+        try:
+            rows = await conn.execute_fetchall(
+                "SELECT * FROM runs WHERE parent_run_id = ?", (parent_run_id,)
+            )
+            return [self._row_to_run(r) for r in rows]
+        finally:
+            await conn.close()
+
+    def _make_delegate_fn(self) -> Any:
+        """Create the delegation callback to pass into ToolContext."""
+        async def delegate_fn(
+            parent_run_id: str,
+            task: str,
+            workspace_id: str = "",
+            max_iterations: int = 5,
+        ) -> Run:
+            return await self.handle_child_message(
+                parent_run_id=parent_run_id,
+                task=task,
+                workspace_id=workspace_id,
+                max_iterations=max_iterations,
+            )
+        return delegate_fn
+
     async def wait_pending(self) -> None:
         """Await all pending background tasks. Used by tests for clean shutdown."""
         if self._pending_tasks:
@@ -127,7 +224,7 @@ class Orchestrator:
         if exc:
             logger.error("Background run task failed: %s", exc, exc_info=exc)
 
-    async def _process_run(self, run: Run) -> None:
+    async def _process_run(self, run: Run, *, is_child: bool = False) -> None:
         try:
             if not self._planner:
                 run.status = RunStatus.FAILED
@@ -139,7 +236,7 @@ class Orchestrator:
                 return
 
             if self._settings.use_react:
-                await self._react_loop(run)
+                await self._react_loop(run, is_child=is_child)
             else:
                 await self._plan_and_execute(run)
 
@@ -169,12 +266,18 @@ class Orchestrator:
     # ReAct loop
     # ------------------------------------------------------------------
 
-    async def _react_loop(self, run: Run) -> None:
+    async def _react_loop(self, run: Run, *, is_child: bool = False) -> None:
         """Iterative ReAct loop: think → act → observe, up to max_iterations.
 
         When ``react_use_goals`` is enabled, generates a goal checklist before
         the loop and tracks progress. When ``react_max_replans >= 1``, allows
         the agent (or auto-triggers) to regenerate goals mid-loop.
+
+        When ``is_child`` is True (sub-agent delegation):
+        - Self-reflection is skipped
+        - Agent Dreams are skipped
+        - Episode storage is skipped
+        - delegate_fn is NOT passed to ToolContext (children can't delegate)
         """
         memory_context = await self._retrieval.get_context_for_planner(
             message=run.user_message, workspace_id=run.workspace_id)
@@ -339,8 +442,8 @@ class Orchestrator:
                 run.observations.append(obs)
                 run.final_response = decision.get("response", "Task completed.")
 
-                # FLAG-GATED: Self-reflection critique
-                if self._settings.react_self_reflect and self._planner:
+                # FLAG-GATED: Self-reflection critique (skip for child runs)
+                if self._settings.react_self_reflect and self._planner and not is_child:
                     run.status = RunStatus.REFLECTING
                     await self._save_run(run)
                     event_emitter.emit(run.run_id, "reflection_started")
@@ -356,7 +459,8 @@ class Orchestrator:
                 await self._audit.log("run_completed", run_id=run.run_id,
                                        data={"iterations": run.iterations})
                 event_emitter.emit(run.run_id, "run_completed")
-                await self._store_episode_for_run(run)
+                if not is_child:
+                    await self._store_episode_for_run(run)
                 return
 
             # FLAG-GATED: REPLAN — agent requests new goals
@@ -601,6 +705,7 @@ class Orchestrator:
             context = ToolContext(
                 workspace_root=str(self._workspace), run_id=run.run_id,
                 step_id=step_id, db_path=str(self._db_path),
+                delegate_fn=self._make_delegate_fn() if not is_child else None,
             )
             result = await self._executor.execute_tool(tool_name, tool_args, context)
 
@@ -676,7 +781,8 @@ class Orchestrator:
                                    data={"reason": "max_iterations_synthesized",
                                          "iterations": run.iterations})
             event_emitter.emit(run.run_id, "run_completed")
-            await self._store_episode_for_run(run)
+            if not is_child:
+                await self._store_episode_for_run(run)
         else:
             # Synthesis failed or no evidence — fall back to partial summary
             run.final_response = await self._summarize_partial(run)
@@ -1406,20 +1512,22 @@ class Orchestrator:
                 await conn.execute(
                     "UPDATE runs SET status=?, plan=?, final_response=?, updated_at=?, "
                     "iterations=?, max_iterations=?, observations=?, context_window=?, "
-                    "model_name=?, reflection=? WHERE id=?",
+                    "model_name=?, reflection=?, parent_run_id=?, depth=? WHERE id=?",
                     (run.status.value, plan_json, run.final_response, run.updated_at,
                      run.iterations, run.max_iterations, observations_json,
-                     run.context_window, run.model_name, reflection_json, run.run_id))
+                     run.context_window, run.model_name, reflection_json,
+                     run.parent_run_id, run.depth, run.run_id))
             else:
                 await conn.execute(
                     "INSERT INTO runs (id,session_id,workspace_id,status,user_message,plan,"
                     "final_response,created_at,updated_at,iterations,max_iterations,observations,"
-                    "context_window,model_name,reflection) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "context_window,model_name,reflection,parent_run_id,depth) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (run.run_id, run.session_id, run.workspace_id, run.status.value,
                      run.user_message, plan_json, run.final_response, run.created_at,
                      run.updated_at, run.iterations, run.max_iterations, observations_json,
-                     run.context_window, run.model_name, reflection_json))
+                     run.context_window, run.model_name, reflection_json,
+                     run.parent_run_id, run.depth))
             await conn.commit()
         finally:
             await conn.close()
@@ -1466,6 +1574,11 @@ class Orchestrator:
             for step in run.plan.steps:
                 if step.status == StepStatus.AWAITING_APPROVAL:
                     await self.approve_step(run_id, step.step_id, approved=False)
+        # Cascade cancellation to child runs
+        children = await self._get_child_runs(run_id)
+        for child in children:
+            if child.status.value not in ("completed", "failed", "cancelled"):
+                await self.cancel_run(child.run_id)
         event_emitter.emit(run_id, "run_cancelled")
         return run
 
@@ -1524,4 +1637,6 @@ class Orchestrator:
             context_window=context_window or 0,
             model_name=model_name or "",
             reflection=reflection,
+            parent_run_id=row["parent_run_id"] if "parent_run_id" in row.keys() else None,
+            depth=row["depth"] if "depth" in row.keys() else 0,
         )

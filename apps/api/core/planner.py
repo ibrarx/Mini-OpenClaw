@@ -108,6 +108,7 @@ When calling a tool, always include a "user_announcement" field with a short, co
 - remember_fact → "I'll save that to memory so I remember next time..."
 - write_file → "I'll create [filename] for you..."
 - run_shell_safe → "Let me run a quick command to check that..."
+- delegate_task → "Let me hand this sub-task off to a focused agent..."
 Never use technical jargon. Never mention tool names. Keep it natural and brief.
 
 Respond with ONLY valid JSON (no markdown, no backticks):

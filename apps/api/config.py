@@ -121,6 +121,12 @@ class Settings(BaseSettings):
     # Minimum confidence threshold for dream-generated insights.
     dream_confidence_threshold: float = 0.6
 
+    # ----- Sub-agent delegation -----
+    delegate_enabled: bool = True
+    delegate_max_depth: int = 2            # max nesting level (0=parent only)
+    delegate_max_children: int = 3         # max child runs per parent
+    delegate_max_child_iterations: int = 5 # iteration cap per child
+
     # ----- Derived -----
     @property
     def temp_dir(self) -> Path:

@@ -53,6 +53,8 @@ export interface Run {
   context_window?: number;
   model_name?: string;
   reflection?: ReflectionResult | null;
+  parent_run_id?: string | null;
+  depth?: number;
 }
 
 export interface Observation {
