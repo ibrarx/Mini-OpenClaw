@@ -377,8 +377,9 @@ class TaskScheduler:
         self._wake_event.set()  # wake the loop to recalculate sleep
 
         logger.info(
-            "Created scheduled task %s: type=%s, next_run=%s",
+            "Created scheduled task %s: type=%s, next_run=%s, delay=%.0fs",
             task.id, task.schedule_type.value, task.next_run_at,
+            (next_run_at - now).total_seconds(),
         )
         return task
 
