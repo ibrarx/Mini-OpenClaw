@@ -1237,6 +1237,7 @@ def _make_settings_with_goals(
         react_max_iterations=max_iterations,
         react_use_goals=use_goals,
         react_max_replans=max_replans,
+        react_self_reflect=False,  # prevent .env from injecting extra LLM calls
     )
 
 
