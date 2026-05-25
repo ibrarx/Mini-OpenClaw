@@ -25,8 +25,12 @@ import {
   resumeTask,
   deleteTask,
   getTaskRuns,
+  getRun,
+  approveStep,
+  rejectStep,
 } from "../api/client";
-import type { ScheduledTask, TaskStatus, Run, RunStatus } from "../api/types";
+import type { ScheduledTask, TaskStatus, Run, RunStatus, PlanStep } from "../api/types";
+import ApprovalCard from "../components/ApprovalCard";
 
 /* ── Helpers ───────────────────────────────────────── */
 
@@ -110,6 +114,52 @@ function intervalLabel(seconds: number | null): string {
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   return text.slice(0, max).trimEnd() + "…";
+}
+
+/* ── Inflight Approval Card ─────────────────────────── */
+
+function InflightApproval({ runId, onDecided }: { runId: string; onDecided: () => void }) {
+  const [run, setRun] = useState<Run | null>(null);
+  const [pendingStep, setPendingStep] = useState<PlanStep | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = () =>
+      getRun(runId)
+        .then((r) => {
+          if (cancelled) return;
+          setRun(r);
+          if (r.status === "awaiting_approval" && r.plan?.steps) {
+            const step = r.plan.steps.find((s) => s.status === "awaiting_approval");
+            setPendingStep(step ?? null);
+          } else {
+            setPendingStep(null);
+          }
+        })
+        .catch(() => {});
+    poll();
+    const id = setInterval(poll, 3_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [runId]);
+
+  if (!pendingStep || !run) return null;
+
+  return (
+    <div className="mt-2">
+      <ApprovalCard
+        step={pendingStep}
+        runId={runId}
+        onApprove={async (rid, sid) => {
+          await approveStep(rid, sid);
+          onDecided();
+        }}
+        onReject={async (rid, sid) => {
+          await rejectStep(rid, sid);
+          onDecided();
+        }}
+      />
+    </div>
+  );
 }
 
 /* ── Run History Panel ─────────────────────────────── */
@@ -408,6 +458,14 @@ export default function SchedulerPage() {
                       <div className="mt-2 px-2 py-1.5 rounded bg-red-500/10 text-red-400 text-[11px] truncate" title={task.error}>
                         {task.error}
                       </div>
+                    )}
+
+                    {/* Inflight approval card */}
+                    {task.inflight_run_id && (
+                      <InflightApproval
+                        runId={task.inflight_run_id}
+                        onDecided={fetchTasks}
+                      />
                     )}
 
                     {/* Actions */}

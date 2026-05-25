@@ -708,9 +708,7 @@ class Orchestrator:
                     event_emitter.emit(run.run_id, "approval_requested")
 
                     # Wait for user decision
-                    # Scheduled runs use a shorter timeout since the user
-                    # may not be actively watching the UI.
-                    approval_timeout = 60.0 if is_scheduled else 300.0
+                    approval_timeout = 300.0
                     approved = await self._wait_for_approval(
                         run.run_id, step_id, timeout=approval_timeout
                     )

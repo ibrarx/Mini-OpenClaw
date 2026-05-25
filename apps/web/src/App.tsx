@@ -120,10 +120,28 @@ function AppContent() {
   }, []);
 
   // Poll scheduler for new runs (badge = unseen run count)
+  // Also detect pending approvals for an urgent indicator.
+  const [approvalNeeded, setApprovalNeeded] = useState(false);
   useEffect(() => {
     const poll = () =>
       getScheduledTasks()
-        .then((tasks) => {
+        .then(async (tasks) => {
+          // Check for inflight runs needing approval
+          let needsApproval = false;
+          for (const t of tasks) {
+            if (t.inflight_run_id) {
+              try {
+                const { getRun } = await import("./api/client");
+                const run = await getRun(t.inflight_run_id);
+                if (run.status === "awaiting_approval") {
+                  needsApproval = true;
+                  break;
+                }
+              } catch { /* ignore */ }
+            }
+          }
+          setApprovalNeeded(needsApproval);
+
           // If user is on the scheduler page, mark all as seen
           if (page === "scheduler") {
             const counts: Record<string, number> = {};
@@ -184,9 +202,11 @@ function AppContent() {
             >
               <Icon size={14} />
               <span className="hidden sm:inline">{label}</span>
-              {id === "scheduler" && schedulerBadge > 0 && (
-                <span className="absolute -top-1 -right-1.5 flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-emerald-500 text-[8px] font-bold text-white animate-pulse">
-                  {schedulerBadge > 99 ? "99+" : schedulerBadge}
+              {id === "scheduler" && (schedulerBadge > 0 || approvalNeeded) && (
+                <span className={`absolute -top-1 -right-1.5 flex h-4 min-w-4 px-1 items-center justify-center rounded-full text-[8px] font-bold text-white animate-pulse ${
+                  approvalNeeded ? "bg-amber-500" : "bg-emerald-500"
+                }`}>
+                  {approvalNeeded ? "!" : schedulerBadge > 99 ? "99+" : schedulerBadge}
                 </span>
               )}
             </button>
