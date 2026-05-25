@@ -65,7 +65,10 @@ class Orchestrator:
 
         try:
             provider = build_provider(settings)
-            self._planner = Planner(provider, registry)
+            self._planner = Planner(
+                provider, registry,
+                observation_max_chars=settings.react_observation_max_chars,
+            )
         except ProviderConfigError as exc:
             logger.warning("LLM provider not configured: %s", exc)
             self._planner = None

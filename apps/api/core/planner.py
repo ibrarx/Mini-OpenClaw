@@ -241,10 +241,14 @@ class Planner:
     """
 
     def __init__(
-        self, provider: LLMProvider | None, registry: SkillRegistry | None = None
+        self,
+        provider: LLMProvider | None,
+        registry: SkillRegistry | None = None,
+        observation_max_chars: int = 1000,
     ) -> None:
         self._provider = provider
         self._registry = registry
+        self._observation_max_chars = observation_max_chars
 
     # ------------------------------------------------------------------
     # Public API — unchanged shape so the orchestrator does not care which
@@ -683,19 +687,20 @@ class Planner:
             "compression_level": compression_level,
         }
 
-    @staticmethod
-    def _truncate_observation(obs: dict[str, Any]) -> str:
+    def _truncate_observation(self, obs: dict[str, Any]) -> str:
         """Truncate an observation for the LLM context.
 
         File reads get more room than other tools since batch reading is
-        pointless if we immediately throw away the content.
+        pointless if we immediately throw away the content. All other tools
+        are capped at ``self._observation_max_chars`` (configurable via
+        ``REACT_OBSERVATION_MAX_CHARS``).
         """
         output = obs.get("output") or obs.get("error", "")
         tool = obs.get("tool", "")
 
         if tool == "read_file" and isinstance(output, dict):
             return json.dumps(Planner._truncate_file_output(output), default=str)
-        return json.dumps(output, default=str)[:500]
+        return json.dumps(output, default=str)[:self._observation_max_chars]
 
     @staticmethod
     def _truncate_file_output(output: dict[str, Any]) -> dict[str, Any]:
