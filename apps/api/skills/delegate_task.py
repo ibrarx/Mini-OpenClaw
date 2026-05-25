@@ -24,6 +24,9 @@ from apps.api.skills.base import BaseTool, ToolContext, ToolResult
 
 
 class DelegateTaskTool(BaseTool):
+    def __init__(self, *, approval_required: bool = True) -> None:
+        self._approval_required = approval_required
+
     def manifest(self) -> ToolManifest:
         return ToolManifest(
             name="delegate_task",
@@ -35,7 +38,7 @@ class DelegateTaskTool(BaseTool):
                 "and tools (except delegation and memory writes)."
             ),
             risk_level=RiskLevel.MEDIUM,
-            approval_required=True,
+            approval_required=self._approval_required,
             input_schema={
                 "type": "object",
                 "properties": {

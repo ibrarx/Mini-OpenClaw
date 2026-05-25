@@ -606,6 +606,7 @@ All settings are read from the `.env` file (see `.env.example`):
 | `DREAM_MAX_PREFERENCES` | Maximum active preferences to keep; lowest-confidence evicted at cap | `10` |
 | `DREAM_CONFIDENCE_THRESHOLD` | Minimum LLM confidence (0.0–1.0) for a dream insight to be proposed | `0.6` |
 | `DELEGATE_ENABLED` | Enable/disable the `delegate_task` tool | `true` |
+| `DELEGATE_APPROVAL_REQUIRED` | Require user approval before spawning a child run (`true` = safer demo, `false` = smoother UX) | `true` |
 | `DELEGATE_MAX_DEPTH` | Maximum nesting level for delegation (0 = no delegation, 1 = children only, 2 = grandchildren) | `2` |
 | `DELEGATE_MAX_CHILDREN` | Maximum child runs a single parent can spawn | `3` |
 | `DELEGATE_MAX_CHILD_ITERATIONS` | Iteration cap per child run (hard max regardless of agent request) | `5` |

@@ -123,6 +123,7 @@ class Settings(BaseSettings):
 
     # ----- Sub-agent delegation -----
     delegate_enabled: bool = True
+    delegate_approval_required: bool = True  # require user approval before spawning child
     delegate_max_depth: int = 2            # max nesting level (0=parent only)
     delegate_max_children: int = 3         # max child runs per parent
     delegate_max_child_iterations: int = 5 # iteration cap per child

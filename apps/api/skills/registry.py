@@ -45,9 +45,13 @@ class SkillRegistry:
 
         # Register delegation tool only for top-level runs when enabled
         if not is_child_run and settings and getattr(settings, "delegate_enabled", True):
-            dt = _DELEGATION_TOOL_CLASS()
+            dt = _DELEGATION_TOOL_CLASS(
+                approval_required=getattr(settings, "delegate_approval_required", True),
+            )
             self._tools[dt.name] = dt
-            logger.info("Registered tool: %s (risk=%s)", dt.name, dt.manifest().risk_level.value)
+            logger.info("Registered tool: %s (risk=%s, approval=%s)",
+                        dt.name, dt.manifest().risk_level.value,
+                        dt.manifest().approval_required)
 
         logger.info("Tool discovery complete: %d tools", len(self._tools))
 
