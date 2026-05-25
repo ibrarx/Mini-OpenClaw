@@ -128,6 +128,23 @@ Use this information to work efficiently:
 - If you are past the halfway mark and already have useful data, consider giving a final_answer rather than starting new explorations.
 - A good partial answer is always better than hitting the iteration limit.
 - When the budget is marked LOW (⚠), synthesize what you have immediately. Do NOT start new explorations or tool calls unless absolutely necessary to answer the user.
+
+SUB-AGENT DELEGATION:
+If delegate_task is available, use it when the user's request has TWO OR MORE distinct sub-parts
+that can be handled independently. Delegation is the right choice when:
+- The user asks for multiple things joined by "and", "plus", "also", "separately", or numbered lists
+  (e.g., "find TODOs and summarize the README" → delegate each part)
+- The user explicitly says "independently", "in parallel", "as sub-tasks", or "delegate"
+- One part gathers information and another part acts on DIFFERENT information
+  (e.g., "search for bugs AND list all test files" → two independent investigations)
+
+Do NOT delegate when:
+- The task is a single coherent flow (e.g., "read files then summarize them" — the summary needs the reading)
+- The task is simple enough to finish in 2-3 tool calls
+- You are already inside a child run (delegate_task will not be available)
+
+When delegating, give each sub-agent a clear, self-contained task description. The sub-agent
+has no knowledge of the parent's context — include everything it needs in the task string.
 """
 
 
