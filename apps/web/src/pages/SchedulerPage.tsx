@@ -118,16 +118,17 @@ function TaskRunHistory({ taskId }: { taskId: string }) {
   const [runs, setRuns] = useState<Run[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedRun, setExpandedRun] = useState<string | null>(null);
+  const [limit, setLimit] = useState(5);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    getTaskRuns(taskId, 5)
+    getTaskRuns(taskId, limit)
       .then((data) => { if (!cancelled) setRuns(data); })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [taskId]);
+  }, [taskId, limit]);
 
   if (loading) {
     return (
@@ -147,6 +148,18 @@ function TaskRunHistory({ taskId }: { taskId: string }) {
 
   return (
     <div className="space-y-1.5">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[11px] t-faint">{runs.length} run{runs.length !== 1 ? "s" : ""} shown</span>
+        <select
+          value={limit}
+          onChange={(e) => setLimit(Number(e.target.value))}
+          className="text-[11px] t-muted bg-transparent border border-app rounded px-1.5 py-0.5 focus:outline-none focus:border-blue-500"
+        >
+          {[5, 10, 25, 50].map((n) => (
+            <option key={n} value={n}>Last {n}</option>
+          ))}
+        </select>
+      </div>
       {runs.map((run) => {
         const isExpanded = expandedRun === run.run_id;
         const response = run.final_response || "(no response)";
