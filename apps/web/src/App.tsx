@@ -2,7 +2,7 @@
  * App — root layout with header navigation, theme support, and page routing.
  */
 
-import { useState, useEffect, createContext, useContext, useCallback } from "react";
+import { useState, useEffect, createContext, useContext, useCallback, useRef } from "react";
 import {
   MessageSquare,
   History,
@@ -105,8 +105,8 @@ function AppContent() {
   const [page, setPage] = useState<Page>("chat");
   const [backendUp, setBackendUp] = useState<boolean | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  // Track the last run_count the user has "seen" per task
-  const [seenRunCounts, setSeenRunCounts] = useState<Record<string, number>>({});
+  // Track the last run_count the user has "seen" per task (ref to avoid re-render loops)
+  const seenRunCountsRef = useRef<Record<string, number>>({});
   const [schedulerBadge, setSchedulerBadge] = useState(0);
 
   useEffect(() => {
@@ -128,23 +128,23 @@ function AppContent() {
           if (page === "scheduler") {
             const counts: Record<string, number> = {};
             for (const t of tasks) counts[t.id] = t.run_count;
-            setSeenRunCounts(counts);
+            seenRunCountsRef.current = counts;
             setSchedulerBadge(0);
             return;
           }
           // Count new runs since last seen
           let unseen = 0;
           for (const t of tasks) {
-            const seen = seenRunCounts[t.id] ?? 0;
+            const seen = seenRunCountsRef.current[t.id] ?? 0;
             if (t.run_count > seen) unseen += t.run_count - seen;
           }
           setSchedulerBadge(unseen);
         })
         .catch(() => {});
     poll();
-    const id = setInterval(poll, 30_000);
+    const id = setInterval(poll, 15_000);
     return () => clearInterval(id);
-  }, [page, seenRunCounts]);
+  }, [page]);
 
   const navItems: { id: Page; label: string; icon: typeof MessageSquare }[] = [
     { id: "chat", label: "Chat", icon: MessageSquare },
