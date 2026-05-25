@@ -99,15 +99,36 @@ class TaskScheduler:
 
                 # Determine how long to sleep
                 sleep_for = self._seconds_until_next()
+
                 if sleep_for is None:
-                    # No tasks — wait until woken by a new task creation
-                    logger.debug("Scheduler: no tasks in heap, waiting for wake event")
-                    self._wake_event.clear()
-                    await self._wake_event.wait()
-                    logger.debug("Scheduler: woken by new task")
-                    continue
+                    if self._inflight:
+                        # Tasks are in-flight but nothing in the heap —
+                        # poll every 5s to detect completion and reschedule.
+                        logger.debug(
+                            "Scheduler: heap empty, %d in-flight — polling in 5s",
+                            len(self._inflight),
+                        )
+                        self._wake_event.clear()
+                        try:
+                            await asyncio.wait_for(
+                                self._wake_event.wait(), timeout=5.0
+                            )
+                        except asyncio.TimeoutError:
+                            pass
+                        continue
+                    else:
+                        # No tasks at all — wait until woken by a new task creation
+                        logger.debug("Scheduler: no tasks in heap, waiting for wake event")
+                        self._wake_event.clear()
+                        await self._wake_event.wait()
+                        logger.debug("Scheduler: woken by new task")
+                        continue
 
                 if sleep_for > 0:
+                    # If there are in-flight tasks, cap sleep to 5s for
+                    # faster completion detection.
+                    if self._inflight:
+                        sleep_for = min(sleep_for, 5.0)
                     logger.debug("Scheduler: sleeping %.1fs until next task", sleep_for)
                     self._wake_event.clear()
                     try:
