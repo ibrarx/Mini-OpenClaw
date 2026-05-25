@@ -12,6 +12,7 @@ from apps.api.skills.run_shell_safe import RunShellSafeTool
 from apps.api.skills.remember_fact import RememberFactTool
 from apps.api.skills.search_memory import SearchMemoryTool
 from apps.api.skills.delegate_task import DelegateTaskTool
+from apps.api.skills.schedule_task import ScheduleTaskTool
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,9 @@ _TOOL_CLASSES: list[type[BaseTool]] = [
 
 # Delegation tool is registered separately — excluded in child runs
 _DELEGATION_TOOL_CLASS: type[BaseTool] = DelegateTaskTool
+
+# Scheduling tool is registered separately — excluded in child/scheduled runs
+_SCHEDULE_TOOL_CLASS: type[BaseTool] = ScheduleTaskTool
 
 
 class SkillRegistry:
@@ -52,6 +56,14 @@ class SkillRegistry:
             logger.info("Registered tool: %s (risk=%s, approval=%s)",
                         dt.name, dt.manifest().risk_level.value,
                         dt.manifest().approval_required)
+
+        # Register scheduling tool only for top-level runs when enabled
+        if not is_child_run and settings and getattr(settings, "scheduler_enabled", True):
+            st = _SCHEDULE_TOOL_CLASS()
+            self._tools[st.name] = st
+            logger.info("Registered tool: %s (risk=%s, approval=%s)",
+                        st.name, st.manifest().risk_level.value,
+                        st.manifest().approval_required)
 
         logger.info("Tool discovery complete: %d tools", len(self._tools))
 

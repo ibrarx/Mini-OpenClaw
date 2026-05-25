@@ -10,12 +10,14 @@ import {
   Wifi,
   WifiOff,
   Cog,
+  Clock,
 } from "lucide-react";
 import { useSession } from "./hooks/useSession";
 import { healthCheck } from "./api/client";
 import ChatPage from "./pages/ChatPage";
 import HistoryPage from "./pages/HistoryPage";
 import MemoryPage from "./pages/MemoryPage";
+import SchedulerPage from "./pages/SchedulerPage";
 import Settings from "./components/Settings";
 import type { ChatMessage } from "./api/types";
 
@@ -96,7 +98,7 @@ function ThemeProvider({ children }: { children: React.ReactNode }) {
 
 // ── App ───────────────────────────────────────────────
 
-type Page = "chat" | "history" | "memory" | "settings";
+type Page = "chat" | "history" | "memory" | "scheduler" | "settings";
 
 function AppContent() {
   const { sessionId, resetSession } = useSession();
@@ -119,6 +121,7 @@ function AppContent() {
     { id: "chat", label: "Chat", icon: MessageSquare },
     { id: "history", label: "History", icon: History },
     { id: "memory", label: "Memory", icon: Brain },
+    { id: "scheduler", label: "Scheduler", icon: Clock },
     { id: "settings", label: "Settings", icon: Cog },
   ];
 
@@ -182,6 +185,7 @@ function AppContent() {
         )}
         {page === "history" && <HistoryPage sessionId={sessionId} />}
         {page === "memory" && <MemoryPage />}
+        {page === "scheduler" && <SchedulerPage />}
         {page === "settings" && (
           <div className="h-full overflow-y-auto">
             <Settings sessionId={sessionId} onResetSession={resetSession} />

@@ -94,7 +94,8 @@ class Orchestrator:
             logger.info("Indexed %d memory items into vector store", count)
 
     async def handle_message(self, session_id: str, message: str,
-                              workspace_id: str = "default") -> Run:
+                              workspace_id: str = "default",
+                              is_scheduled: bool = False) -> Run:
         run_id = f"run_{uuid.uuid4().hex[:12]}"
         now = datetime.now(timezone.utc).isoformat()
         run = Run(run_id=run_id, session_id=session_id, workspace_id=workspace_id,
@@ -104,9 +105,10 @@ class Orchestrator:
         await self._save_run(run)
         await self._store_message(session_id, "user", message, run_id)
         await self._audit.log("run_created", run_id=run_id,
-                               data={"message": message, "session_id": session_id})
+                               data={"message": message, "session_id": session_id,
+                                     "is_scheduled": is_scheduled})
         event_emitter.emit(run_id, "run_created")
-        task = asyncio.create_task(self._process_run(run))
+        task = asyncio.create_task(self._process_run(run, is_scheduled=is_scheduled))
         task.add_done_callback(self._task_done)
         self._pending_tasks.append(task)
         # Clean up finished tasks
@@ -210,6 +212,34 @@ class Orchestrator:
             )
         return delegate_fn
 
+    def _make_schedule_fn(self) -> Any | None:
+        """Create the scheduling callback to pass into ToolContext.
+
+        Returns None if the scheduler is not attached (e.g. child runs or
+        scheduler disabled).
+        """
+        scheduler = getattr(self, "_scheduler", None)
+        if scheduler is None:
+            return None
+
+        async def schedule_fn(
+            session_id: str,
+            message: str,
+            workspace_id: str = "default",
+            delay_minutes: int = 0,
+            interval_minutes: int = 0,
+            max_runs: int = 0,
+        ):
+            return await scheduler.create_task(
+                session_id=session_id,
+                message=message,
+                workspace_id=workspace_id,
+                delay_minutes=delay_minutes,
+                interval_minutes=interval_minutes,
+                max_runs=max_runs,
+            )
+        return schedule_fn
+
     async def wait_pending(self) -> None:
         """Await all pending background tasks. Used by tests for clean shutdown."""
         if self._pending_tasks:
@@ -224,7 +254,7 @@ class Orchestrator:
         if exc:
             logger.error("Background run task failed: %s", exc, exc_info=exc)
 
-    async def _process_run(self, run: Run, *, is_child: bool = False) -> None:
+    async def _process_run(self, run: Run, *, is_child: bool = False, is_scheduled: bool = False) -> None:
         try:
             if not self._planner:
                 run.status = RunStatus.FAILED
@@ -236,7 +266,7 @@ class Orchestrator:
                 return
 
             if self._settings.use_react:
-                await self._react_loop(run, is_child=is_child)
+                await self._react_loop(run, is_child=is_child, is_scheduled=is_scheduled)
             else:
                 await self._plan_and_execute(run)
 
@@ -266,7 +296,7 @@ class Orchestrator:
     # ReAct loop
     # ------------------------------------------------------------------
 
-    async def _react_loop(self, run: Run, *, is_child: bool = False) -> None:
+    async def _react_loop(self, run: Run, *, is_child: bool = False, is_scheduled: bool = False) -> None:
         """Iterative ReAct loop: think → act → observe, up to max_iterations.
 
         When ``react_use_goals`` is enabled, generates a goal checklist before
@@ -278,6 +308,11 @@ class Orchestrator:
         - Agent Dreams are skipped
         - Episode storage is skipped
         - delegate_fn is NOT passed to ToolContext (children can't delegate)
+
+        When ``is_scheduled`` is True (scheduler-initiated run):
+        - schedule_fn is NOT passed to ToolContext (no recursive scheduling)
+        - Approval-required tools still go through the normal approval flow
+          (SSE events notify the UI so the user can approve when online)
         """
         memory_context = await self._retrieval.get_context_for_planner(
             message=run.user_message, workspace_id=run.workspace_id)
@@ -706,6 +741,7 @@ class Orchestrator:
                 workspace_root=str(self._workspace), run_id=run.run_id,
                 step_id=step_id, db_path=str(self._db_path),
                 delegate_fn=self._make_delegate_fn() if not is_child else None,
+                schedule_fn=self._make_schedule_fn() if not (is_child or is_scheduled) else None,
             )
             result = await self._executor.execute_tool(tool_name, tool_args, context)
 

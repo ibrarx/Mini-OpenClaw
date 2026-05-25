@@ -11,6 +11,10 @@ from apps.api.models.tool_manifest import ToolManifest
 # Signature: (parent_run_id, task, workspace_id, max_iterations) -> Run
 DelegateFn = Callable[..., Coroutine[Any, Any, Any]]
 
+# Type alias for the schedule callback.
+# Signature: (session_id, message, workspace_id, delay_minutes, interval_minutes, max_runs) -> ScheduledTask
+ScheduleFn = Callable[..., Coroutine[Any, Any, Any]]
+
 
 class ToolContext(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
@@ -20,6 +24,7 @@ class ToolContext(BaseModel):
     db_path: str = ""
     execution_id: str = ""
     delegate_fn: DelegateFn | None = None  # set by orchestrator for delegation
+    schedule_fn: ScheduleFn | None = None  # set by orchestrator for scheduling
 
 
 class BaseTool(abc.ABC):
