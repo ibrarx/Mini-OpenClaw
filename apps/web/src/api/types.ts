@@ -181,4 +181,6 @@ export interface ScheduledTask {
   error: string | null;
   pre_approved_tools: string[];
   approve_all_runs: boolean;
+  /** Set when a run is currently in-flight for this task. */
+  inflight_run_id: string | null;
 }

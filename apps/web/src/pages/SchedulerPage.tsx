@@ -364,6 +364,14 @@ export default function SchedulerPage() {
                         {task.max_runs > 0 ? `/${task.max_runs}` : ""}
                       </span>
 
+                      {/* In-flight indicator */}
+                      {task.inflight_run_id && (
+                        <span className="flex items-center gap-1 text-blue-400">
+                          <Loader2 size={11} className="animate-spin" />
+                          Running…
+                        </span>
+                      )}
+
                       {task.last_run_at && (
                         <span title={formatTime(task.last_run_at)}>
                           Last: {relativeTime(task.last_run_at)}

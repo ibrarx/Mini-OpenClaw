@@ -24,7 +24,13 @@ async def list_tasks(
     tasks = await scheduler.list_tasks(
         workspace_id=workspace_id, status=task_status
     )
-    return [t.model_dump() for t in tasks]
+    # Enrich with inflight status
+    result = []
+    for t in tasks:
+        d = t.model_dump()
+        d["inflight_run_id"] = scheduler._inflight.get(t.id)
+        result.append(d)
+    return result
 
 
 @router.get("/tasks/{task_id}")
