@@ -325,9 +325,13 @@ class Orchestrator:
 
                 # FLAG-GATED: Self-reflection critique
                 if self._settings.react_self_reflect and self._planner:
+                    run.status = RunStatus.REFLECTING
+                    await self._save_run(run)
+                    event_emitter.emit(run.run_id, "reflection_started")
                     reflection = await self._do_reflection(run)
                     if reflection:
                         run.reflection = reflection
+                    event_emitter.emit(run.run_id, "reflection_completed")
 
                 run.status = RunStatus.COMPLETED
                 await self._save_run(run)

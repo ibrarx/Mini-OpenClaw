@@ -88,6 +88,8 @@ export function useRunSSE(runId: string | null) {
         "approval_requested",
         "step_announced",
         "step_completed",
+        "reflection_started",
+        "reflection_completed",
         "run_completed",
         "run_failed",
         "run_cancelled",

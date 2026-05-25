@@ -19,6 +19,7 @@ import {
   Target,
   SkipForward,
   RefreshCw,
+  ScanEye,
 } from "lucide-react";
 import type { Plan, PlanStep, StepStatus, RiskLevel, Observation, Run, Goal, GoalStatus, ReflectionResult } from "../api/types";
 
@@ -158,6 +159,7 @@ interface ReactTimelineProps {
 
 function ReactTimeline({ run, expandedStep, onToggleStep, compact }: ReactTimelineProps) {
   const isActive = run.status === "reacting";
+  const isReflecting = run.status === "reflecting";
   const maxReached = run.status === "failed" && run.iterations >= run.max_iterations;
   const goals = run.plan?.goals ?? [];
   const replanCount = run.plan?.replan_count ?? 0;
@@ -175,6 +177,12 @@ function ReactTimeline({ run, expandedStep, onToggleStep, compact }: ReactTimeli
             <span className="flex items-center gap-1 text-blue-500">
               <Loader2 size={12} className="animate-spin" />
               Thinking…
+            </span>
+          )}
+          {isReflecting && (
+            <span className="flex items-center gap-1 text-violet-500">
+              <Loader2 size={12} className="animate-spin" />
+              Reviewing…
             </span>
           )}
         </div>
@@ -217,7 +225,16 @@ function ReactTimeline({ run, expandedStep, onToggleStep, compact }: ReactTimeli
         )}
       </div>
 
-      {/* Self-reflection badge */}
+      {/* Self-reflection: live spinner while reviewing */}
+      {isReflecting && (
+        <div className="mt-1.5 rounded-md bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800 px-2.5 py-2 flex items-center gap-2 text-xs text-violet-700 dark:text-violet-400 animate-fade-in">
+          <ScanEye size={14} className="flex-shrink-0" />
+          <span>Reviewing answer quality…</span>
+          <Loader2 size={12} className="animate-spin ml-auto" />
+        </div>
+      )}
+
+      {/* Self-reflection result badge */}
       {run.reflection && <ReflectionBadge reflection={run.reflection} />}
     </div>
   );
@@ -581,27 +598,86 @@ export function RiskBadge({ level }: { level: RiskLevel }) {
 }
 
 function ReflectionBadge({ reflection }: { reflection: ReflectionResult }) {
+  const [expanded, setExpanded] = useState(false);
   const score = Math.round(reflection.overall_score * 100);
   const color = score >= 80 ? "text-emerald-600" : score >= 60 ? "text-amber-600" : "text-red-600";
   const bgColor = score >= 80 ? "bg-emerald-50 dark:bg-emerald-950/20" : score >= 60 ? "bg-amber-50 dark:bg-amber-950/20" : "bg-red-50 dark:bg-red-950/20";
+  const borderColor = score >= 80 ? "border-emerald-200 dark:border-emerald-800" : score >= 60 ? "border-amber-200 dark:border-amber-800" : "border-red-200 dark:border-red-800";
+
+  const scores = [
+    { label: "Completeness", value: reflection.completeness },
+    { label: "Accuracy", value: reflection.accuracy },
+    { label: "Clarity", value: reflection.clarity },
+  ];
 
   return (
-    <div className={`mt-1.5 rounded-md px-2.5 py-2 ${bgColor} border border-app`}>
-      <div className="flex items-center gap-2 text-xs">
+    <div className={`mt-1.5 rounded-md px-2.5 py-2 ${bgColor} border ${borderColor} animate-fade-in`}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-2 text-xs text-left"
+      >
+        <ScanEye size={13} className={color} />
         <span className="font-medium t-secondary">Self-check:</span>
         <span className={`font-medium ${color}`}>{score}%</span>
         {reflection.improved && (
-          <span className="text-[10px] t-muted">(answer improved)</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 font-medium">
+            answer improved
+          </span>
         )}
-      </div>
-      {reflection.issues.length > 0 && (
-        <div className="mt-1 text-[11px] t-muted">
-          {reflection.issues.map((issue, i) => (
-            <div key={i} className="flex items-start gap-1">
-              <span className="t-faint">•</span>
-              <span>{issue}</span>
+        <span className="ml-auto">
+          {expanded ? (
+            <ChevronDown size={12} className="t-faint" />
+          ) : (
+            <ChevronRight size={12} className="t-faint" />
+          )}
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="mt-2 space-y-1.5">
+          {/* Score breakdown */}
+          <div className="flex gap-3">
+            {scores.map((s) => {
+              const pct = Math.round(s.value * 100);
+              const barColor = pct >= 80 ? "bg-emerald-500" : pct >= 60 ? "bg-amber-500" : "bg-red-500";
+              return (
+                <div key={s.label} className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between text-[10px] mb-0.5">
+                    <span className="t-muted">{s.label}</span>
+                    <span className="t-secondary font-medium">{pct}%</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${barColor} transition-all duration-500`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Issues */}
+          {reflection.issues.length > 0 && (
+            <div className="mt-1">
+              <span className="text-[10px] uppercase tracking-wider t-faint">Issues found</span>
+              <div className="mt-0.5 text-[11px] t-muted">
+                {reflection.issues.map((issue, i) => (
+                  <div key={i} className="flex items-start gap-1 py-0.5">
+                    <span className="t-faint mt-0.5">•</span>
+                    <span>{issue}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          ))}
+          )}
+
+          {/* Suggestion */}
+          {reflection.suggestion && (
+            <div className="text-[11px] t-muted italic">
+              Suggestion: {reflection.suggestion}
+            </div>
+          )}
         </div>
       )}
     </div>

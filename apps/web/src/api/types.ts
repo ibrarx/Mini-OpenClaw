@@ -9,6 +9,7 @@ export type RunStatus =
   | "awaiting_approval"
   | "running"
   | "reacting"
+  | "reflecting"
   | "completed"
   | "failed"
   | "cancelled";
