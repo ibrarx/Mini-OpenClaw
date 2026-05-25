@@ -731,6 +731,91 @@ class Planner:
             }
         return output
 
+    # ------------------------------------------------------------------
+    # Self-reflection — critique and optionally improve the final answer
+    # ------------------------------------------------------------------
+
+    async def reflect_on_answer(
+        self,
+        user_message: str,
+        final_answer: str,
+        observations_summary: str,
+        goals_summary: str = "",
+    ) -> dict[str, Any]:
+        """Critique the agent's final answer. Returns quality scores and issues.
+
+        Returns dict with: overall_score, completeness, accuracy, clarity, issues, suggestion
+        """
+        if self._provider is None:
+            return {"overall_score": 1.0, "issues": [], "suggestion": ""}
+
+        content = (
+            f"User's original request: {user_message}\n\n"
+            f"Data collected by the agent:\n{observations_summary}\n\n"
+            f"Goals:\n{goals_summary}\n\n"
+            f"Agent's final answer:\n{final_answer}\n\n"
+            "Review this answer for quality."
+        )
+
+        try:
+            result = await self._provider.generate_json(
+                messages=[LLMMessage(role="user", content=content)],
+                system=REFLECT_SYSTEM_PROMPT,
+                max_tokens=1024,
+                timeout=30.0,
+            )
+            # Ensure required fields with defaults
+            result.setdefault("overall_score", 0.8)
+            result.setdefault("issues", [])
+            result.setdefault("suggestion", "")
+            return result
+        except Exception as exc:
+            logger.warning("Reflection failed (non-fatal): %s", exc)
+            return {"overall_score": 1.0, "issues": [], "suggestion": ""}
+
+    async def improve_answer(
+        self,
+        user_message: str,
+        original_answer: str,
+        critique: dict[str, Any],
+        observations_summary: str,
+    ) -> str:
+        """Rewrite the answer based on the critique."""
+        if self._provider is None:
+            return original_answer
+
+        issues_text = "\n".join(f"- {issue}" for issue in critique.get("issues", []))
+        suggestion = critique.get("suggestion", "")
+
+        content = (
+            f"User's original request: {user_message}\n\n"
+            f"Your previous answer:\n{original_answer}\n\n"
+            f"Quality review found these issues:\n{issues_text}\n\n"
+            f"Suggestion: {suggestion}\n\n"
+            f"Evidence from tools:\n{observations_summary}\n\n"
+            "Rewrite your answer to fix these issues. Be concise and accurate."
+        )
+
+        try:
+            response = await self._provider.generate(
+                messages=[LLMMessage(role="user", content=content)],
+                system=(
+                    "You are rewriting an AI agent's answer based on a quality review. "
+                    "Fix the identified issues. Use only the tool evidence provided — "
+                    "do not hallucinate data."
+                ),
+                max_tokens=2048,
+                timeout=30.0,
+            )
+            return (response.text or original_answer).strip()
+        except Exception as exc:
+            logger.warning("Answer improvement failed: %s", exc)
+            return original_answer
+
+    # ------------------------------------------------------------------
+    # Summary generation
+    # ------------------------------------------------------------------
+
     async def generate_summary(
         self, user_message: str, tool_results: list[dict[str, Any]]
     ) -> str:
@@ -764,6 +849,28 @@ class Planner:
         except Exception as exc:  # noqa: BLE001 — degrade gracefully
             logger.warning("Summary failed: %s", exc)
             return "Task completed. Check tool traces for details."
+
+
+REFLECT_SYSTEM_PROMPT = """You are a quality reviewer for an AI agent's response.
+
+The agent was asked to do a task. It collected data using tools, then wrote a final answer.
+Your job: score the answer's quality and identify any problems.
+
+Score the answer on these criteria (each 0.0 to 1.0):
+- completeness: Does it fully address what the user asked?
+- accuracy: Is it consistent with the tool outputs (no hallucinated data)?
+- clarity: Is it well-written and easy to understand?
+
+Respond with ONLY valid JSON (no markdown, no backticks):
+{{
+  "overall_score": 0.0 to 1.0 (weighted average),
+  "completeness": 0.0 to 1.0,
+  "accuracy": 0.0 to 1.0,
+  "clarity": 0.0 to 1.0,
+  "issues": ["list of specific problems found"],
+  "suggestion": "How the answer should be improved (or empty string if good)"
+}}
+"""
 
 
 class PlannerError(Exception):

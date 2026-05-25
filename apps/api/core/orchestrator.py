@@ -29,7 +29,7 @@ from apps.api.memory.manager import MemoryManager
 from apps.api.memory.retrieval import MemoryRetrieval
 from apps.api.memory.vector_store import VectorStore
 from apps.api.models.run import (
-    Goal, GoalStatus, Observation, Plan, PlanStep, Run, RunStatus, StepStatus, RiskLevel, ToolResult,
+    Goal, GoalStatus, Observation, Plan, PlanStep, ReflectionResult, Run, RunStatus, StepStatus, RiskLevel, ToolResult,
 )
 from apps.api.providers import build_provider
 from apps.api.providers.base import LLMMessage
@@ -322,6 +322,13 @@ class Orchestrator:
                 )
                 run.observations.append(obs)
                 run.final_response = decision.get("response", "Task completed.")
+
+                # FLAG-GATED: Self-reflection critique
+                if self._settings.react_self_reflect and self._planner:
+                    reflection = await self._do_reflection(run)
+                    if reflection:
+                        run.reflection = reflection
+
                 run.status = RunStatus.COMPLETED
                 await self._save_run(run)
                 if run.final_response:
@@ -690,6 +697,79 @@ class Orchestrator:
 
         await self._execute_replan(run, memory_context, workspace_info)
         return "continue"
+
+    # ------------------------------------------------------------------
+    # Self-reflection (flag-gated)
+    # ------------------------------------------------------------------
+
+    async def _do_reflection(self, run: Run) -> ReflectionResult | None:
+        """Run self-reflection on the final answer. May rewrite the answer."""
+        if not self._planner or not run.final_response:
+            return None
+
+        # Build observations summary for the critic
+        obs_summary = "\n".join(
+            f"- {o.tool}: {o.result.status} → "
+            f"{json.dumps(o.result.output or o.result.error, default=str)[:200]}"
+            for o in run.observations if o.tool and o.result
+        )
+        goals_summary = "\n".join(
+            f"- [{g.status.value}] {g.description}"
+            for g in (run.plan.goals if run.plan else [])
+        )
+
+        for attempt in range(self._settings.react_reflect_max_retries + 1):
+            try:
+                critique = await self._planner.reflect_on_answer(
+                    user_message=run.user_message,
+                    final_answer=run.final_response,
+                    observations_summary=obs_summary,
+                    goals_summary=goals_summary,
+                )
+            except Exception as exc:
+                logger.warning("Reflection failed at attempt %d: %s", attempt, exc)
+                return ReflectionResult(attempt=attempt)
+
+            score = critique.get("overall_score", 1.0)
+            result = ReflectionResult(
+                overall_score=score,
+                completeness=critique.get("completeness", 1.0),
+                accuracy=critique.get("accuracy", 1.0),
+                clarity=critique.get("clarity", 1.0),
+                issues=critique.get("issues", []),
+                suggestion=critique.get("suggestion", ""),
+                attempt=attempt,
+            )
+
+            if score >= self._settings.react_reflect_quality_threshold:
+                # Answer is good enough
+                logger.info(
+                    "Run %s: reflection passed (score=%.2f, attempt=%d)",
+                    run.run_id, score, attempt,
+                )
+                return result
+
+            # Below threshold — try to improve
+            if attempt < self._settings.react_reflect_max_retries:
+                logger.info(
+                    "Run %s: reflection failed (score=%.2f), improving (attempt %d)",
+                    run.run_id, score, attempt,
+                )
+                improved_answer = await self._planner.improve_answer(
+                    user_message=run.user_message,
+                    original_answer=run.final_response,
+                    critique=critique,
+                    observations_summary=obs_summary,
+                )
+                if improved_answer != run.final_response:
+                    run.final_response = improved_answer
+                    result.improved = True
+
+            # Last attempt — return whatever we have
+            if attempt == self._settings.react_reflect_max_retries:
+                return result
+
+        return None
 
     async def _check_auto_replan(
         self, run: Run, memory_context: str, workspace_info: str,
@@ -1274,6 +1354,7 @@ class Orchestrator:
         observations_json = json.dumps(
             [o.model_dump() for o in run.observations], default=str
         ) if run.observations else "[]"
+        reflection_json = run.reflection.model_dump_json() if run.reflection else None
         conn = await get_connection(self._db_path)
         try:
             existing = await conn.execute_fetchall("SELECT id FROM runs WHERE id=?", (run.run_id,))
@@ -1281,20 +1362,20 @@ class Orchestrator:
                 await conn.execute(
                     "UPDATE runs SET status=?, plan=?, final_response=?, updated_at=?, "
                     "iterations=?, max_iterations=?, observations=?, context_window=?, "
-                    "model_name=? WHERE id=?",
+                    "model_name=?, reflection=? WHERE id=?",
                     (run.status.value, plan_json, run.final_response, run.updated_at,
                      run.iterations, run.max_iterations, observations_json,
-                     run.context_window, run.model_name, run.run_id))
+                     run.context_window, run.model_name, reflection_json, run.run_id))
             else:
                 await conn.execute(
                     "INSERT INTO runs (id,session_id,workspace_id,status,user_message,plan,"
                     "final_response,created_at,updated_at,iterations,max_iterations,observations,"
-                    "context_window,model_name) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "context_window,model_name,reflection) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (run.run_id, run.session_id, run.workspace_id, run.status.value,
                      run.user_message, plan_json, run.final_response, run.created_at,
                      run.updated_at, run.iterations, run.max_iterations, observations_json,
-                     run.context_window, run.model_name))
+                     run.context_window, run.model_name, reflection_json))
             await conn.commit()
         finally:
             await conn.close()
@@ -1377,6 +1458,13 @@ class Orchestrator:
                 observations = [Observation.model_validate(o) for o in obs_list]
             except Exception:
                 pass
+        reflection = None
+        reflection_raw = row["reflection"] if "reflection" in row.keys() else None
+        if reflection_raw:
+            try:
+                reflection = ReflectionResult.model_validate_json(reflection_raw)
+            except Exception:
+                pass
         iterations = row["iterations"] if "iterations" in row.keys() else 0
         max_iterations = row["max_iterations"] if "max_iterations" in row.keys() else 10
         context_window = row["context_window"] if "context_window" in row.keys() else 0
@@ -1391,4 +1479,5 @@ class Orchestrator:
             observations=observations,
             context_window=context_window or 0,
             model_name=model_name or "",
+            reflection=reflection,
         )

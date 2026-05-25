@@ -24,6 +24,17 @@ export type RiskLevel = "safe" | "medium" | "high";
 
 export type MemoryType = "fact" | "episode" | "summary";
 
+export interface ReflectionResult {
+  overall_score: number;
+  completeness: number;
+  accuracy: number;
+  clarity: number;
+  issues: string[];
+  suggestion: string;
+  improved: boolean;
+  attempt: number;
+}
+
 export interface Run {
   run_id: string;
   session_id: string;
@@ -38,6 +49,7 @@ export interface Run {
   observations: Observation[];
   context_window?: number;
   model_name?: string;
+  reflection?: ReflectionResult | null;
 }
 
 export interface Observation {

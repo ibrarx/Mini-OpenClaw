@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     react_read_file_max_batch: int = 10     # max files per batch read_file call
     react_read_file_max_chars: int = 50000  # max total output chars per read_file call
 
+    # ----- Self-reflection -----
+    # Critique the agent's final answer before delivering it to the user.
+    react_self_reflect: bool = False         # master toggle
+    react_reflect_max_retries: int = 1       # how many times to retry after critique
+    react_reflect_quality_threshold: float = 0.7  # 0.0-1.0, below this triggers retry
+
     # ----- Memory summaries -----
     # How many completed runs between auto-generated conversation summaries.
     # Set to 0 to disable auto-summarization.

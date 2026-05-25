@@ -20,7 +20,7 @@ import {
   SkipForward,
   RefreshCw,
 } from "lucide-react";
-import type { Plan, PlanStep, StepStatus, RiskLevel, Observation, Run, Goal, GoalStatus } from "../api/types";
+import type { Plan, PlanStep, StepStatus, RiskLevel, Observation, Run, Goal, GoalStatus, ReflectionResult } from "../api/types";
 
 interface PlanPreviewProps {
   plan: Plan;
@@ -216,6 +216,9 @@ function ReactTimeline({ run, expandedStep, onToggleStep, compact }: ReactTimeli
           </div>
         )}
       </div>
+
+      {/* Self-reflection badge */}
+      {run.reflection && <ReflectionBadge reflection={run.reflection} />}
     </div>
   );
 }
@@ -575,6 +578,34 @@ export function RiskBadge({ level }: { level: RiskLevel }) {
         ? "badge-medium"
         : "badge-high";
   return <span className={`badge ${cls}`}>{level}</span>;
+}
+
+function ReflectionBadge({ reflection }: { reflection: ReflectionResult }) {
+  const score = Math.round(reflection.overall_score * 100);
+  const color = score >= 80 ? "text-emerald-600" : score >= 60 ? "text-amber-600" : "text-red-600";
+  const bgColor = score >= 80 ? "bg-emerald-50 dark:bg-emerald-950/20" : score >= 60 ? "bg-amber-50 dark:bg-amber-950/20" : "bg-red-50 dark:bg-red-950/20";
+
+  return (
+    <div className={`mt-1.5 rounded-md px-2.5 py-2 ${bgColor} border border-app`}>
+      <div className="flex items-center gap-2 text-xs">
+        <span className="font-medium t-secondary">Self-check:</span>
+        <span className={`font-medium ${color}`}>{score}%</span>
+        {reflection.improved && (
+          <span className="text-[10px] t-muted">(answer improved)</span>
+        )}
+      </div>
+      {reflection.issues.length > 0 && (
+        <div className="mt-1 text-[11px] t-muted">
+          {reflection.issues.map((issue, i) => (
+            <div key={i} className="flex items-start gap-1">
+              <span className="t-faint">•</span>
+              <span>{issue}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ConfidenceBadge({ value }: { value: number }) {

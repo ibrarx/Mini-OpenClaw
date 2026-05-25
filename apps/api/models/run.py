@@ -118,6 +118,18 @@ class Observation(BaseModel):
     compression_level: str = ""     # "none" | "partial" | "aggressive" — context compression state
 
 
+class ReflectionResult(BaseModel):
+    """Result of the self-reflection critique."""
+    overall_score: float = 1.0
+    completeness: float = 1.0
+    accuracy: float = 1.0
+    clarity: float = 1.0
+    issues: list[str] = Field(default_factory=list)
+    suggestion: str = ""
+    improved: bool = False  # whether the answer was rewritten
+    attempt: int = 0        # which reflection attempt (0 = first)
+
+
 class Run(BaseModel):
     run_id: str
     session_id: str
@@ -134,3 +146,4 @@ class Run(BaseModel):
     observations: list[Observation] = Field(default_factory=list)
     context_window: int = 0         # model's context window size (set at run start)
     model_name: str = ""            # LLM model identifier (for UI display)
+    reflection: ReflectionResult | None = None  # self-reflection critique result
