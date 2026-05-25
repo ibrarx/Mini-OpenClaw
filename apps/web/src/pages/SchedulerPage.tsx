@@ -1,8 +1,5 @@
 /**
- * SchedulerPage — View and manage scheduled tasks.
- *
- * Shows a table of all scheduled tasks with status, timing info,
- * and action buttons for pause/resume/delete.
+ * SchedulerPage — View and manage scheduled tasks with run history.
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -16,14 +13,22 @@ import {
   CheckCircle2,
   Timer,
   Repeat,
+  ChevronDown,
+  ChevronUp,
+  XCircle,
+  Loader2,
+  Activity,
 } from "lucide-react";
 import {
   getScheduledTasks,
   pauseTask,
   resumeTask,
   deleteTask,
+  getTaskRuns,
 } from "../api/client";
-import type { ScheduledTask, TaskStatus } from "../api/types";
+import type { ScheduledTask, TaskStatus, Run, RunStatus } from "../api/types";
+
+/* ── Helpers ───────────────────────────────────────── */
 
 function statusBadge(status: TaskStatus) {
   const map: Record<TaskStatus, { color: string; icon: typeof Clock; label: string }> = {
@@ -40,6 +45,24 @@ function statusBadge(status: TaskStatus) {
       {cfg.label}
     </span>
   );
+}
+
+function runStatusIcon(status: RunStatus) {
+  switch (status) {
+    case "completed":
+      return <CheckCircle2 size={12} className="text-emerald-400" />;
+    case "failed":
+      return <XCircle size={12} className="text-red-400" />;
+    case "cancelled":
+      return <XCircle size={12} className="text-yellow-400" />;
+    case "running":
+    case "reacting":
+    case "planning":
+    case "reflecting":
+      return <Loader2 size={12} className="text-blue-400 animate-spin" />;
+    default:
+      return <Activity size={12} className="t-faint" />;
+  }
 }
 
 function formatTime(iso: string | null): string {
@@ -83,11 +106,93 @@ function intervalLabel(seconds: number | null): string {
   return `${(seconds / 3600).toFixed(1)}h`;
 }
 
+/** Truncate text with ellipsis. */
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return text.slice(0, max).trimEnd() + "…";
+}
+
+/* ── Run History Panel ─────────────────────────────── */
+
+function TaskRunHistory({ taskId }: { taskId: string }) {
+  const [runs, setRuns] = useState<Run[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedRun, setExpandedRun] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getTaskRuns(taskId, 5)
+      .then((data) => { if (!cancelled) setRuns(data); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [taskId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 py-2 text-[11px] t-faint">
+        <Loader2 size={11} className="animate-spin" /> Loading runs…
+      </div>
+    );
+  }
+
+  if (runs.length === 0) {
+    return (
+      <div className="py-2 text-[11px] t-faint">
+        No runs yet — waiting for first execution.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {runs.map((run) => {
+        const isExpanded = expandedRun === run.run_id;
+        const response = run.final_response || "(no response)";
+        return (
+          <div key={run.run_id} className="rounded border border-app bg-app/50">
+            <button
+              onClick={() => setExpandedRun(isExpanded ? null : run.run_id)}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[11px] hover:bg-app-hover/30 transition-colors"
+            >
+              {runStatusIcon(run.status)}
+              <span className="t-muted flex-1 min-w-0 truncate">
+                {truncate(response.replace(/\*\*/g, "").replace(/\n/g, " "), 80)}
+              </span>
+              <span className="t-faint whitespace-nowrap">
+                {relativeTime(run.created_at)}
+              </span>
+              {isExpanded ? <ChevronUp size={11} className="t-faint" /> : <ChevronDown size={11} className="t-faint" />}
+            </button>
+            {isExpanded && (
+              <div className="px-2.5 pb-2.5 border-t border-app">
+                <div className="mt-2 text-[11px] t-secondary whitespace-pre-wrap break-words max-h-48 overflow-y-auto leading-relaxed">
+                  {response}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] t-faint">
+                  <span>Status: {run.status}</span>
+                  <span>Steps: {run.plan?.steps?.length ?? 0}</span>
+                  <span>Iterations: {run.iterations}/{run.max_iterations}</span>
+                  <span>{formatTime(run.created_at)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ── Main Page ─────────────────────────────────────── */
+
 export default function SchedulerPage() {
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [expandedTask, setExpandedTask] = useState<string | null>(null);
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -103,8 +208,7 @@ export default function SchedulerPage() {
 
   useEffect(() => {
     fetchTasks();
-    // Auto-refresh every 10s
-    const interval = setInterval(fetchTasks, 10_000);
+    const interval = setInterval(fetchTasks, 5_000); // 5s for faster feedback
     return () => clearInterval(interval);
   }, [fetchTasks]);
 
@@ -145,6 +249,12 @@ export default function SchedulerPage() {
     }
   };
 
+  // Count tasks that ran in the last 2 minutes (for parent badge)
+  const recentlyFired = tasks.filter((t) => {
+    if (!t.last_run_at) return false;
+    return Date.now() - new Date(t.last_run_at).getTime() < 120_000;
+  }).length;
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
@@ -155,6 +265,12 @@ export default function SchedulerPage() {
           <span className="text-[11px] t-faint">
             {tasks.length} task{tasks.length !== 1 ? "s" : ""}
           </span>
+          {recentlyFired > 0 && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium text-emerald-400 bg-emerald-400/10 animate-pulse">
+              <Activity size={10} />
+              {recentlyFired} ran recently
+            </span>
+          )}
         </div>
         <button
           onClick={fetchTasks}
@@ -194,118 +310,136 @@ export default function SchedulerPage() {
           </div>
         ) : (
           <div className="space-y-2">
-            {tasks.map((task) => (
-              <div
-                key={task.id}
-                className="rounded-lg border border-app bg-app-surface p-3 transition-colors hover:border-app-hover"
-              >
-                {/* Top row: message + status */}
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm t-primary truncate" title={task.message}>
-                      {task.message}
-                    </p>
-                  </div>
-                  {statusBadge(task.status)}
-                </div>
+            {tasks.map((task) => {
+              const isExpanded = expandedTask === task.id;
+              return (
+                <div
+                  key={task.id}
+                  className="rounded-lg border border-app bg-app-surface transition-colors"
+                >
+                  {/* Card header — clickable to expand */}
+                  <div className="p-3">
+                    {/* Top row: message + status */}
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm t-primary" title={task.message}>
+                          {task.message}
+                        </p>
+                      </div>
+                      {statusBadge(task.status)}
+                    </div>
 
-                {/* Meta row */}
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] t-faint">
-                  {/* Type */}
-                  <span className="flex items-center gap-1">
-                    {task.schedule_type === "interval" ? (
-                      <Repeat size={11} />
-                    ) : (
-                      <Timer size={11} />
+                    {/* Meta row */}
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] t-faint">
+                      <span className="flex items-center gap-1">
+                        {task.schedule_type === "interval" ? <Repeat size={11} /> : <Timer size={11} />}
+                        {task.schedule_type === "interval"
+                          ? `Every ${intervalLabel(task.interval_seconds)}`
+                          : "One-time"}
+                      </span>
+
+                      {task.status === "active" && (
+                        <span title={formatTime(task.next_run_at)}>
+                          Next: {relativeTime(task.next_run_at)}
+                        </span>
+                      )}
+
+                      <span>
+                        Runs: {task.run_count}
+                        {task.max_runs > 0 ? `/${task.max_runs}` : ""}
+                      </span>
+
+                      {task.last_run_at && (
+                        <span title={formatTime(task.last_run_at)}>
+                          Last: {relativeTime(task.last_run_at)}
+                        </span>
+                      )}
+
+                      <span title={formatTime(task.created_at)}>
+                        Created: {formatTime(task.created_at)}
+                      </span>
+                    </div>
+
+                    {/* Pre-approved tools */}
+                    {task.pre_approved_tools.length > 0 && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+                        <span className="t-faint">Pre-approved:</span>
+                        {task.pre_approved_tools.map((tool) => (
+                          <span
+                            key={tool}
+                            className="px-1.5 py-0.5 rounded bg-amber-400/10 text-amber-400 font-mono"
+                          >
+                            {tool}
+                          </span>
+                        ))}
+                        {task.schedule_type === "interval" && (
+                          <span className={task.approve_all_runs ? "text-emerald-400" : "text-yellow-400"}>
+                            ({task.approve_all_runs ? "all runs" : "first run only"})
+                          </span>
+                        )}
+                      </div>
                     )}
-                    {task.schedule_type === "interval"
-                      ? `Every ${intervalLabel(task.interval_seconds)}`
-                      : "One-time"}
-                  </span>
 
-                  {/* Next run */}
-                  {task.status === "active" && (
-                    <span title={formatTime(task.next_run_at)}>
-                      Next: {relativeTime(task.next_run_at)}
-                    </span>
-                  )}
+                    {/* Error */}
+                    {task.error && (
+                      <div className="mt-2 px-2 py-1.5 rounded bg-red-500/10 text-red-400 text-[11px] truncate" title={task.error}>
+                        {task.error}
+                      </div>
+                    )}
 
-                  {/* Run count */}
-                  <span>
-                    Runs: {task.run_count}
-                    {task.max_runs > 0 ? `/${task.max_runs}` : ""}
-                  </span>
-
-                  {/* Last run */}
-                  {task.last_run_at && (
-                    <span title={formatTime(task.last_run_at)}>
-                      Last: {relativeTime(task.last_run_at)}
-                    </span>
-                  )}
-
-                  {/* Created */}
-                  <span title={formatTime(task.created_at)}>
-                    Created: {formatTime(task.created_at)}
-                  </span>
-                </div>
-
-                {/* Pre-approved tools */}
-                {task.pre_approved_tools.length > 0 && (
-                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
-                    <span className="t-faint">Pre-approved:</span>
-                    {task.pre_approved_tools.map((tool) => (
-                      <span
-                        key={tool}
-                        className="px-1.5 py-0.5 rounded bg-amber-400/10 text-amber-400 font-mono"
+                    {/* Actions */}
+                    <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-app">
+                      {task.status === "active" && (
+                        <button
+                          onClick={() => handlePause(task.id)}
+                          disabled={actionLoading === task.id}
+                          className="flex items-center gap-1 px-2 py-1 rounded text-[11px] t-muted hover:text-yellow-400 hover:bg-yellow-400/10 transition-colors disabled:opacity-50"
+                        >
+                          <Pause size={11} /> Pause
+                        </button>
+                      )}
+                      {task.status === "paused" && (
+                        <button
+                          onClick={() => handleResume(task.id)}
+                          disabled={actionLoading === task.id}
+                          className="flex items-center gap-1 px-2 py-1 rounded text-[11px] t-muted hover:text-emerald-400 hover:bg-emerald-400/10 transition-colors disabled:opacity-50"
+                        >
+                          <Play size={11} /> Resume
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDelete(task.id)}
+                        disabled={actionLoading === task.id}
+                        className="flex items-center gap-1 px-2 py-1 rounded text-[11px] t-muted hover:text-red-400 hover:bg-red-400/10 transition-colors disabled:opacity-50"
                       >
-                        {tool}
-                      </span>
-                    ))}
-                    {task.schedule_type === "interval" && (
-                      <span className={task.approve_all_runs ? "text-emerald-400" : "text-yellow-400"}>
-                        ({task.approve_all_runs ? "all runs" : "first run only"})
-                      </span>
-                    )}
-                  </div>
-                )}
+                        <Trash2 size={11} /> Delete
+                      </button>
 
-                {/* Error */}
-                {task.error && (
-                  <div className="mt-2 px-2 py-1.5 rounded bg-red-500/10 text-red-400 text-[11px] truncate" title={task.error}>
-                    {task.error}
+                      {/* Expand run history */}
+                      {task.run_count > 0 && (
+                        <button
+                          onClick={() => setExpandedTask(isExpanded ? null : task.id)}
+                          className="flex items-center gap-1 px-2 py-1 rounded text-[11px] t-muted hover:text-blue-400 hover:bg-blue-400/10 transition-colors ml-auto"
+                        >
+                          <Activity size={11} />
+                          {isExpanded ? "Hide" : "View"} runs
+                          {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                )}
 
-                {/* Actions */}
-                <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-app">
-                  {task.status === "active" && (
-                    <button
-                      onClick={() => handlePause(task.id)}
-                      disabled={actionLoading === task.id}
-                      className="flex items-center gap-1 px-2 py-1 rounded text-[11px] t-muted hover:text-yellow-400 hover:bg-yellow-400/10 transition-colors disabled:opacity-50"
-                    >
-                      <Pause size={11} /> Pause
-                    </button>
+                  {/* Expanded run history */}
+                  {isExpanded && (
+                    <div className="px-3 pb-3 border-t border-app">
+                      <div className="mt-2">
+                        <TaskRunHistory taskId={task.id} />
+                      </div>
+                    </div>
                   )}
-                  {task.status === "paused" && (
-                    <button
-                      onClick={() => handleResume(task.id)}
-                      disabled={actionLoading === task.id}
-                      className="flex items-center gap-1 px-2 py-1 rounded text-[11px] t-muted hover:text-emerald-400 hover:bg-emerald-400/10 transition-colors disabled:opacity-50"
-                    >
-                      <Play size={11} /> Resume
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handleDelete(task.id)}
-                    disabled={actionLoading === task.id}
-                    className="flex items-center gap-1 px-2 py-1 rounded text-[11px] t-muted hover:text-red-400 hover:bg-red-400/10 transition-colors disabled:opacity-50"
-                  >
-                    <Trash2 size={11} /> Delete
-                  </button>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

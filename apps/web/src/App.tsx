@@ -13,7 +13,7 @@ import {
   Clock,
 } from "lucide-react";
 import { useSession } from "./hooks/useSession";
-import { healthCheck } from "./api/client";
+import { healthCheck, getScheduledTasks } from "./api/client";
 import ChatPage from "./pages/ChatPage";
 import HistoryPage from "./pages/HistoryPage";
 import MemoryPage from "./pages/MemoryPage";
@@ -105,6 +105,7 @@ function AppContent() {
   const [page, setPage] = useState<Page>("chat");
   const [backendUp, setBackendUp] = useState<boolean | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [schedulerBadge, setSchedulerBadge] = useState(0); // count of recently fired tasks
 
   useEffect(() => {
     const check = () =>
@@ -112,8 +113,24 @@ function AppContent() {
         .then(() => setBackendUp(true))
         .catch(() => setBackendUp(false));
     check();
-    // Re-check periodically so the indicator recovers after backend restarts
     const id = setInterval(check, 10_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Poll scheduler for recent activity (badge on nav)
+  useEffect(() => {
+    const poll = () =>
+      getScheduledTasks()
+        .then((tasks) => {
+          const recent = tasks.filter((t) => {
+            if (!t.last_run_at) return false;
+            return Date.now() - new Date(t.last_run_at).getTime() < 120_000;
+          });
+          setSchedulerBadge(recent.length);
+        })
+        .catch(() => {});
+    poll();
+    const id = setInterval(poll, 10_000);
     return () => clearInterval(id);
   }, []);
 
@@ -147,7 +164,7 @@ function AppContent() {
             <button
               key={id}
               onClick={() => setPage(id)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors ${
+              className={`relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors ${
                 page === id
                   ? "bg-blue-600/15 text-blue-400"
                   : "t-muted hover:t-secondary"
@@ -155,6 +172,11 @@ function AppContent() {
             >
               <Icon size={14} />
               <span className="hidden sm:inline">{label}</span>
+              {id === "scheduler" && schedulerBadge > 0 && page !== "scheduler" && (
+                <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-emerald-500 text-[8px] font-bold text-white animate-pulse">
+                  {schedulerBadge}
+                </span>
+              )}
             </button>
           ))}
 

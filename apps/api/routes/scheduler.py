@@ -39,6 +39,24 @@ async def get_task(task_id: str, request: Request) -> dict:
     return task.model_dump()
 
 
+@router.get("/tasks/{task_id}/runs")
+async def get_task_runs(
+    task_id: str, request: Request, limit: int = 10
+) -> list[dict]:
+    """Get recent runs for a scheduled task."""
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="Scheduler not available")
+    task = await scheduler.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+    orchestrator = request.app.state.orchestrator
+    runs = await orchestrator.list_runs(
+        session_id=f"scheduled_{task_id}", limit=limit
+    )
+    return [r.model_dump() for r in runs]
+
+
 @router.post("/tasks/{task_id}/pause")
 async def pause_task(task_id: str, request: Request) -> dict:
     """Pause an active scheduled task."""

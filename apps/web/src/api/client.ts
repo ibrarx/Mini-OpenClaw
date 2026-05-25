@@ -189,3 +189,7 @@ export async function resumeTask(taskId: string): Promise<ScheduledTask> {
 export async function deleteTask(taskId: string): Promise<{ deleted: boolean }> {
   return apiFetch(`/tasks/${taskId}`, { method: "DELETE" });
 }
+
+export async function getTaskRuns(taskId: string, limit: number = 5): Promise<Run[]> {
+  return apiFetch(`/tasks/${taskId}/runs?limit=${limit}`);
+}
