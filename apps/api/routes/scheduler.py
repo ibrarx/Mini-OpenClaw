@@ -73,3 +73,28 @@ async def delete_task(task_id: str, request: Request) -> dict:
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
     return {"deleted": True, "task_id": task_id}
+
+
+@router.get("/scheduler/health")
+async def scheduler_health(request: Request) -> dict:
+    """Check scheduler loop health."""
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler is None:
+        return {"status": "disabled"}
+    loop_alive = (
+        scheduler._loop_task is not None
+        and not scheduler._loop_task.done()
+    )
+    loop_error = None
+    if scheduler._loop_task and scheduler._loop_task.done():
+        exc = scheduler._loop_task.exception() if not scheduler._loop_task.cancelled() else None
+        loop_error = str(exc) if exc else "cancelled"
+    return {
+        "status": "running" if loop_alive else "dead",
+        "loop_alive": loop_alive,
+        "loop_error": loop_error,
+        "tasks_in_memory": len(scheduler._tasks),
+        "heap_size": len(scheduler._heap),
+        "inflight": len(scheduler._inflight),
+        "running": scheduler._running,
+    }

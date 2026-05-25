@@ -91,6 +91,7 @@ class TaskScheduler:
 
     async def _run_loop(self) -> None:
         """Sleep until the next task is due, execute it, repeat."""
+        logger.info("Scheduler loop started")
         while self._running:
             try:
                 # Check in-flight runs from previous cycle
@@ -100,16 +101,20 @@ class TaskScheduler:
                 sleep_for = self._seconds_until_next()
                 if sleep_for is None:
                     # No tasks — wait until woken by a new task creation
+                    logger.debug("Scheduler: no tasks in heap, waiting for wake event")
                     self._wake_event.clear()
                     await self._wake_event.wait()
+                    logger.debug("Scheduler: woken by new task")
                     continue
 
                 if sleep_for > 0:
+                    logger.debug("Scheduler: sleeping %.1fs until next task", sleep_for)
                     self._wake_event.clear()
                     try:
                         await asyncio.wait_for(
                             self._wake_event.wait(), timeout=sleep_for
                         )
+                        logger.debug("Scheduler: woken early by new task")
                     except asyncio.TimeoutError:
                         pass  # normal — sleep elapsed
 
@@ -121,6 +126,7 @@ class TaskScheduler:
             except Exception as exc:
                 logger.error("Scheduler loop error: %s", exc, exc_info=True)
                 await asyncio.sleep(5)  # back off on unexpected errors
+        logger.info("Scheduler loop exited")
 
     def _seconds_until_next(self) -> float | None:
         """Seconds until the next due task, or None if the heap is empty."""
@@ -150,6 +156,7 @@ class TaskScheduler:
     async def _fire_due_tasks(self) -> None:
         """Pop and execute all tasks whose next_run_at <= now."""
         now = datetime.now(timezone.utc)
+        fired_count = 0
         while self._heap:
             next_at_str, task_id = self._heap[0]
             task = self._tasks.get(task_id)
@@ -175,9 +182,15 @@ class TaskScheduler:
 
             # Don't fire if already in-flight
             if task_id in self._inflight:
+                logger.debug("Scheduler: task %s already in-flight, skipping", task_id)
                 continue
 
+            logger.info("Scheduler: firing task %s ('%s')", task_id, task.message[:60])
             await self._execute_task(task)
+            fired_count += 1
+
+        if fired_count:
+            logger.info("Scheduler: fired %d task(s) this cycle", fired_count)
 
     async def _execute_task(self, task: ScheduledTask) -> None:
         """Fire-and-forget: create a run via the orchestrator."""
