@@ -717,9 +717,10 @@ class Orchestrator:
             return None
 
         # Build observations summary for the critic
+        obs_limit = self._settings.react_observation_max_chars
         obs_summary = "\n".join(
             f"- {o.tool}: {o.result.status} → "
-            f"{json.dumps(o.result.output or o.result.error, default=str)[:200]}"
+            f"{json.dumps(o.result.output or o.result.error, default=str)[:obs_limit]}"
             for o in run.observations if o.tool and o.result
         )
         goals_summary = "\n".join(
