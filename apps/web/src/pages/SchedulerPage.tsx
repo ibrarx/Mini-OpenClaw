@@ -221,7 +221,7 @@ export default function SchedulerPage() {
 
   useEffect(() => {
     fetchTasks();
-    const interval = setInterval(fetchTasks, 15_000); // 15s refresh
+    const interval = setInterval(fetchTasks, 5_000); // 5s refresh
     return () => clearInterval(interval);
   }, [fetchTasks]);
 

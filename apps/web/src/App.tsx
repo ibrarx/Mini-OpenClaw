@@ -142,7 +142,7 @@ function AppContent() {
         })
         .catch(() => {});
     poll();
-    const id = setInterval(poll, 15_000);
+    const id = setInterval(poll, 5_000);
     return () => clearInterval(id);
   }, [page]);
 
