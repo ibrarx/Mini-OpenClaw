@@ -16,6 +16,7 @@ The agent uses a **Hybrid Plan → ReAct → Replan** architecture as its defaul
 
 Key features:
 
+- **Sub-agent delegation** — complex multi-part tasks are decomposed into child runs, each executed by a focused sub-agent with its own iteration budget, approval gates, and real-time SSE streaming in the UI
 - **Hybrid Plan-ReAct with replanning** — goal checklist generated before execution, tracked live in the UI, with automatic or LLM-requested replanning when the plan goes off-track
 - **ReAct loop** with iterative reasoning and real-time adaptation to failures
 - **Real-time SSE streaming** — run status, plans, and approvals pushed to the frontend instantly via Server-Sent Events (no polling)
@@ -203,6 +204,12 @@ Once the app is running, type these into the chat:
 19. Enable self-reflection: set `REACT_SELF_REFLECT=true` in `.env` and restart the backend.
 20. **"Read the README and summarize it"** — after the agent finishes, a **Self-check** badge appears below the observations showing the quality score (completeness, accuracy, clarity). Click it to expand the breakdown and see any issues found.
 21. **"Search for TODO in all files"** — the self-check may flag incomplete data and rewrite the answer. Look for the **"answer improved"** pill on the badge.
+
+### Sub-agent delegation
+22. **"Delegate reading all the Python files to a sub-agent, then use its findings to create a summary document."** — the parent agent spawns a child run (visible as a purple "sub-agent" badge), the child reads and analyses all files, then the parent uses the child's findings to write a summary. Approval is requested before delegation starts.
+23. **"First, search all files for TODO comments and list them. Separately, read the README and create a summary. Do these as independent sub-tasks."** — the agent spawns **two** sub-agents, each handling one independent sub-task. Both child runs stream their progress in real-time within the parent's observation timeline.
+24. **"Find all Python files and summarize each one, and also search for bugs or TODOs across the codebase"** — the "and also" joining two unrelated tasks triggers delegation without needing to explicitly say "delegate".
+25. Expand a delegation observation row — the nested **Sub-agent** card shows the child's task description, iteration count, individual observation steps, and final response. The child run also appears separately in the Run History tab.
 
 ## Execution Modes
 
@@ -429,6 +436,35 @@ The **ReAct loop** replaces the legacy plan-all-upfront model. Each iteration pe
 
 See [docs/architecture.md](docs/architecture.md) for the full design and [docs/provider-abstraction.md](docs/provider-abstraction.md) for the LLM provider layer.
 
+### Sub-agent delegation
+
+When a user request contains multiple independent sub-tasks, the agent can delegate each to a focused **child run** via the `delegate_task` tool. This enables multi-agent orchestration within the existing run-centric architecture.
+
+```
+User: "Search for TODO comments AND summarize the README"
+
+Parent run (3 iterations):
+  ├── Step 1: delegate_task("Search for TODO comments")
+  │     └── Child run_abc (2 iterations):
+  │           ├── search_in_files(".", "TODO")  → 12 matches
+  │           └── final_answer → "Found 12 TODOs..."
+  ├── Step 2: delegate_task("Read and summarize README.md")
+  │     └── Child run_def (2 iterations):
+  │           ├── read_file("README.md")  → content
+  │           └── final_answer → "The project is..."
+  └── Step 3: final_answer → Combined summary from both sub-agents
+```
+
+**Design decisions:**
+
+- **Approval required** — the user sees "Let me hand this sub-task off to a focused agent…" and approves before the child spawns. This makes delegation visible and auditable.
+- **Synchronous execution** — the parent awaits the child's completion directly (no polling). Simple, no race conditions.
+- **Child restrictions** — children cannot delegate further, write memory, trigger self-reflection, or run Agent Dreams. They are read-and-report agents.
+- **All tools available** — children can use `write_file` and `run_shell_safe` with their own approval gates, so the user retains full control over risky actions.
+- **Depth limit** — configurable max nesting (default: 2 levels). Children per parent is also capped (default: 3).
+- **Real-time streaming** — each child run emits its own SSE events. The frontend subscribes to the child's stream and renders a nested observation timeline inside the parent's delegation step.
+- **Cancellation cascade** — cancelling the parent automatically cancels all active children.
+
 ## Memory System
 
 Mini-OpenClaw has a five-layer memory system with hybrid semantic search, designed so the agent remembers user preferences, learns from past tasks, discovers workflow patterns, and builds up context over time.
@@ -517,6 +553,7 @@ This context is injected into the LLM system prompt with explicit instructions t
 | `run_shell_safe` | Execute allowlisted commands (pwd, ls, find, cat, grep) | Medium–High | Yes |
 | `remember_fact` | Store a durable fact in memory | Safe | No |
 | `search_memory` | Query stored facts, episodes, and summaries | Safe | No |
+| `delegate_task` | Spawn a sub-agent to handle an independent sub-task — child runs with own iteration budget, restricted tool set (no delegation, no memory writes), and real-time SSE streaming | Medium | Yes |
 
 ## Security Model
 
@@ -568,6 +605,10 @@ All settings are read from the `.env` file (see `.env.example`):
 | `DREAM_MAX_STRATEGIES` | Maximum active strategies to keep; lowest-confidence evicted at cap | `10` |
 | `DREAM_MAX_PREFERENCES` | Maximum active preferences to keep; lowest-confidence evicted at cap | `10` |
 | `DREAM_CONFIDENCE_THRESHOLD` | Minimum LLM confidence (0.0–1.0) for a dream insight to be proposed | `0.6` |
+| `DELEGATE_ENABLED` | Enable/disable the `delegate_task` tool | `true` |
+| `DELEGATE_MAX_DEPTH` | Maximum nesting level for delegation (0 = no delegation, 1 = children only, 2 = grandchildren) | `2` |
+| `DELEGATE_MAX_CHILDREN` | Maximum child runs a single parent can spawn | `3` |
+| `DELEGATE_MAX_CHILD_ITERATIONS` | Iteration cap per child run (hard max regardless of agent request) | `5` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
 | `BACKEND_PORT` | Backend server port | `8000` |
 
@@ -586,6 +627,7 @@ The test suite covers:
 | Test file | What it tests | Count |
 |-----------|--------------|-------|
 | `test_context.py` | Token estimation, context window lookup, progressive summarization, compression levels | 22 |
+| `test_delegation.py` | Sub-agent delegation: child run creation, workspace inheritance, depth limits, children limits, iteration caps, result flow-back, tool restrictions | 7 |
 | `test_memory_semantic.py` | Hybrid search, embedding, vector store, planner wiring, summaries | 44 |
 | `test_policy.py` | Path validation, shell blocking, injection detection, risk classification | 38 |
 | `test_providers.py` | Anthropic/Gemini/Ollama provider translation, factory, JSON extraction | 48 |
@@ -635,6 +677,11 @@ python scripts/export_memory.py
 | Self-check shows "truncated" on small files | The reflection critic had a separate truncation limit — update to latest code, or increase `REACT_OBSERVATION_MAX_CHARS` in `.env` |
 | Self-check scores seem too harsh | Lower `REACT_REFLECT_QUALITY_THRESHOLD` (e.g. `0.5`) or disable with `REACT_SELF_REFLECT=false` |
 | Runs are slow with self-reflection enabled | Self-reflection adds 1–2 extra LLM calls per run. Disable it (`REACT_SELF_REFLECT=false`) for faster responses, or set `REACT_REFLECT_MAX_RETRIES=0` for critique-only (no rewrite) |
+| Agent doesn't delegate when expected | The planner only delegates when it sees distinct independent sub-parts. Use explicit cues: "do these as independent sub-tasks", numbered lists, or "and also" joining unrelated tasks. Or explicitly say "delegate" |
+| Delegation approval keeps appearing | Each child run is gated by a separate approval. This is by design — the user controls what work gets spawned. Set `DELEGATE_ENABLED=false` to disable delegation entirely |
+| Child run appears stuck | The child has its own iteration budget (max 5 by default). Check if it's waiting for approval on a `write_file` or `run_shell_safe` call inside the child |
+| Too many child runs spawning | Lower `DELEGATE_MAX_CHILDREN` in `.env` (default: 3). The planner also respects this limit and won't attempt more delegations than allowed |
+| Child run not visible in UI | Expand the `delegate_task` observation row in the parent — the child run card with its observations renders inline. Child runs also appear separately in Run History |
 
 ## Project Structure
 
@@ -643,12 +690,12 @@ mini-openclaw/
 ├── apps/api/              # FastAPI backend
 │   ├── core/              #   Orchestrator, planner, policy, executor, audit
 │   ├── providers/         #   LLM provider abstraction (Anthropic, Gemini, Ollama)
-│   ├── skills/            #   V1 tool implementations + registry
+│   ├── skills/            #   V1 tool implementations + registry + sub-agent delegation
 │   ├── memory/            #   Memory manager, hybrid retrieval, embeddings, vector store, dreamer
 │   └── models/            #   Pydantic models (Run, ToolResult, ErrorKind, etc.)
 ├── apps/web/              # React + TypeScript frontend
 │   └── src/components/    #   ChatPanel, PlanPreview, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser
-├── tests/                 # pytest test suite (333 tests)
+├── tests/                 # pytest test suite (340 tests)
 ├── scripts/               # seed_demo.py (workspace + memory setup), export_memory.py
 ├── docs/                  # Architecture and design documentation
 └── requirements.txt       # Python dependencies
