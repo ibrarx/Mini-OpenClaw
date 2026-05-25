@@ -185,8 +185,8 @@ function AppContent() {
               <Icon size={14} />
               <span className="hidden sm:inline">{label}</span>
               {id === "scheduler" && schedulerBadge > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-emerald-500 text-[8px] font-bold text-white animate-pulse">
-                  {schedulerBadge > 9 ? "9+" : schedulerBadge}
+                <span className="absolute -top-1 -right-1.5 flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-emerald-500 text-[8px] font-bold text-white animate-pulse">
+                  {schedulerBadge > 99 ? "99+" : schedulerBadge}
                 </span>
               )}
             </button>
