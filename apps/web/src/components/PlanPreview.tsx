@@ -635,25 +635,27 @@ function ReflectionBadge({ reflection }: { reflection: ReflectionResult }) {
 
       {expanded && (
         <div className="mt-2 space-y-1.5">
-          {/* Score breakdown — matches BudgetBar / ContextBar layout */}
-          {scores.map((s) => {
-            const pct = Math.round(s.value * 100);
-            const barColor = pct >= 80 ? "bg-emerald-500" : pct >= 60 ? "bg-amber-500" : "bg-red-500";
-            return (
-              <div key={s.label} className="flex items-center gap-2">
-                <span className={BAR_LABEL}>{s.label}</span>
-                <div className={BAR_OUTER}>
-                  <div
-                    className={`absolute inset-y-0 left-0 rounded-l transition-all duration-500 ease-out ${barColor}`}
-                    style={{ width: `${pct}%` }}
-                  />
-                  <span className="absolute inset-0 flex items-center justify-center text-[10px] font-medium text-gray-600 dark:text-gray-300">
-                    {pct}%
-                  </span>
+          {/* Score breakdown */}
+          <div className="flex gap-3">
+            {scores.map((s) => {
+              const pct = Math.round(s.value * 100);
+              const barColor = pct >= 80 ? "bg-emerald-500" : pct >= 60 ? "bg-amber-500" : "bg-red-500";
+              return (
+                <div key={s.label} className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between text-[10px] mb-0.5">
+                    <span className="t-muted">{s.label}</span>
+                    <span className="t-secondary font-medium">{pct}%</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${barColor} transition-all duration-500`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
 
           {/* Issues */}
           {reflection.issues.length > 0 && (
