@@ -4,16 +4,14 @@
  * The sidebar shows the execution graph:
  * - During an active run: shows the live graph (real-time updates)
  * - After a run completes: clicking the graph icon on a message loads
- *   that run's graph in the sidebar (Option A: click message to load)
+ *   that run's graph in the sidebar
  */
 
-import { useState, useCallback, lazy, Suspense } from "react";
-import { PanelRightClose, PanelRightOpen, GitBranch, Loader2 } from "lucide-react";
+import { useState, useCallback } from "react";
+import { PanelRightClose, PanelRightOpen, GitBranch } from "lucide-react";
 import ChatPanel from "../components/ChatPanel";
+import ExecutionGraph from "../components/ExecutionGraph";
 import type { ChatMessage, Run } from "../api/types";
-
-// Lazy-load the graph component (it pulls in @xyflow/react)
-const ExecutionGraph = lazy(() => import("../components/ExecutionGraph"));
 
 interface ChatPageProps {
   sessionId: string;
@@ -24,12 +22,10 @@ interface ChatPageProps {
 export default function ChatPage({ sessionId, messages, onMessagesChange }: ChatPageProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeRun, setActiveRun] = useState<Run | null>(null);
-  /** Run selected by clicking a completed message's graph icon. */
   const [selectedRun, setSelectedRun] = useState<Run | null>(null);
 
   const handleRunUpdate = useCallback((run: Run | null) => {
     setActiveRun(run);
-    // Clear selected run when a new active run starts
     if (run && ["planning", "reacting", "running"].includes(run.status)) {
       setSelectedRun(null);
     }
@@ -39,7 +35,6 @@ export default function ChatPage({ sessionId, messages, onMessagesChange }: Chat
     setSelectedRun((prev) => (prev?.run_id === run.run_id ? null : run));
   }, []);
 
-  // Active run takes priority; otherwise show the selected past run
   const isLive =
     activeRun?.plan &&
     activeRun.plan.task_type !== "direct_answer" &&
@@ -102,24 +97,15 @@ export default function ChatPage({ sessionId, messages, onMessagesChange }: Chat
                 )}
               </div>
 
-              {/* Graph canvas */}
-              <div className="flex-1 min-h-0">
-                <Suspense
-                  fallback={
-                    <div className="flex items-center justify-center h-full t-faint gap-2">
-                      <Loader2 size={14} className="animate-spin" />
-                      <span className="text-xs">Loading graph…</span>
-                    </div>
-                  }
-                >
-                  <ExecutionGraph key={graphRun.run_id} run={graphRun} />
-                </Suspense>
+              {/* Graph — scrolls naturally */}
+              <div className="flex-1 overflow-y-auto min-h-0">
+                <ExecutionGraph key={graphRun.run_id} run={graphRun} />
               </div>
 
               {/* Footer */}
               <div className="px-3 py-1.5 border-t border-app flex items-center flex-shrink-0">
                 <span className="text-[10px] t-faint flex-1 text-center">
-                  Click a node for details · Scroll to zoom · Drag to pan
+                  Click a node for details
                 </span>
                 {!isLive && selectedRun && (
                   <button

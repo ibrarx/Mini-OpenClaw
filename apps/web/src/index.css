@@ -178,66 +178,8 @@
   40% { transform: scale(1); opacity: 1; }
 }
 
-/* ── React Flow theme overrides ────────────────────── */
-.execution-graph.react-flow {
-  background-color: var(--bg-secondary) !important;
-}
-.execution-graph .react-flow__background {
-  background-color: transparent !important;
-}
-.execution-graph .react-flow__viewport {
-  transition: transform 0.2s ease-out;
-}
-.execution-graph .react-flow__controls {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-}
-.execution-graph .react-flow__controls-button {
-  background-color: var(--bg-card) !important;
-  border: 0.5px solid var(--border-primary) !important;
-  border-radius: 4px !important;
-  color: var(--text-faint) !important;
-  fill: var(--text-faint) !important;
-  width: 22px !important;
-  height: 22px !important;
-  margin: 1px 0 !important;
-}
-.execution-graph .react-flow__controls-button:hover {
-  background-color: var(--bg-card-hover) !important;
-  color: var(--text-primary) !important;
-  fill: var(--text-primary) !important;
-}
-.execution-graph .react-flow__controls-button svg {
-  max-width: 11px !important;
-  max-height: 11px !important;
-}
-/* Custom edge styling */
-.execution-graph .react-flow__edge-path {
-  stroke-width: 0.75;
-}
-/* Graph node base — used by GraphNode component */
-.graph-node {
-  transition: all 0.15s ease;
-}
-.graph-node:hover {
-  filter: brightness(1.1);
-}
-/* Node fade-in animation */
-.execution-graph .react-flow__node {
-  animation: graphNodeFadeIn 0.35s ease-out both;
-}
-@keyframes graphNodeFadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-/* React Flow node wrapper — let it size naturally from content.
-   The inner .graph-node div handles all visual styling. */
-.execution-graph .react-flow__node-graphNode {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  padding: 0 !important;
-  border-radius: 0 !important;
-  /* Do NOT set width/height here — ResizeObserver measures from this element */
+/* ── Execution graph animations ────────────────────── */
+@keyframes edgeDrawIn {
+  from { stroke-dashoffset: 32; stroke-dasharray: 32; }
+  to { stroke-dashoffset: 0; }
 }
