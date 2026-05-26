@@ -501,9 +501,87 @@ class Orchestrator:
                     run.status = RunStatus.REFLECTING
                     await self._save_run(run)
                     event_emitter.emit(run.run_id, "reflection_started")
-                    reflection = await self._do_reflection(run)
-                    if reflection:
+
+                    reflection = await self._run_critique(run)
+
+                    if reflection and reflection.overall_score < self._settings.react_reflect_quality_threshold:
+                        # Score too low — decide: re-enter loop or text-rewrite
+                        budget_left = run.max_iterations - run.iterations
+
+                        if budget_left > 0:
+                            # RE-ENTER the loop: inject critique as observation
+                            issues_text = "; ".join(reflection.issues) if reflection.issues else "Quality below threshold."
+                            suggestion = reflection.suggestion or "Collect more data and try again."
+
+                            critique_obs = Observation(
+                                step_id=f"reflect_{run.iterations}",
+                                iteration=run.iterations,
+                                tool="_reflection",
+                                reasoning=(
+                                    f"Self-check scored your answer {reflection.overall_score:.0%} "
+                                    f"(threshold: {self._settings.react_reflect_quality_threshold:.0%}). "
+                                    f"Issues: {issues_text} Suggestion: {suggestion}"
+                                ),
+                                result=ToolResult(
+                                    tool_name="_reflection",
+                                    status="error",
+                                    risk_level=RiskLevel.SAFE,
+                                    input={},
+                                    output=None,
+                                    error=(
+                                        f"SELF-CHECK FAILED (score={reflection.overall_score:.2f}). "
+                                        f"Your answer has these problems: {issues_text} "
+                                        f"{suggestion} "
+                                        f"You have {budget_left} iteration(s) left. "
+                                        f"Use tools to fix the issues, then give a better final_answer."
+                                    ),
+                                    started_at=now,
+                                    finished_at=datetime.now(timezone.utc).isoformat(),
+                                ),
+                                timestamp=datetime.now(timezone.utc).isoformat(),
+                            )
+                            run.observations.append(critique_obs)
+                            run.final_response = None  # clear — agent must try again
+                            reflection.reentry = True
+                            run.reflection = reflection
+
+                            # Re-open any skipped goals so the agent can revisit
+                            if goals_enabled and run.plan and run.plan.goals:
+                                for goal in run.plan.goals:
+                                    if goal.status == GoalStatus.SKIPPED:
+                                        goal.status = GoalStatus.PENDING
+
+                            logger.info(
+                                "Run %s: reflection failed (score=%.2f), re-entering loop (%d iterations left)",
+                                run.run_id, reflection.overall_score, budget_left,
+                            )
+                            event_emitter.emit(run.run_id, "reflection_completed")
+                            continue  # ← back to while loop
+
+                        else:
+                            # No budget — fall back to text-only rewrite
+                            logger.info(
+                                "Run %s: reflection failed (score=%.2f), no budget for re-entry — text rewrite",
+                                run.run_id, reflection.overall_score,
+                            )
+                            improved_answer = await self._planner.improve_answer(
+                                user_message=run.user_message,
+                                original_answer=run.final_response,
+                                critique={
+                                    "issues": reflection.issues,
+                                    "suggestion": reflection.suggestion,
+                                },
+                                observations_summary=self._build_obs_summary(run),
+                            )
+                            if improved_answer != run.final_response:
+                                run.final_response = improved_answer
+                                reflection.improved = True
+                            run.reflection = reflection
+
+                    elif reflection:
+                        # Score is good — store and proceed
                         run.reflection = reflection
+
                     event_emitter.emit(run.run_id, "reflection_completed")
 
                 run.status = RunStatus.COMPLETED
@@ -908,75 +986,50 @@ class Orchestrator:
     # Self-reflection (flag-gated)
     # ------------------------------------------------------------------
 
-    async def _do_reflection(self, run: Run) -> ReflectionResult | None:
-        """Run self-reflection on the final answer. May rewrite the answer."""
+    async def _run_critique(self, run: Run) -> ReflectionResult | None:
+        """Run a single reflection critique on the final answer.
+
+        Returns a ReflectionResult with scores and issues, or None on failure.
+        The caller decides what to do (re-enter loop vs text rewrite vs accept).
+        """
         if not self._planner or not run.final_response:
             return None
 
-        # Build observations summary for the critic
-        obs_limit = self._settings.react_observation_max_chars
-        obs_summary = "\n".join(
-            f"- {o.tool}: {o.result.status} → "
-            f"{json.dumps(o.result.output or o.result.error, default=str)[:obs_limit]}"
-            for o in run.observations if o.tool and o.result
-        )
+        obs_summary = self._build_obs_summary(run)
         goals_summary = "\n".join(
             f"- [{g.status.value}] {g.description}"
             for g in (run.plan.goals if run.plan else [])
         )
 
-        for attempt in range(self._settings.react_reflect_max_retries + 1):
-            try:
-                critique = await self._planner.reflect_on_answer(
-                    user_message=run.user_message,
-                    final_answer=run.final_response,
-                    observations_summary=obs_summary,
-                    goals_summary=goals_summary,
-                )
-            except Exception as exc:
-                logger.warning("Reflection failed at attempt %d: %s", attempt, exc)
-                return ReflectionResult(attempt=attempt)
-
-            score = critique.get("overall_score", 1.0)
-            result = ReflectionResult(
-                overall_score=score,
-                completeness=critique.get("completeness", 1.0),
-                accuracy=critique.get("accuracy", 1.0),
-                clarity=critique.get("clarity", 1.0),
-                issues=critique.get("issues", []),
-                suggestion=critique.get("suggestion", ""),
-                attempt=attempt,
+        try:
+            critique = await self._planner.reflect_on_answer(
+                user_message=run.user_message,
+                final_answer=run.final_response,
+                observations_summary=obs_summary,
+                goals_summary=goals_summary,
             )
+        except Exception as exc:
+            logger.warning("Reflection critique failed: %s", exc)
+            return None
 
-            if score >= self._settings.react_reflect_quality_threshold:
-                # Answer is good enough
-                logger.info(
-                    "Run %s: reflection passed (score=%.2f, attempt=%d)",
-                    run.run_id, score, attempt,
-                )
-                return result
+        return ReflectionResult(
+            overall_score=critique.get("overall_score", 1.0),
+            completeness=critique.get("completeness", 1.0),
+            accuracy=critique.get("accuracy", 1.0),
+            clarity=critique.get("clarity", 1.0),
+            issues=critique.get("issues", []),
+            suggestion=critique.get("suggestion", ""),
+        )
 
-            # Below threshold — try to improve
-            if attempt < self._settings.react_reflect_max_retries:
-                logger.info(
-                    "Run %s: reflection failed (score=%.2f), improving (attempt %d)",
-                    run.run_id, score, attempt,
-                )
-                improved_answer = await self._planner.improve_answer(
-                    user_message=run.user_message,
-                    original_answer=run.final_response,
-                    critique=critique,
-                    observations_summary=obs_summary,
-                )
-                if improved_answer != run.final_response:
-                    run.final_response = improved_answer
-                    result.improved = True
-
-            # Last attempt — return whatever we have
-            if attempt == self._settings.react_reflect_max_retries:
-                return result
-
-        return None
+    def _build_obs_summary(self, run: Run) -> str:
+        """Build a text summary of tool observations for the reflection critic."""
+        obs_limit = self._settings.react_observation_max_chars
+        return "\n".join(
+            f"- {o.tool}: {o.result.status} → "
+            f"{json.dumps(o.result.output or o.result.error, default=str)[:obs_limit]}"
+            for o in run.observations if o.tool and o.result
+            and o.tool != "_reflection"  # exclude previous reflection observations
+        )
 
     async def _check_auto_replan(
         self, run: Run, memory_context: str, workspace_info: str,

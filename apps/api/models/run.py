@@ -127,8 +127,9 @@ class ReflectionResult(BaseModel):
     clarity: float = 1.0
     issues: list[str] = Field(default_factory=list)
     suggestion: str = ""
-    improved: bool = False  # whether the answer was rewritten
-    attempt: int = 0        # which reflection attempt (0 = first)
+    improved: bool = False   # whether the answer was text-rewritten (fallback)
+    reentry: bool = False    # whether the agent re-entered the loop to take action
+    attempt: int = 0         # which reflection attempt (0 = first)
 
 
 class Run(BaseModel):

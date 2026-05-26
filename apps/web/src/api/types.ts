@@ -35,6 +35,7 @@ export interface ReflectionResult {
   issues: string[];
   suggestion: string;
   improved: boolean;
+  reentry: boolean;
   attempt: number;
 }
 

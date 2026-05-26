@@ -628,9 +628,8 @@ All settings are read from the `.env` file (see `.env.example`):
 | `REACT_OBSERVATION_MAX_CHARS` | Max characters kept per tool observation (except `read_file`) fed back to the planner. Increase if `search_in_files` or `run_shell_safe` results are truncated | `1000` |
 | `REACT_READ_FILE_OBS_SINGLE` | Max characters kept per single-file `read_file` observation fed back to the planner | `3000` |
 | `REACT_READ_FILE_OBS_BATCH` | Max characters kept per file in a batch `read_file` observation fed back to the planner | `2000` |
-| `REACT_SELF_REFLECT` | Enable self-reflection: the agent critiques its own final answer and rewrites if quality is low | `false` |
-| `REACT_REFLECT_MAX_RETRIES` | How many times to retry after a low-quality critique (0 = critique only, no rewrite) | `1` |
-| `REACT_REFLECT_QUALITY_THRESHOLD` | Quality score (0.0–1.0) below which the agent rewrites its answer | `0.7` |
+| `REACT_SELF_REFLECT` | Enable self-reflection: the agent critiques its own final answer and re-enters the ReAct loop to take corrective action if quality is low. Falls back to text rewrite if no iteration budget remains | `false` |
+| `REACT_REFLECT_QUALITY_THRESHOLD` | Quality score (0.0–1.0) below which the agent re-enters the loop or rewrites its answer | `0.7` |
 | `SUMMARY_INTERVAL` | Auto-generate a summary every N completed runs (0 = disable) | `5` |
 | `MAX_SUMMARIES` | Number of summaries to keep (oldest pruned) | `3` |
 | `DREAM_INTERVAL` | Run Agent Dreams every N episodes to propose strategies and preferences (0 = disable) | `5` |

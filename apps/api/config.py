@@ -99,9 +99,11 @@ class Settings(BaseSettings):
 
     # ----- Self-reflection -----
     # Critique the agent's final answer before delivering it to the user.
+    # When the score is below threshold and iteration budget remains, the agent
+    # re-enters the ReAct loop to take corrective action. If no budget remains,
+    # falls back to a text-only rewrite.
     react_self_reflect: bool = False         # master toggle
-    react_reflect_max_retries: int = 1       # how many times to retry after critique
-    react_reflect_quality_threshold: float = 0.7  # 0.0-1.0, below this triggers retry
+    react_reflect_quality_threshold: float = 0.7  # 0.0-1.0, below this triggers loop re-entry
 
     # ----- Memory summaries -----
     # How many completed runs between auto-generated conversation summaries.

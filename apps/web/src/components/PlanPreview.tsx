@@ -631,9 +631,14 @@ function ReflectionBadge({ reflection }: { reflection: ReflectionResult }) {
         <ScanEye size={13} className={color} />
         <span className="font-medium t-secondary">Self-check:</span>
         <span className={`font-medium ${color}`}>{score}%</span>
-        {reflection.improved && (
+        {reflection.reentry && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-medium">
+            agent retried
+          </span>
+        )}
+        {reflection.improved && !reflection.reentry && (
           <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 font-medium">
-            answer improved
+            answer rewritten
           </span>
         )}
         <span className="ml-auto">

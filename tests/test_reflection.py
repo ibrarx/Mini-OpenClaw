@@ -1,13 +1,16 @@
 """
-Tests for the self-reflection critique loop.
+Tests for the self-reflection critique with loop re-entry.
 
-Validates that the planner can critique a final answer, optionally improve
-it, and that the orchestrator correctly wires reflection into the run
-lifecycle — including the flag gate and max-retries logic.
+Validates that:
+- The planner can critique a final answer and return quality scores
+- The orchestrator re-enters the ReAct loop when the score is low and budget remains
+- The orchestrator falls back to text rewrite when no iteration budget is left
+- Reflection is skipped when the flag is disabled or for child runs
+- Critique failures are non-fatal
+- Reflection results survive DB persistence
 """
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -124,6 +127,7 @@ class TestReflectionResultModel:
         assert r.issues == []
         assert r.suggestion == ""
         assert r.improved is False
+        assert r.reentry is False
         assert r.attempt == 0
 
     def test_serialization_roundtrip(self) -> None:
@@ -134,14 +138,14 @@ class TestReflectionResultModel:
             clarity=0.7,
             issues=["Missing details", "Inaccurate claim"],
             suggestion="Add more data",
-            improved=True,
+            reentry=True,
             attempt=1,
         )
         json_str = r.model_dump_json()
         restored = ReflectionResult.model_validate_json(json_str)
         assert restored.overall_score == 0.65
         assert restored.issues == ["Missing details", "Inaccurate claim"]
-        assert restored.improved is True
+        assert restored.reentry is True
         assert restored.attempt == 1
 
     def test_dict_roundtrip(self) -> None:
@@ -205,7 +209,6 @@ class TestPlannerReflection:
             final_answer="Hi there",
             observations_summary="",
         )
-        # Should return a safe default, not raise
         assert result["overall_score"] == 1.0
         assert result["issues"] == []
 
@@ -221,8 +224,7 @@ class TestPlannerReflection:
 
     @pytest.mark.asyncio
     async def test_reflect_sets_defaults(self, planner: Planner, fake_provider: FakeProvider) -> None:
-        """Ensure missing fields in LLM response get safe defaults."""
-        fake_provider.queue({"accuracy": 0.5})  # Missing overall_score, issues, suggestion
+        fake_provider.queue({"accuracy": 0.5})
         result = await planner.reflect_on_answer(
             user_message="Test",
             final_answer="Test answer",
@@ -234,7 +236,7 @@ class TestPlannerReflection:
 
 
 class TestPlannerImproveAnswer:
-    """Test the planner's improve_answer method."""
+    """Test the planner's improve_answer method (text-only fallback)."""
 
     @pytest.mark.asyncio
     async def test_improve_returns_better_answer(self, planner: Planner, fake_provider: FakeProvider) -> None:
@@ -311,7 +313,6 @@ class TestOrchestratorReflection:
             react_use_goals=False,
         )
         provider = FakeProvider()
-        # Queue: react_step returns final_answer immediately
         provider.queue({"action": "final_answer", "response": "Hello!", "reasoning": "Done"})
 
         orch = self._make_orchestrator(settings, registry, provider)
@@ -322,28 +323,24 @@ class TestOrchestratorReflection:
         assert run is not None
         assert run.status == RunStatus.COMPLETED
         assert run.reflection is None
-        # Only 1 call: the react_step. No reflection calls.
         assert len(provider.calls) == 1
 
     @pytest.mark.asyncio
-    async def test_reflection_runs_when_enabled_high_score(
+    async def test_reflection_high_score_passes(
         self, tmp_workspace: Path, db_path: Path, registry: SkillRegistry,
     ) -> None:
-        """When enabled and score >= threshold, reflection is stored but answer unchanged."""
+        """When score >= threshold, reflection is stored and answer unchanged."""
         settings = Settings(
             workspace_root=tmp_workspace,
             database_path=db_path,
             use_react=True,
             react_self_reflect=True,
-            react_reflect_max_retries=1,
             react_reflect_quality_threshold=0.7,
             anthropic_api_key="fake",
             react_use_goals=False,
         )
         provider = FakeProvider()
-        # react_step → final_answer
         provider.queue({"action": "final_answer", "response": "Great answer!", "reasoning": "Done"})
-        # reflect_on_answer → high score
         provider.queue({
             "overall_score": 0.9,
             "completeness": 0.9,
@@ -364,37 +361,38 @@ class TestOrchestratorReflection:
         assert run.reflection is not None
         assert run.reflection.overall_score == 0.9
         assert run.reflection.improved is False
+        assert run.reflection.reentry is False
 
     @pytest.mark.asyncio
-    async def test_reflection_improves_answer_on_low_score(
+    async def test_reflection_low_score_reenters_loop(
         self, tmp_workspace: Path, db_path: Path, registry: SkillRegistry,
     ) -> None:
-        """When score < threshold, improve_answer is called and answer is rewritten."""
+        """When score < threshold and budget remains, agent re-enters the loop."""
         settings = Settings(
             workspace_root=tmp_workspace,
             database_path=db_path,
             use_react=True,
             react_self_reflect=True,
-            react_reflect_max_retries=1,
             react_reflect_quality_threshold=0.7,
+            react_max_iterations=5,
             anthropic_api_key="fake",
             react_use_goals=False,
         )
         provider = FakeProvider()
-        # react_step → final_answer
+        # Iteration 1: agent gives a bad final_answer
         provider.queue({"action": "final_answer", "response": "Bad answer", "reasoning": "Done"})
-        # reflect_on_answer → low score (attempt 0)
+        # Reflection: low score
         provider.queue({
             "overall_score": 0.4,
             "completeness": 0.3,
             "accuracy": 0.5,
             "clarity": 0.4,
             "issues": ["Incomplete"],
-            "suggestion": "Add details",
+            "suggestion": "Use list_files to get the data",
         })
-        # improve_answer → better text
-        provider.queue("Much better answer with all the details")
-        # reflect_on_answer → second attempt (attempt 1 = max_retries, last attempt)
+        # Iteration 2: agent sees the critique and gives a better final_answer
+        provider.queue({"action": "final_answer", "response": "Much better answer!", "reasoning": "Fixed it"})
+        # Reflection on second attempt: passes this time
         provider.queue({
             "overall_score": 0.85,
             "completeness": 0.9,
@@ -411,30 +409,74 @@ class TestOrchestratorReflection:
         run = await orch.get_run(run.run_id)
         assert run is not None
         assert run.status == RunStatus.COMPLETED
-        assert run.final_response == "Much better answer with all the details"
+        assert run.final_response == "Much better answer!"
+        assert run.iterations == 2  # used 2 iterations
+        # The final reflection should be the passing one
         assert run.reflection is not None
         assert run.reflection.overall_score == 0.85
-        assert run.reflection.attempt == 1
+        # Should have a _reflection observation injected
+        reflection_obs = [o for o in run.observations if o.tool == "_reflection"]
+        assert len(reflection_obs) == 1
 
     @pytest.mark.asyncio
-    async def test_reflection_failure_is_non_fatal(
+    async def test_reflection_low_score_text_rewrite_when_no_budget(
         self, tmp_workspace: Path, db_path: Path, registry: SkillRegistry,
     ) -> None:
-        """If reflection throws, the run still completes."""
+        """When score < threshold but no iterations left, falls back to text rewrite."""
         settings = Settings(
             workspace_root=tmp_workspace,
             database_path=db_path,
             use_react=True,
             react_self_reflect=True,
-            react_reflect_max_retries=0,
+            react_reflect_quality_threshold=0.7,
+            react_max_iterations=1,  # only 1 iteration — no budget for re-entry
+            anthropic_api_key="fake",
+            react_use_goals=False,
+        )
+        provider = FakeProvider()
+        # Iteration 1 (the only one): bad final_answer
+        provider.queue({"action": "final_answer", "response": "Bad answer", "reasoning": "Done"})
+        # Reflection: low score
+        provider.queue({
+            "overall_score": 0.4,
+            "completeness": 0.3,
+            "accuracy": 0.5,
+            "clarity": 0.4,
+            "issues": ["Incomplete"],
+            "suggestion": "Add details",
+        })
+        # improve_answer (text-only fallback)
+        provider.queue("Rewritten answer with more details")
+
+        orch = self._make_orchestrator(settings, registry, provider)
+        run = await orch.handle_message("sess1", "Do something")
+        await orch.wait_pending()
+
+        run = await orch.get_run(run.run_id)
+        assert run is not None
+        assert run.status == RunStatus.COMPLETED
+        assert run.final_response == "Rewritten answer with more details"
+        assert run.reflection is not None
+        assert run.reflection.improved is True
+        assert run.reflection.reentry is False
+        assert run.iterations == 1
+
+    @pytest.mark.asyncio
+    async def test_reflection_failure_is_non_fatal(
+        self, tmp_workspace: Path, db_path: Path, registry: SkillRegistry,
+    ) -> None:
+        """If the critique throws, the run still completes with the original answer."""
+        settings = Settings(
+            workspace_root=tmp_workspace,
+            database_path=db_path,
+            use_react=True,
+            react_self_reflect=True,
             react_reflect_quality_threshold=0.7,
             anthropic_api_key="fake",
             react_use_goals=False,
         )
         provider = FakeProvider()
-        # react_step → final_answer
         provider.queue({"action": "final_answer", "response": "Good answer", "reasoning": "Done"})
-        # reflect_on_answer → exception
         provider.queue(LLMProviderError("API exploded"))
 
         orch = self._make_orchestrator(settings, registry, provider)
@@ -445,37 +487,37 @@ class TestOrchestratorReflection:
         assert run is not None
         assert run.status == RunStatus.COMPLETED
         assert run.final_response == "Good answer"
-        # Reflection result exists but with default score (from the except branch)
+        # Planner's reflect_on_answer catches the error and returns a safe
+        # default (score=1.0), so _run_critique returns a passing result.
+        # The important thing is the run completed — no crash.
         assert run.reflection is not None
-        assert run.reflection.attempt == 0
+        assert run.reflection.overall_score == 1.0  # safe default
+        assert run.reflection.reentry is False
 
     @pytest.mark.asyncio
-    async def test_max_retries_respected(
+    async def test_reflection_reentry_consumes_iteration_budget(
         self, tmp_workspace: Path, db_path: Path, registry: SkillRegistry,
     ) -> None:
-        """With max_retries=0, only one reflection attempt (no improvement)."""
+        """Re-entry uses iteration budget. With max=2, first attempt + re-entry = 2."""
         settings = Settings(
             workspace_root=tmp_workspace,
             database_path=db_path,
             use_react=True,
             react_self_reflect=True,
-            react_reflect_max_retries=0,
             react_reflect_quality_threshold=0.7,
+            react_max_iterations=2,
             anthropic_api_key="fake",
             react_use_goals=False,
         )
         provider = FakeProvider()
-        # react_step → final_answer
-        provider.queue({"action": "final_answer", "response": "Mediocre answer", "reasoning": "Done"})
-        # reflect_on_answer → low score, but max_retries=0 so no improvement
-        provider.queue({
-            "overall_score": 0.4,
-            "completeness": 0.3,
-            "accuracy": 0.5,
-            "clarity": 0.4,
-            "issues": ["Incomplete"],
-            "suggestion": "Add more",
-        })
+        # Iteration 1: bad answer
+        provider.queue({"action": "final_answer", "response": "Bad", "reasoning": "Done"})
+        # Reflection: fail
+        provider.queue({"overall_score": 0.3, "issues": ["Bad"], "suggestion": "Fix it"})
+        # Iteration 2 (re-entry): better answer
+        provider.queue({"action": "final_answer", "response": "Better", "reasoning": "Fixed"})
+        # Reflection: pass
+        provider.queue({"overall_score": 0.9, "issues": [], "suggestion": ""})
 
         orch = self._make_orchestrator(settings, registry, provider)
         run = await orch.handle_message("sess1", "Test")
@@ -484,11 +526,8 @@ class TestOrchestratorReflection:
         run = await orch.get_run(run.run_id)
         assert run is not None
         assert run.status == RunStatus.COMPLETED
-        # Answer is NOT changed because max_retries=0 (attempt 0 is the last)
-        assert run.final_response == "Mediocre answer"
-        assert run.reflection is not None
-        assert run.reflection.overall_score == 0.4
-        assert run.reflection.improved is False
+        assert run.iterations == 2
+        assert run.final_response == "Better"
 
     @pytest.mark.asyncio
     async def test_reflection_persisted_in_db(
@@ -500,7 +539,6 @@ class TestOrchestratorReflection:
             database_path=db_path,
             use_react=True,
             react_self_reflect=True,
-            react_reflect_max_retries=0,
             react_reflect_quality_threshold=0.5,
             anthropic_api_key="fake",
             react_use_goals=False,
@@ -520,9 +558,9 @@ class TestOrchestratorReflection:
         run = await orch.handle_message("sess1", "Test")
         await orch.wait_pending()
 
-        # Load from DB
         loaded = await orch.get_run(run.run_id)
         assert loaded is not None
         assert loaded.reflection is not None
         assert loaded.reflection.overall_score == 0.8
         assert loaded.reflection.issues == ["Minor"]
+        assert loaded.reflection.reentry is False
