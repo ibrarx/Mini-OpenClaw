@@ -88,6 +88,8 @@ function buildGraph(run: Run): { nodes: Node<GraphNodeData>[]; edges: Edge[] } {
     position: { x: START_X, y: START_Y },
     width: NODE_W,
     height: NODE_H,
+    measured: { width: NODE_W, height: NODE_H },
+    style: { width: NODE_W, height: NODE_H },
     data: {
       kind: "start",
       label: run.user_message.length > 40
@@ -148,6 +150,8 @@ function buildGraph(run: Run): { nodes: Node<GraphNodeData>[]; edges: Edge[] } {
       position: { x: START_X, y: mainY },
       width: NODE_W,
       height: NODE_H,
+      measured: { width: NODE_W, height: NODE_H },
+      style: { width: NODE_W, height: NODE_H },
       data: {
         kind,
         label,
@@ -202,6 +206,8 @@ function buildGraph(run: Run): { nodes: Node<GraphNodeData>[]; edges: Edge[] } {
       position: { x: START_X, y: mainY },
       width: NODE_W,
       height: NODE_H,
+      measured: { width: NODE_W, height: NODE_H },
+      style: { width: NODE_W, height: NODE_H },
       data: {
         kind: isReflecting ? "reflect" : "active",
         label: isReflecting ? "Reviewing…" : "Thinking…",

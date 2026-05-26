@@ -231,11 +231,11 @@
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
-/* Fix React Flow default node wrapper — no background/border/shadow */
+/* Fix React Flow default node wrapper — transparent but keeps dimensions */
 .execution-graph .react-flow__node-graphNode {
-  background: none !important;
+  background: transparent !important;
   border: none !important;
   box-shadow: none !important;
-  padding: 0 !important;
   border-radius: 0 !important;
+  font-size: 0;
 }
