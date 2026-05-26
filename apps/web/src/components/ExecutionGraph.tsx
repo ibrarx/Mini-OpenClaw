@@ -248,7 +248,7 @@ function AutoFit({ nodeCount }: { nodeCount: number }) {
   useEffect(() => {
     if (!initialFit.current) {
       initialFit.current = true;
-      const t = setTimeout(() => fitView({ padding: 0.4, duration: 200 }), 100);
+      const t = setTimeout(() => fitView({ padding: 0.15, maxZoom: 1.2, duration: 200 }), 150);
       return () => clearTimeout(t);
     }
   }, [fitView]);
@@ -257,7 +257,7 @@ function AutoFit({ nodeCount }: { nodeCount: number }) {
   useEffect(() => {
     if (nodeCount !== prevCount.current) {
       prevCount.current = nodeCount;
-      const t = setTimeout(() => fitView({ padding: 0.4, duration: 300 }), 50);
+      const t = setTimeout(() => fitView({ padding: 0.15, maxZoom: 1.2, duration: 300 }), 80);
       return () => clearTimeout(t);
     }
   }, [nodeCount, fitView]);
@@ -349,9 +349,10 @@ function ExecutionGraphInner({ run }: ExecutionGraphProps) {
         edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
+        defaultViewport={{ x: 40, y: 20, zoom: 1 }}
         fitView
-        fitViewOptions={{ padding: 0.4, minZoom: 0.5, maxZoom: 1.5 }}
-        minZoom={0.2}
+        fitViewOptions={{ padding: 0.15, minZoom: 0.5, maxZoom: 1.2 }}
+        minZoom={0.3}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
         nodesDraggable={false}
