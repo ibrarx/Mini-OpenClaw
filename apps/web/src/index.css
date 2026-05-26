@@ -231,11 +231,13 @@
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
-/* Fix React Flow default node wrapper — transparent but keeps dimensions */
+/* React Flow node wrapper — let it size naturally from content.
+   The inner .graph-node div handles all visual styling. */
 .execution-graph .react-flow__node-graphNode {
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
+  padding: 0 !important;
   border-radius: 0 !important;
-  font-size: 0;
+  /* Do NOT set width/height here — ResizeObserver measures from this element */
 }
