@@ -2,7 +2,10 @@
  * NodePopover — Floating detail card for a selected graph node.
  *
  * Appears near the clicked node, shows tool args, result, reasoning,
- * and timing. Dismisses on click-away (handled by parent's onPaneClick).
+ * and timing. Supports pin mode: when pinned, clicking another node
+ * or the pane won't dismiss this popover — only the unpin button or
+ * Escape will.
+ *
  * Matches Mini-OpenClaw theme with CSS variables.
  */
 
@@ -13,6 +16,9 @@ import {
   Clock,
   ShieldOff,
   Ban,
+  Pin,
+  PinOff,
+  X,
 } from "lucide-react";
 import type { Node } from "@xyflow/react";
 import type { GraphNodeData } from "../ExecutionGraph";
@@ -21,9 +27,19 @@ interface NodePopoverProps {
   node: Node<GraphNodeData>;
   position: { x: number; y: number };
   onClose: () => void;
+  /** Whether the popover is pinned (immune to pane clicks). */
+  pinned?: boolean;
+  /** Toggle pin state. */
+  onTogglePin?: () => void;
 }
 
-export default function NodePopover({ node, position, onClose }: NodePopoverProps) {
+export default function NodePopover({
+  node,
+  position,
+  onClose,
+  pinned = false,
+  onTogglePin,
+}: NodePopoverProps) {
   const ref = useRef<HTMLDivElement>(null);
   const data = node.data;
   const obs = data.observation;
@@ -57,7 +73,7 @@ export default function NodePopover({ node, position, onClose }: NodePopoverProp
     el.style.top = `${y}px`;
   }, [position]);
 
-  // Close on Escape
+  // Close on Escape (always works, even when pinned)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -74,7 +90,14 @@ export default function NodePopover({ node, position, onClose }: NodePopoverProp
         style={{ left: position.x, top: position.y, pointerEvents: "auto" }}
       >
         <div className="rounded-lg border border-app bg-app-secondary shadow-lg p-3 max-w-[240px]">
-          <div className="text-xs font-medium t-primary mb-1">User request</div>
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-xs font-medium t-primary">User request</div>
+            <PopoverActions
+              pinned={pinned}
+              onTogglePin={onTogglePin}
+              onClose={onClose}
+            />
+          </div>
           <p className="text-[11px] t-secondary leading-relaxed">
             {node.data.label}
           </p>
@@ -119,6 +142,11 @@ export default function NodePopover({ node, position, onClose }: NodePopoverProp
               {duration}ms
             </span>
           )}
+          <PopoverActions
+            pinned={pinned}
+            onTogglePin={onTogglePin}
+            onClose={onClose}
+          />
         </div>
 
         {/* Body */}
@@ -173,7 +201,56 @@ export default function NodePopover({ node, position, onClose }: NodePopoverProp
             </div>
           )}
         </div>
+
+        {/* Pin indicator */}
+        {pinned && (
+          <div className="px-3 py-1 border-t border-app text-[9px] t-faint text-center">
+            Pinned — click other nodes to compare
+          </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+/** Pin / close button group in the popover header. */
+function PopoverActions({
+  pinned,
+  onTogglePin,
+  onClose,
+}: {
+  pinned: boolean;
+  onTogglePin?: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-0.5 ml-1 flex-shrink-0">
+      {onTogglePin && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onTogglePin();
+          }}
+          className={`p-0.5 rounded transition-colors ${
+            pinned
+              ? "text-blue-400 hover:text-blue-300"
+              : "t-faint hover:t-muted"
+          }`}
+          title={pinned ? "Unpin popover" : "Pin popover (stay open)"}
+        >
+          {pinned ? <PinOff size={10} /> : <Pin size={10} />}
+        </button>
+      )}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+        className="p-0.5 rounded t-faint hover:text-red-400 transition-colors"
+        title="Close"
+      >
+        <X size={10} />
+      </button>
     </div>
   );
 }

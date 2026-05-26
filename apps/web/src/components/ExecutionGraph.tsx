@@ -253,6 +253,7 @@ function ExecutionGraphInner({ run }: ExecutionGraphProps) {
   const [popoverPos, setPopoverPos] = useState<{ x: number; y: number } | null>(
     null,
   );
+  const [pinned, setPinned] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Find the selected node's data for the popover
@@ -261,38 +262,55 @@ function ExecutionGraphInner({ run }: ExecutionGraphProps) {
     [nodes, selectedNodeId],
   );
 
+  const positionPopover = useCallback(
+    (nodeId: string) => {
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const nodeEl = container.querySelector(
+        `[data-id="${nodeId}"]`,
+      ) as HTMLElement | null;
+      if (nodeEl) {
+        const nodeRect = nodeEl.getBoundingClientRect();
+        setPopoverPos({
+          x: nodeRect.right - rect.left + 8,
+          y: nodeRect.top - rect.top,
+        });
+      }
+    },
+    [],
+  );
+
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node<GraphNodeData>) => {
-      if (selectedNodeId === node.id) {
+      // If clicking the same node, toggle off (unless pinned)
+      if (selectedNodeId === node.id && !pinned) {
         setSelectedNodeId(null);
         setPopoverPos(null);
         return;
       }
 
       setSelectedNodeId(node.id);
-
-      // Position popover near the click, offset to the right of the node
-      const container = containerRef.current;
-      if (container) {
-        const rect = container.getBoundingClientRect();
-        const nodeEl = container.querySelector(
-          `[data-id="${node.id}"]`,
-        ) as HTMLElement | null;
-        if (nodeEl) {
-          const nodeRect = nodeEl.getBoundingClientRect();
-          setPopoverPos({
-            x: nodeRect.right - rect.left + 8,
-            y: nodeRect.top - rect.top,
-          });
-        }
-      }
+      positionPopover(node.id);
     },
-    [selectedNodeId],
+    [selectedNodeId, pinned, positionPopover],
   );
 
   const onPaneClick = useCallback(() => {
+    // Don't dismiss when pinned
+    if (pinned) return;
     setSelectedNodeId(null);
     setPopoverPos(null);
+  }, [pinned]);
+
+  const handleClosePopover = useCallback(() => {
+    setSelectedNodeId(null);
+    setPopoverPos(null);
+    setPinned(false);
+  }, []);
+
+  const handleTogglePin = useCallback(() => {
+    setPinned((p) => !p);
   }, []);
 
   // Check if the selected node is a delegate with child run
@@ -362,10 +380,9 @@ function ExecutionGraphInner({ run }: ExecutionGraphProps) {
         <NodePopover
           node={selectedNode}
           position={popoverPos}
-          onClose={() => {
-            setSelectedNodeId(null);
-            setPopoverPos(null);
-          }}
+          onClose={handleClosePopover}
+          pinned={pinned}
+          onTogglePin={handleTogglePin}
         />
       )}
 
