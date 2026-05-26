@@ -240,27 +240,52 @@ function buildGraph(run: Run): { nodes: Node<GraphNodeData>[]; edges: Edge[] } {
 // ── Viewport auto-fit ────────────────────────────────
 
 function AutoFit({ nodeCount }: { nodeCount: number }) {
-  const { fitView } = useReactFlow();
+  const { fitView, setViewport } = useReactFlow();
   const prevCount = useRef(nodeCount);
   const initialFit = useRef(false);
+  const containerRef = useRef<HTMLElement | null>(null);
+
+  // Get container on mount
+  useEffect(() => {
+    const el = document.querySelector('.execution-graph') as HTMLElement | null;
+    containerRef.current = el;
+  }, []);
+
+  const alignTop = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) {
+      // Fallback: just fitView
+      fitView({ padding: 0.1, maxZoom: 1 });
+      return;
+    }
+
+    const containerWidth = container.clientWidth;
+    // Graph is NODE_W wide (200px), nodes start at x=0
+    // Center horizontally, pin to top with some padding
+    const zoom = Math.min(1, (containerWidth - 40) / NODE_W);
+    const x = (containerWidth - NODE_W * zoom) / 2;
+    const y = 20; // top padding
+
+    setViewport({ x, y, zoom }, { duration: 200 });
+  }, [fitView, setViewport]);
 
   // Fit on initial render
   useEffect(() => {
     if (!initialFit.current) {
       initialFit.current = true;
-      const t = setTimeout(() => fitView({ padding: 0.15, maxZoom: 1.2, duration: 200 }), 150);
+      const t = setTimeout(alignTop, 150);
       return () => clearTimeout(t);
     }
-  }, [fitView]);
+  }, [alignTop]);
 
-  // Fit when nodes change
+  // Re-fit when nodes change
   useEffect(() => {
     if (nodeCount !== prevCount.current) {
       prevCount.current = nodeCount;
-      const t = setTimeout(() => fitView({ padding: 0.15, maxZoom: 1.2, duration: 300 }), 80);
+      const t = setTimeout(alignTop, 80);
       return () => clearTimeout(t);
     }
-  }, [nodeCount, fitView]);
+  }, [nodeCount, alignTop]);
 
   return null;
 }
@@ -350,10 +375,8 @@ function ExecutionGraphInner({ run }: ExecutionGraphProps) {
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
         defaultViewport={{ x: 40, y: 20, zoom: 1 }}
-        fitView
-        fitViewOptions={{ padding: 0.15, minZoom: 0.5, maxZoom: 1.2 }}
         minZoom={0.3}
-        maxZoom={2}
+        maxZoom={1.5}
         proOptions={{ hideAttribution: true }}
         nodesDraggable={false}
         nodesConnectable={false}
