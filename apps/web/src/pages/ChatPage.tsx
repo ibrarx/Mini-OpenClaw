@@ -1,14 +1,18 @@
 /**
  * ChatPage — main layout with chat panel and toggleable sidebar.
- * The sidebar shows the live plan preview and tool traces for the active run.
+ *
+ * The sidebar shows the execution graph when a run is active, replacing
+ * the old redundant PlanPreview + ToolTraces panel. The inline PlanPreview
+ * in the chat area remains as the timeline view.
  */
 
-import { useState, useCallback } from "react";
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { useState, useCallback, lazy, Suspense } from "react";
+import { PanelRightClose, PanelRightOpen, GitBranch, Loader2 } from "lucide-react";
 import ChatPanel from "../components/ChatPanel";
-import PlanPreview from "../components/PlanPreview";
-import ToolTrace from "../components/ToolTrace";
 import type { ChatMessage, Run } from "../api/types";
+
+// Lazy-load the graph component (it pulls in @xyflow/react)
+const ExecutionGraph = lazy(() => import("../components/ExecutionGraph"));
 
 interface ChatPageProps {
   sessionId: string;
@@ -24,8 +28,12 @@ export default function ChatPage({ sessionId, messages, onMessagesChange }: Chat
     setActiveRun(run);
   }, []);
 
-  const completedSteps =
-    activeRun?.plan?.steps.filter((s) => s.status === "completed" && s.result) ?? [];
+  const hasGraph =
+    activeRun?.plan &&
+    activeRun.plan.task_type !== "direct_answer" &&
+    (activeRun.observations.length > 0 ||
+      activeRun.status === "planning" ||
+      activeRun.status === "reacting");
 
   return (
     <div className="flex h-full">
@@ -52,38 +60,46 @@ export default function ChatPage({ sessionId, messages, onMessagesChange }: Chat
         )}
       </button>
 
-      {/* Sidebar */}
+      {/* Sidebar — execution graph or empty state */}
       {sidebarOpen && (
-        <div className="w-80 border-l border-app bg-app-secondary flex flex-col overflow-y-auto animate-slide-in-right flex-shrink-0">
-          {activeRun?.plan && activeRun.plan.task_type !== "direct_answer" ? (
-            <div className="p-3 space-y-4">
-              {/* Plan */}
-              <div>
-                <h3 className="text-xs font-medium t-muted uppercase tracking-wider mb-2">
-                  Plan Preview
+        <div className="w-80 border-l border-app bg-app-secondary flex flex-col animate-slide-in-right flex-shrink-0 overflow-hidden">
+          {hasGraph && activeRun ? (
+            <>
+              {/* Header */}
+              <div className="px-3 py-2 border-b border-app flex items-center gap-2 flex-shrink-0">
+                <GitBranch size={12} className="text-blue-400" />
+                <h3 className="text-xs font-medium t-muted uppercase tracking-wider">
+                  Execution graph
                 </h3>
-                <PlanPreview plan={activeRun.plan} run={activeRun} />
+                <span className="text-[10px] t-faint ml-auto">
+                  {activeRun.observations.length} step{activeRun.observations.length !== 1 ? "s" : ""}
+                </span>
               </div>
 
-              {/* Tool traces */}
-              {completedSteps.length > 0 && (
-                <div>
-                  <h3 className="text-xs font-medium t-muted uppercase tracking-wider mb-2">
-                    Tool Traces
-                  </h3>
-                  <div className="space-y-1.5">
-                    {completedSteps.map((step) => (
-                      <ToolTrace key={step.step_id} step={step} />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+              {/* Graph canvas */}
+              <div className="flex-1 min-h-0">
+                <Suspense
+                  fallback={
+                    <div className="flex items-center justify-center h-full t-faint gap-2">
+                      <Loader2 size={14} className="animate-spin" />
+                      <span className="text-xs">Loading graph…</span>
+                    </div>
+                  }
+                >
+                  <ExecutionGraph run={activeRun} />
+                </Suspense>
+              </div>
+
+              {/* Footer hint */}
+              <div className="px-3 py-1.5 border-t border-app text-[10px] t-faint text-center flex-shrink-0">
+                Click a node for details · Scroll to zoom · Drag to pan
+              </div>
+            </>
           ) : (
             <div className="flex flex-col items-center justify-center h-full t-faint gap-2 p-6">
-              <PanelRightOpen size={24} className="opacity-30" />
+              <GitBranch size={24} className="opacity-30" />
               <p className="text-xs text-center">
-                Plan details will appear here when a run is active
+                Execution graph will appear here when a run is active
               </p>
             </div>
           )}
