@@ -288,7 +288,8 @@ function NodePopover({
 
   if (!obs) return null;
 
-  const status = obs.result?.status;
+  const isFinalAnswer = !obs.tool;
+  const status = isFinalAnswer ? "success" : obs.result?.status;
   const duration =
     obs.result?.started_at && obs.result?.finished_at
       ? Math.round(
