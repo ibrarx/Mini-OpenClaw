@@ -29,7 +29,7 @@ Key features:
 - **Budget-aware planning** — the agent sees its iteration budget, prefers batch operations, and works more strategically when budget is low; a live progress bar in the UI shows budget consumption
 - **Graceful max-iterations degradation** — when the agent exhausts its iteration budget, it synthesizes a direct answer from collected evidence instead of just summarizing what actions were taken; the run completes successfully if evidence is sufficient
 - **Error classification** — transient errors are retried with backoff, permanent errors go straight to the LLM, side-effect errors are surfaced to the user
-- **Self-reflection quality gate** — optional post-answer critique step where the agent scores its own output (completeness, accuracy, clarity) and rewrites it if quality is below a configurable threshold, with live "Reviewing…" status in the UI
+- **Self-reflection quality gate** — optional critique step where the agent scores its own final answer (completeness, accuracy, clarity). When the score is below threshold and iteration budget remains, the agent re-enters the ReAct loop to take corrective action (re-read files, run additional searches, etc.). Falls back to a text-only rewrite if no budget remains. Live "Reviewing…" status and expandable score breakdown in the UI
 - **Retry failed runs** — a one-click retry button appears on failed or cancelled runs, re-submitting the original message without retyping
 - **LLM-provider-agnostic** — swap Claude for Gemini or a local Ollama model (or add your own) without touching core code
 - **Manifest-driven tool extensibility** — add a tool without rewriting the core agent loop
@@ -202,15 +202,16 @@ Once the app is running, type these into the chat:
 22. Check the **Strategies** and **Preferences** tabs to see all accepted insights. Rejected ones are excluded from future dream proposals.
 
 ### Self-reflection quality gate
-19. Enable self-reflection: set `REACT_SELF_REFLECT=true` in `.env` and restart the backend.
-20. **"Read the README and summarize it"** — after the agent finishes, a **Self-check** badge appears below the observations showing the quality score (completeness, accuracy, clarity). Click it to expand the breakdown and see any issues found.
-21. **"Search for TODO in all files"** — the self-check may flag incomplete data and rewrite the answer. Look for the **"answer improved"** pill on the badge.
+23. Enable self-reflection: set `REACT_SELF_REFLECT=true` in `.env` and restart the backend.
+24. **"Read every file in the workspace and give me a complete summary of the entire project — include all file names, their purposes, and any TODOs you find."** — the agent will likely give an incomplete first answer. The self-check flags it, and the agent **re-enters the ReAct loop** to call more tools (re-read files, run searches). Watch the iteration count jump and look for the blue **"agent retried"** pill on the self-check badge. The final answer will be more thorough than the first attempt.
+25. **"Read the README and summarize it"** — if the answer passes the quality threshold, a green self-check badge appears (e.g., 85%). Click it to expand the score breakdown (completeness, accuracy, clarity).
+26. To force a text-only fallback, set `REACT_MAX_ITERATIONS=1` and repeat the command. With no budget for re-entry, the self-check rewrites the prose instead — look for the violet **"answer rewritten"** pill.
 
 ### Sub-agent delegation
-22. **"Delegate reading all the Python files to a sub-agent, then use its findings to create a summary document."** — the parent agent spawns a child run (visible as a purple "sub-agent" badge), the child reads and analyses all files, then the parent uses the child's findings to write a summary. Approval is requested before delegation starts.
-23. **"First, search all files for TODO comments and list them. Separately, read the README and create a summary. Do these as independent sub-tasks."** — the agent spawns **two** sub-agents, each handling one independent sub-task. Both child runs stream their progress in real-time within the parent's observation timeline.
-24. **"Find all Python files and summarize each one, and also search for bugs or TODOs across the codebase"** — the "and also" joining two unrelated tasks triggers delegation without needing to explicitly say "delegate".
-25. Expand a delegation observation row — the nested **Sub-agent** card shows the child's task description, iteration count, individual observation steps, and final response. The child run also appears separately in the Run History tab.
+27. **"Delegate reading all the Python files to a sub-agent, then use its findings to create a summary document."** — the parent agent spawns a child run (visible as a purple "sub-agent" badge), the child reads and analyses all files, then the parent uses the child's findings to write a summary. Approval is requested before delegation starts.
+28. **"First, search all files for TODO comments and list them. Separately, read the README and create a summary. Do these as independent sub-tasks."** — the agent spawns **two** sub-agents, each handling one independent sub-task. Both child runs stream their progress in real-time within the parent's observation timeline.
+29. **"Find all Python files and summarize each one, and also search for bugs or TODOs across the codebase"** — the "and also" joining two unrelated tasks triggers delegation without needing to explicitly say "delegate".
+30. Expand a delegation observation row — the nested **Sub-agent** card shows the child's task description, iteration count, individual observation steps, and final response. The child run also appears separately in the Run History tab.
 
 ### Scheduled tasks — recurring and one-time
 
@@ -218,30 +219,30 @@ The agent can schedule tasks for future or recurring execution via the `schedule
 
 **Recurring task (safe tools — fully autonomous):**
 
-26. **"Every 2 minutes, list all files in the workspace and tell me the total count"** — approve the scheduling step → navigate to the Scheduler tab → watch the badge appear as runs complete → expand "View runs" to see each run's output. Uses only safe tools, so no further approval needed.
+31. **"Every 2 minutes, list all files in the workspace and tell me the total count"** — approve the scheduling step → navigate to the Scheduler tab → watch the badge appear as runs complete → expand "View runs" to see each run's output. Uses only safe tools, so no further approval needed.
 
 **Recurring task with pre-approved writes (approve once, runs autonomously):**
 
-27. **"Every 5 minutes, read the README and write a one-line summary to workspace-summary.txt. Approve all future runs automatically."** — the LLM pre-approves `write_file` with `approve_all_runs=true`. One approval card appears at scheduling time. All subsequent runs auto-execute. The Scheduler page shows the amber `write_file` badge with "(all runs auto-approved)".
+32. **"Every 5 minutes, read the README and write a one-line summary to workspace-summary.txt. Approve all future runs automatically."** — the LLM pre-approves `write_file` with `approve_all_runs=true`. One approval card appears at scheduling time. All subsequent runs auto-execute. The Scheduler page shows the amber `write_file` badge with "(all runs auto-approved)".
 
 **Recurring task with per-run approval (approve each execution):**
 
-28. **"Every 2 minutes, read the README and write a one-line summary to workspace-summary.txt. Ask me for approval each time."** — the LLM sets `approve_all_runs=false`. Every run triggers an approval card on the Scheduler page. An amber **"!"** badge pulses on the Scheduler nav tab when approval is needed.
+33. **"Every 2 minutes, read the README and write a one-line summary to workspace-summary.txt. Ask me for approval each time."** — the LLM sets `approve_all_runs=false`. Every run triggers an approval card on the Scheduler page. An amber **"!"** badge pulses on the Scheduler nav tab when approval is needed.
 
 **One-time scheduled task:**
 
-29. **"In 1 minute, list all files in the workspace and tell me the count"** — the task fires once and its status changes to "Completed". Check the Scheduler page to see the result in the run history.
+34. **"In 1 minute, list all files in the workspace and tell me the count"** — the task fires once and its status changes to "Completed". Check the Scheduler page to see the result in the run history.
 
 **Search-based recurring (output changes between runs):**
 
-30. **"Every 3 minutes, search for TODO comments in all files and count how many there are"** — add a `# TODO: fix this` to a file between runs and watch the count change. Good for demonstrating that each run is independent.
+35. **"Every 3 minutes, search for TODO comments in all files and count how many there are"** — add a `# TODO: fix this` to a file between runs and watch the count change. Good for demonstrating that each run is independent.
 
 **Scheduler page features to demonstrate:**
 
-31. **Pause/Resume** — create a recurring task, let it run 2–3 times, hit **Pause**. Verify runs stop. Hit **Resume** — runs restart on schedule.
-32. **View runs** — expand a task's run history. Click a run to see the full response. Change the dropdown to "Last 10" or "Last 25" to see more.
-33. **Nav badge** — leave the Scheduler page while tasks are running. A green badge appears on the Scheduler tab showing the count of new (unseen) runs. Navigate back → badge clears.
-34. **Delete** — delete a task and verify it disappears from the list.
+36. **Pause/Resume** — create a recurring task, let it run 2–3 times, hit **Pause**. Verify runs stop. Hit **Resume** — runs restart on schedule.
+37. **View runs** — expand a task's run history. Click a run to see the full response. Change the dropdown to "Last 10" or "Last 25" to see more.
+38. **Nav badge** — leave the Scheduler page while tasks are running. A green badge appears on the Scheduler tab showing the count of new (unseen) runs. Navigate back → badge clears.
+39. **Delete** — delete a task and verify it disappears from the list.
 
 ## Execution Modes
 
@@ -667,7 +668,7 @@ The test suite covers:
 | `test_providers.py` | Anthropic/Gemini/Ollama provider translation, factory, JSON extraction | 48 |
 | `test_tools.py` | Each V1 tool in isolation (including batch read_file) | 42 |
 | `test_react.py` | ReAct loop, hybrid Plan-ReAct, goal tracking, replanning, saga compensation, error classification, loop detection, approval flow, batch reads, budget awareness, graceful max-iterations degradation | 63 |
-| `test_reflection.py` | Self-reflection critique, answer improvement, quality scoring, flag gating, max retries, graceful failure, DB persistence | 17 |
+| `test_reflection.py` | Self-reflection critique, loop re-entry on low score, text-rewrite fallback when no budget, quality scoring, flag gating, graceful failure, DB persistence | 18 |
 | `test_planner.py` | Plan parsing, provider error handling, summary generation | 13 |
 | `test_memory.py` | Memory CRUD, keyword search, retrieval, export | 13 |
 | `test_dreams.py` | Agent Dreams: dreamer core, pending review lifecycle, FIFO eviction, interval logic, planner context integration, DB migration | 21 |
@@ -711,7 +712,7 @@ python scripts/export_memory.py
 | Retry button doesn't appear | Retry only shows on assistant messages from failed or cancelled runs, and only when no other run is active |
 | Self-check shows "truncated" on small files | The reflection critic had a separate truncation limit — update to latest code, or increase `REACT_OBSERVATION_MAX_CHARS` in `.env` |
 | Self-check scores seem too harsh | Lower `REACT_REFLECT_QUALITY_THRESHOLD` (e.g. `0.5`) or disable with `REACT_SELF_REFLECT=false` |
-| Runs are slow with self-reflection enabled | Self-reflection adds 1–2 extra LLM calls per run. Disable it (`REACT_SELF_REFLECT=false`) for faster responses, or set `REACT_REFLECT_MAX_RETRIES=0` for critique-only (no rewrite) |
+| Runs are slow with self-reflection enabled | Self-reflection adds 1–2 extra LLM calls per run and may re-enter the loop. Disable it (`REACT_SELF_REFLECT=false`) for faster responses, or raise the threshold (`REACT_REFLECT_QUALITY_THRESHOLD=0.9`) so only poor answers trigger re-entry |
 | Agent doesn't delegate when expected | The planner only delegates when it sees distinct independent sub-parts. Use explicit cues: "do these as independent sub-tasks", numbered lists, or "and also" joining unrelated tasks. Or explicitly say "delegate" |
 | Delegation approval keeps appearing | Each child run is gated by a separate approval. This is by design — the user controls what work gets spawned. Set `DELEGATE_ENABLED=false` to disable delegation entirely |
 | Child run appears stuck | The child has its own iteration budget (max 5 by default). Check if it's waiting for approval on a `write_file` or `run_shell_safe` call inside the child |
@@ -736,7 +737,7 @@ mini-openclaw/
 │   └── models/            #   Pydantic models (Run, ToolResult, ScheduledTask, ErrorKind, etc.)
 ├── apps/web/              # React + TypeScript frontend
 │   └── src/components/    #   ChatPanel, PlanPreview, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser, SchedulerPage
-├── tests/                 # pytest test suite (366 tests)
+├── tests/                 # pytest test suite (367 tests)
 ├── scripts/               # seed_demo.py (workspace + memory setup), export_memory.py
 ├── docs/                  # Architecture and design documentation
 └── requirements.txt       # Python dependencies
