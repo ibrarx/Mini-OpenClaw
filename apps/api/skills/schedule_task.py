@@ -96,11 +96,12 @@ class ScheduleTaskTool(BaseTool):
                     "approve_all_runs": {
                         "type": "boolean",
                         "description": (
-                            "For recurring tasks: if true, the pre-approval "
-                            "covers ALL future runs. If false, the user will "
-                            "be asked to approve each run individually. "
-                            "Only meaningful when pre_approved_tools is non-empty "
-                            "and interval_minutes > 0."
+                            "For recurring tasks with pre_approved_tools: "
+                            "if true, the pre-approval covers ALL runs — tools "
+                            "execute without asking. If false, the user will "
+                            "be asked to approve EVERY run individually via "
+                            "the Scheduler page. Set false when the user says "
+                            "'ask me each time' or 'approve every run'."
                         ),
                         "default": False,
                     },

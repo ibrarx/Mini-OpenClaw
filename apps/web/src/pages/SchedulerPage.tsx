@@ -447,7 +447,7 @@ export default function SchedulerPage() {
                         ))}
                         {task.schedule_type === "interval" && (
                           <span className={task.approve_all_runs ? "text-emerald-400" : "text-yellow-400"}>
-                            ({task.approve_all_runs ? "all runs" : "first run only"})
+                            ({task.approve_all_runs ? "all runs auto-approved" : "approve each run"})
                           </span>
                         )}
                       </div>

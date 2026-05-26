@@ -373,7 +373,7 @@ class TestPreApproval:
     async def test_execute_recurring_first_run_only(
         self, scheduler: TaskScheduler, mock_orchestrator
     ):
-        """Recurring task with approve_all_runs=False only pre-approves first run."""
+        """Recurring task with approve_all_runs=False never pre-approves, even first run."""
         task = await scheduler.create_task(
             session_id="s1",
             message="Update file",
@@ -382,10 +382,10 @@ class TestPreApproval:
             approve_all_runs=False,
         )
 
-        # First run (run_count=0) — should get pre-approval
+        # First run (run_count=0) — should NOT get pre-approval
         await scheduler._execute_task(task)
         call_kwargs = mock_orchestrator.handle_message.call_args.kwargs
-        assert call_kwargs["pre_approved_tools"] == ["write_file"]
+        assert call_kwargs["pre_approved_tools"] == []
 
         mock_orchestrator.handle_message.reset_mock()
 
@@ -394,7 +394,7 @@ class TestPreApproval:
         scheduler._tasks[task.id] = task
         scheduler._inflight.pop(task.id, None)
 
-        # Second run — should NOT get pre-approval
+        # Second run — also should NOT get pre-approval
         await scheduler._execute_task(task)
         call_kwargs = mock_orchestrator.handle_message.call_args.kwargs
         assert call_kwargs["pre_approved_tools"] == []

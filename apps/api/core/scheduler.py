@@ -238,12 +238,9 @@ class TaskScheduler:
                 # One-time tasks always use pre-approval
                 pre_approved = task.pre_approved_tools
             elif task.approve_all_runs:
-                # Recurring task with blanket approval
+                # Recurring task with blanket approval — every run is pre-approved
                 pre_approved = task.pre_approved_tools
-            elif task.run_count == 0:
-                # First run of a recurring task without blanket approval
-                pre_approved = task.pre_approved_tools
-            # else: subsequent runs without approve_all_runs → no pre-approval
+            # else: approve_all_runs=False → no pre-approval, user approves each run
 
         try:
             run = await self._orchestrator.handle_message(
