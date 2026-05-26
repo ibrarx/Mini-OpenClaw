@@ -482,45 +482,85 @@ export default function ExecutionGraph({ run }: ExecutionGraphProps) {
 
   return (
     <div ref={containerRef} className="flex flex-col items-center gap-0 p-4 pb-8">
-      {nodes.map((node, i) => (
-        <div key={node.id} className="w-full max-w-[240px] flex flex-col items-center">
-          {/* Edge line (before every node except the first) */}
-          {i > 0 && edges[i - 1] && (
-            <EdgeLine edge={edges[i - 1]} index={i} />
-          )}
+      {nodes.map((node, i) => {
+        const isDelegate = node.kind === "delegate";
+        const isSelected = selectedId === node.id;
+        const showPopover = isSelected && selectedNode;
 
-          {/* Node card */}
-          <div
-            ref={(el) => { if (el) nodeRefs.current.set(node.id, el); }}
-            className="w-full animate-fade-in"
-            style={{ animationDelay: `${i * 0.08}s` }}
-          >
-            <NodeCard
-              node={node}
-              index={i}
-              isSelected={selectedId === node.id}
-              onClick={() => handleNodeClick(node.id)}
-            />
+        return (
+          <div key={node.id} className="w-full max-w-[240px] flex flex-col items-center">
+            {/* Edge line (before every node except the first) */}
+            {i > 0 && edges[i - 1] && (
+              <EdgeLine edge={edges[i - 1]} index={i} />
+            )}
+
+            {/* Delegate: branched layout — indented right with left border */}
+            {isDelegate ? (
+              <div className="w-full animate-fade-in" style={{ animationDelay: `${i * 0.08}s` }}>
+                {/* Delegate node card — slightly indented */}
+                <div
+                  ref={(el) => { if (el) nodeRefs.current.set(node.id, el); }}
+                  className="ml-4"
+                >
+                  <NodeCard
+                    node={node}
+                    index={i}
+                    isSelected={isSelected}
+                    onClick={() => handleNodeClick(node.id)}
+                  />
+                </div>
+
+                {/* Child run branch — always visible for delegates with child runs */}
+                {node.childRunId && (
+                  <div className="ml-6 mt-1 mb-1 pl-3 border-l-2 border-purple-500/30">
+                    <ChildRunCardInline childRunId={node.childRunId} />
+                  </div>
+                )}
+
+                {/* Popover below delegate */}
+                {showPopover && (
+                  <div className="ml-4">
+                    <NodePopover
+                      node={selectedNode}
+                      onClose={handleClose}
+                      pinned={pinned}
+                      onTogglePin={handleTogglePin}
+                    />
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Normal node: centered */
+              <>
+                <div
+                  ref={(el) => { if (el) nodeRefs.current.set(node.id, el); }}
+                  className="w-full animate-fade-in"
+                  style={{ animationDelay: `${i * 0.08}s` }}
+                >
+                  <NodeCard
+                    node={node}
+                    index={i}
+                    isSelected={isSelected}
+                    onClick={() => handleNodeClick(node.id)}
+                  />
+                </div>
+
+                {/* Popover below the selected node */}
+                {showPopover && (
+                  <div className="w-full">
+                    <NodePopover
+                      node={selectedNode}
+                      onClose={handleClose}
+                      pinned={pinned}
+                      onTogglePin={handleTogglePin}
+                    />
+                  </div>
+                )}
+              </>
+            )}
           </div>
-
-          {/* Popover (below the selected node) */}
-          {selectedId === node.id && selectedNode && (
-            <div className="w-full">
-              <NodePopover
-                node={selectedNode}
-                onClose={handleClose}
-                pinned={pinned}
-                onTogglePin={handleTogglePin}
-              />
-
-              {/* Child run card for delegates */}
-              {selectedNode.childRunId && (
-                <ChildRunCardInline childRunId={selectedNode.childRunId} />
-              )}
-            </div>
-          )}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
