@@ -17,6 +17,7 @@ The agent uses a **Hybrid Plan → ReAct → Replan** architecture as its defaul
 Key features:
 
 - **Sub-agent delegation** — complex multi-part tasks are decomposed into child runs, each executed by a focused sub-agent with its own iteration budget, approval gates, and real-time SSE streaming in the UI
+- **Scheduled tasks** — one-time or recurring tasks via a heap-based scheduler with advance approval, per-run approval, pre-approved tools, and a dedicated Scheduler page with live run history and an approval card for background runs that need user consent
 - **Hybrid Plan-ReAct with replanning** — goal checklist generated before execution, tracked live in the UI, with automatic or LLM-requested replanning when the plan goes off-track
 - **ReAct loop** with iterative reasoning and real-time adaptation to failures
 - **Real-time SSE streaming** — run status, plans, and approvals pushed to the frontend instantly via Server-Sent Events (no polling)
@@ -210,6 +211,37 @@ Once the app is running, type these into the chat:
 23. **"First, search all files for TODO comments and list them. Separately, read the README and create a summary. Do these as independent sub-tasks."** — the agent spawns **two** sub-agents, each handling one independent sub-task. Both child runs stream their progress in real-time within the parent's observation timeline.
 24. **"Find all Python files and summarize each one, and also search for bugs or TODOs across the codebase"** — the "and also" joining two unrelated tasks triggers delegation without needing to explicitly say "delegate".
 25. Expand a delegation observation row — the nested **Sub-agent** card shows the child's task description, iteration count, individual observation steps, and final response. The child run also appears separately in the Run History tab.
+
+### Scheduled tasks — recurring and one-time
+
+The agent can schedule tasks for future or recurring execution via the `schedule_task` tool. A dedicated **Scheduler** page shows all tasks with live status, run history, and inline approval cards.
+
+**Recurring task (safe tools — fully autonomous):**
+
+26. **"Every 2 minutes, list all files in the workspace and tell me the total count"** — approve the scheduling step → navigate to the Scheduler tab → watch the badge appear as runs complete → expand "View runs" to see each run's output. Uses only safe tools, so no further approval needed.
+
+**Recurring task with pre-approved writes (approve once, runs autonomously):**
+
+27. **"Every 5 minutes, read the README and write a one-line summary to workspace-summary.txt. Approve all future runs automatically."** — the LLM pre-approves `write_file` with `approve_all_runs=true`. One approval card appears at scheduling time. All subsequent runs auto-execute. The Scheduler page shows the amber `write_file` badge with "(all runs auto-approved)".
+
+**Recurring task with per-run approval (approve each execution):**
+
+28. **"Every 2 minutes, read the README and write a one-line summary to workspace-summary.txt. Ask me for approval each time."** — the LLM sets `approve_all_runs=false`. Every run triggers an approval card on the Scheduler page. An amber **"!"** badge pulses on the Scheduler nav tab when approval is needed.
+
+**One-time scheduled task:**
+
+29. **"In 1 minute, list all files in the workspace and tell me the count"** — the task fires once and its status changes to "Completed". Check the Scheduler page to see the result in the run history.
+
+**Search-based recurring (output changes between runs):**
+
+30. **"Every 3 minutes, search for TODO comments in all files and count how many there are"** — add a `# TODO: fix this` to a file between runs and watch the count change. Good for demonstrating that each run is independent.
+
+**Scheduler page features to demonstrate:**
+
+31. **Pause/Resume** — create a recurring task, let it run 2–3 times, hit **Pause**. Verify runs stop. Hit **Resume** — runs restart on schedule.
+32. **View runs** — expand a task's run history. Click a run to see the full response. Change the dropdown to "Last 10" or "Last 25" to see more.
+33. **Nav badge** — leave the Scheduler page while tasks are running. A green badge appears on the Scheduler tab showing the count of new (unseen) runs. Navigate back → badge clears.
+34. **Delete** — delete a task and verify it disappears from the list.
 
 ## Execution Modes
 
@@ -610,6 +642,8 @@ All settings are read from the `.env` file (see `.env.example`):
 | `DELEGATE_MAX_DEPTH` | Maximum nesting level for delegation (0 = no delegation, 1 = children only, 2 = grandchildren) | `2` |
 | `DELEGATE_MAX_CHILDREN` | Maximum child runs a single parent can spawn | `3` |
 | `DELEGATE_MAX_CHILD_ITERATIONS` | Iteration cap per child run (hard max regardless of agent request) | `5` |
+| `SCHEDULER_ENABLED` | Enable/disable the scheduled task system and its `schedule_task` tool | `true` |
+| `SCHEDULER_MAX_TASKS` | Maximum number of active scheduled tasks allowed at once | `20` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
 | `BACKEND_PORT` | Backend server port | `8000` |
 
@@ -638,6 +672,7 @@ The test suite covers:
 | `test_planner.py` | Plan parsing, provider error handling, summary generation | 13 |
 | `test_memory.py` | Memory CRUD, keyword search, retrieval, export | 13 |
 | `test_dreams.py` | Agent Dreams: dreamer core, pending review lifecycle, FIFO eviction, interval logic, planner context integration, DB migration | 21 |
+| `test_scheduler.py` | Task scheduler: CRUD, lifecycle (pause/resume/delete), heap-based execution, inflight tracking, one-time and interval tasks, max_runs, pre-approval (once/recurring/approve_all), persistence roundtrip | 26 |
 | `test_integration.py` | End-to-end legacy plan-and-execute path, provider switching, retry failed runs | 12 |
 
 ## Memory Export
@@ -683,20 +718,26 @@ python scripts/export_memory.py
 | Child run appears stuck | The child has its own iteration budget (max 5 by default). Check if it's waiting for approval on a `write_file` or `run_shell_safe` call inside the child |
 | Too many child runs spawning | Lower `DELEGATE_MAX_CHILDREN` in `.env` (default: 3). The planner also respects this limit and won't attempt more delegations than allowed |
 | Child run not visible in UI | Expand the `delegate_task` observation row in the parent — the child run card with its observations renders inline. Child runs also appear separately in Run History |
+| Scheduled task shows "Runs: 0" but is overdue | The scheduler loop may have crashed. Check `curl http://localhost:8000/api/scheduler/health` — if `loop_alive` is `false`, restart the backend. Also check the backend logs for `Scheduler loop error` |
+| Scheduled task asks for approval but nobody sees it | Navigate to the **Scheduler** page — an approval card appears inline on the task card. The nav badge turns amber with **"!"** when approval is needed |
+| Scheduled task with `approve_all_runs=false` auto-executed the first run | Pull the latest code — older versions pre-approved the first run. Current behavior: `approve_all_runs=false` means every run needs approval, including the first |
+| `schedule_task` tool rejected `read_file` in `pre_approved_tools` | Pull the latest code — safe tools are now silently stripped from the list instead of causing an error |
+| Scheduler badge shows huge number on app start | Pull the latest code — the badge now initializes from the first poll so historical runs aren't counted as "new" |
+| Scheduled task was created but DB error appeared | Delete `mini_openclaw.db` and restart — the new schema includes the `pre_approved_tools` and `approve_all_runs` columns. Or just restart (auto-migration adds the missing columns) |
 
 ## Project Structure
 
 ```
 mini-openclaw/
 ├── apps/api/              # FastAPI backend
-│   ├── core/              #   Orchestrator, planner, policy, executor, audit
+│   ├── core/              #   Orchestrator, planner, policy, executor, audit, scheduler
 │   ├── providers/         #   LLM provider abstraction (Anthropic, Gemini, Ollama)
-│   ├── skills/            #   V1 tool implementations + registry + sub-agent delegation
+│   ├── skills/            #   V1 tool implementations + registry + sub-agent delegation + scheduling
 │   ├── memory/            #   Memory manager, hybrid retrieval, embeddings, vector store, dreamer
-│   └── models/            #   Pydantic models (Run, ToolResult, ErrorKind, etc.)
+│   └── models/            #   Pydantic models (Run, ToolResult, ScheduledTask, ErrorKind, etc.)
 ├── apps/web/              # React + TypeScript frontend
-│   └── src/components/    #   ChatPanel, PlanPreview, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser
-├── tests/                 # pytest test suite (340 tests)
+│   └── src/components/    #   ChatPanel, PlanPreview, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser, SchedulerPage
+├── tests/                 # pytest test suite (366 tests)
 ├── scripts/               # seed_demo.py (workspace + memory setup), export_memory.py
 ├── docs/                  # Architecture and design documentation
 └── requirements.txt       # Python dependencies
