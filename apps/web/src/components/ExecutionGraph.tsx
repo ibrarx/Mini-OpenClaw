@@ -33,11 +33,12 @@ import NodePopover from "./graph/NodePopover";
 import ChildRunCard from "./graph/ChildRunCard";
 
 // ── Layout constants ─────────────────────────────────
-// Node width is 200px (set in GraphNode). Center at x=0 so React Flow
-// fitView can center the graph in the sidebar viewport.
-const NODE_H = 40;
-const GAP_Y = 50;
-const START_X = 0;  // centered — fitView handles viewport offset
+// React Flow needs explicit width/height on nodes for proper fitView.
+// The actual rendered node is 200px wide × ~48px tall (padding + 2 lines).
+const NODE_W = 200;
+const NODE_H = 48;
+const GAP_Y = 40;   // gap between bottom of one node and top of next
+const START_X = 0;
 const START_Y = 0;
 
 // ── Types ────────────────────────────────────────────
@@ -85,6 +86,8 @@ function buildGraph(run: Run): { nodes: Node<GraphNodeData>[]; edges: Edge[] } {
     id: "start",
     type: "graphNode",
     position: { x: START_X, y: START_Y },
+    width: NODE_W,
+    height: NODE_H,
     data: {
       kind: "start",
       label: run.user_message.length > 40
@@ -143,6 +146,8 @@ function buildGraph(run: Run): { nodes: Node<GraphNodeData>[]; edges: Edge[] } {
       id: nodeId,
       type: "graphNode",
       position: { x: START_X, y: mainY },
+      width: NODE_W,
+      height: NODE_H,
       data: {
         kind,
         label,
@@ -195,6 +200,8 @@ function buildGraph(run: Run): { nodes: Node<GraphNodeData>[]; edges: Edge[] } {
       id: activeId,
       type: "graphNode",
       position: { x: START_X, y: mainY },
+      width: NODE_W,
+      height: NODE_H,
       data: {
         kind: isReflecting ? "reflect" : "active",
         label: isReflecting ? "Reviewing…" : "Thinking…",

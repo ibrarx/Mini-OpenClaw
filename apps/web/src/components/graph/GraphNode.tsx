@@ -148,7 +148,7 @@ function GraphNode({ data }: NodeProps) {
         className="!w-1.5 !h-1.5 !rounded-full !border-0 !bg-transparent"
       />
 
-      <div className={className} style={{ background: bg, width: 200 }}>
+      <div className={className} style={{ background: bg, width: 200, height: 46, overflow: "hidden" }}>
         {/* Delegate inner border */}
         {kind === "delegate" && (
           <div className="absolute inset-[3px] rounded border border-purple-500/20 pointer-events-none" />
