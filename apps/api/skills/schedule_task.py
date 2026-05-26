@@ -131,16 +131,26 @@ class ScheduleTaskTool(BaseTool):
         if max_runs < 0:
             return self._error(args, "max_runs must be >= 0", started)
 
-        # Validate pre_approved_tools are known approval-required tools
+        # Filter pre_approved_tools to only approval-required tools.
+        # Safe tools (read_file, list_files, etc.) are silently stripped since
+        # they don't need pre-approval. Only reject truly unknown tool names.
         valid_preapproval_tools = {"write_file", "run_shell_safe", "delegate_task"}
-        invalid = [t for t in pre_approved_tools if t not in valid_preapproval_tools]
-        if invalid:
+        known_safe_tools = {
+            "list_files", "read_file", "search_in_files",
+            "search_memory", "remember_fact", "schedule_task",
+        }
+        unknown = [
+            t for t in pre_approved_tools
+            if t not in valid_preapproval_tools and t not in known_safe_tools
+        ]
+        if unknown:
             return self._error(
                 args,
-                f"Cannot pre-approve tools that don't require approval: {invalid}. "
-                f"Valid options: {sorted(valid_preapproval_tools)}",
+                f"Unknown tool names in pre_approved_tools: {unknown}",
                 started,
             )
+        # Keep only tools that actually require approval
+        pre_approved_tools = [t for t in pre_approved_tools if t in valid_preapproval_tools]
 
         if not context.schedule_fn:
             return self._error(
