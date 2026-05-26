@@ -106,7 +106,7 @@ function AppContent() {
   const [backendUp, setBackendUp] = useState<boolean | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   // Track the last run_count the user has "seen" per task (ref to avoid re-render loops)
-  const seenRunCountsRef = useRef<Record<string, number>>({});
+  const seenRunCountsRef = useRef<Record<string, number> | null>(null); // null = not initialized
   const [schedulerBadge, setSchedulerBadge] = useState(0);
 
   useEffect(() => {
@@ -126,6 +126,15 @@ function AppContent() {
     const poll = () =>
       getScheduledTasks()
         .then(async (tasks) => {
+          // First poll: initialize baseline so historical runs aren't "new"
+          if (seenRunCountsRef.current === null) {
+            const counts: Record<string, number> = {};
+            for (const t of tasks) counts[t.id] = t.run_count;
+            seenRunCountsRef.current = counts;
+            setSchedulerBadge(0);
+            // Still check for pending approvals below
+          }
+
           // Check for inflight runs needing approval
           let needsApproval = false;
           for (const t of tasks) {

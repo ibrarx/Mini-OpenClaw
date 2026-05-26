@@ -172,12 +172,16 @@ function TaskRunHistory({ taskId }: { taskId: string }) {
 
   useEffect(() => {
     let cancelled = false;
+    const fetch = () =>
+      getTaskRuns(taskId, limit)
+        .then((data) => { if (!cancelled) setRuns(data); })
+        .catch(() => {})
+        .finally(() => { if (!cancelled) setLoading(false); });
     setLoading(true);
-    getTaskRuns(taskId, limit)
-      .then((data) => { if (!cancelled) setRuns(data); })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+    fetch();
+    // Auto-refresh every 10s while expanded
+    const id = setInterval(fetch, 10_000);
+    return () => { cancelled = true; clearInterval(id); };
   }, [taskId, limit]);
 
   if (loading) {
