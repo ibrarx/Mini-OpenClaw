@@ -705,12 +705,10 @@ python scripts/export_memory.py
 | Memory search only returns keyword matches | Check that `sentence-transformers` installed successfully; backend log should show "Embedding model loaded" on startup |
 | Summaries tab is empty | Summaries auto-generate after every 5 completed runs. Run more tasks, or set `SUMMARY_INTERVAL=3` in `.env` for faster generation |
 | Strategies/Preferences tabs are empty | Agent Dreams needs at least 3 episodes and triggers every `DREAM_INTERVAL` runs (default: 5). Click the ✨ Dream button manually, or run more tasks |
-| Dream button shows "API error 500" | Your database may have the old schema. Pull the latest code and restart — the migration runs automatically. If it persists, delete `mini_openclaw.db` and restart |
 | Dream proposes no insights | Either not enough episodes (minimum 3), or the LLM didn't find patterns above the confidence threshold. Lower `DREAM_CONFIDENCE_THRESHOLD` in `.env` or run more diverse tasks |
 | Frontend won't start | Ensure Node.js 18+ is installed: `node --version` |
 | Run appears stuck in chat | The SSE stream may have disconnected — click the input and send a new message, or refresh the page. Check that the backend is still running |
 | Retry button doesn't appear | Retry only shows on assistant messages from failed or cancelled runs, and only when no other run is active |
-| Self-check shows "truncated" on small files | The reflection critic had a separate truncation limit — update to latest code, or increase `REACT_OBSERVATION_MAX_CHARS` in `.env` |
 | Self-check scores seem too harsh | Lower `REACT_REFLECT_QUALITY_THRESHOLD` (e.g. `0.5`) or disable with `REACT_SELF_REFLECT=false` |
 | Runs are slow with self-reflection enabled | Self-reflection adds 1–2 extra LLM calls per run and may re-enter the loop. Disable it (`REACT_SELF_REFLECT=false`) for faster responses, or raise the threshold (`REACT_REFLECT_QUALITY_THRESHOLD=0.9`) so only poor answers trigger re-entry |
 | Agent doesn't delegate when expected | The planner only delegates when it sees distinct independent sub-parts. Use explicit cues: "do these as independent sub-tasks", numbered lists, or "and also" joining unrelated tasks. Or explicitly say "delegate" |
@@ -720,9 +718,6 @@ python scripts/export_memory.py
 | Child run not visible in UI | Expand the `delegate_task` observation row in the parent — the child run card with its observations renders inline. Child runs also appear separately in Run History |
 | Scheduled task shows "Runs: 0" but is overdue | The scheduler loop may have crashed. Check `curl http://localhost:8000/api/scheduler/health` — if `loop_alive` is `false`, restart the backend. Also check the backend logs for `Scheduler loop error` |
 | Scheduled task asks for approval but nobody sees it | Navigate to the **Scheduler** page — an approval card appears inline on the task card. The nav badge turns amber with **"!"** when approval is needed |
-| Scheduled task with `approve_all_runs=false` auto-executed the first run | Pull the latest code — older versions pre-approved the first run. Current behavior: `approve_all_runs=false` means every run needs approval, including the first |
-| `schedule_task` tool rejected `read_file` in `pre_approved_tools` | Pull the latest code — safe tools are now silently stripped from the list instead of causing an error |
-| Scheduler badge shows huge number on app start | Pull the latest code — the badge now initializes from the first poll so historical runs aren't counted as "new" |
 | Scheduled task was created but DB error appeared | Delete `mini_openclaw.db` and restart — the new schema includes the `pre_approved_tools` and `approve_all_runs` columns. Or just restart (auto-migration adds the missing columns) |
 
 ## Project Structure
