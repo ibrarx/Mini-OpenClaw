@@ -179,13 +179,14 @@
 }
 
 /* ── React Flow theme overrides ────────────────────── */
+.execution-graph.react-flow {
+  background-color: var(--bg-secondary) !important;
+}
 .execution-graph .react-flow__background {
   background-color: transparent !important;
 }
-.execution-graph .react-flow__minimap {
-  background-color: var(--bg-card) !important;
-  border: 0.5px solid var(--border-primary) !important;
-  border-radius: 6px !important;
+.execution-graph .react-flow__viewport {
+  transition: transform 0.2s ease-out;
 }
 .execution-graph .react-flow__controls {
   background: transparent !important;
@@ -198,8 +199,8 @@
   border-radius: 4px !important;
   color: var(--text-faint) !important;
   fill: var(--text-faint) !important;
-  width: 24px !important;
-  height: 24px !important;
+  width: 22px !important;
+  height: 22px !important;
   margin: 1px 0 !important;
 }
 .execution-graph .react-flow__controls-button:hover {
@@ -208,12 +209,19 @@
   fill: var(--text-primary) !important;
 }
 .execution-graph .react-flow__controls-button svg {
-  max-width: 12px !important;
-  max-height: 12px !important;
+  max-width: 11px !important;
+  max-height: 11px !important;
 }
-/* Hide default edge markers — we handle them in AnimatedEdge */
+/* Custom edge styling */
 .execution-graph .react-flow__edge-path {
   stroke-width: 0.75;
+}
+/* Graph node base — used by GraphNode component */
+.graph-node {
+  transition: all 0.15s ease;
+}
+.graph-node:hover {
+  filter: brightness(1.1);
 }
 /* Node fade-in animation */
 .execution-graph .react-flow__node {
@@ -222,4 +230,12 @@
 @keyframes graphNodeFadeIn {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
+}
+/* Fix React Flow default node wrapper — no background/border/shadow */
+.execution-graph .react-flow__node-graphNode {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
 }

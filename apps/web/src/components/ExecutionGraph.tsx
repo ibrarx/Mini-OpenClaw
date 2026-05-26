@@ -15,7 +15,6 @@ import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import {
   ReactFlow,
   Background,
-  MiniMap,
   Controls,
   type Node,
   type Edge,
@@ -34,9 +33,11 @@ import NodePopover from "./graph/NodePopover";
 import ChildRunCard from "./graph/ChildRunCard";
 
 // ── Layout constants ─────────────────────────────────
-const NODE_H = 44;
-const GAP_Y = 60;
-const START_X = 0;
+// Node width is 200px (set in GraphNode). Center at x=0 so React Flow
+// fitView can center the graph in the sidebar viewport.
+const NODE_H = 40;
+const GAP_Y = 50;
+const START_X = 0;  // centered — fitView handles viewport offset
 const START_Y = 0;
 
 // ── Types ────────────────────────────────────────────
@@ -228,12 +229,22 @@ function buildGraph(run: Run): { nodes: Node<GraphNodeData>[]; edges: Edge[] } {
 function AutoFit({ nodeCount }: { nodeCount: number }) {
   const { fitView } = useReactFlow();
   const prevCount = useRef(nodeCount);
+  const initialFit = useRef(false);
 
+  // Fit on initial render
+  useEffect(() => {
+    if (!initialFit.current) {
+      initialFit.current = true;
+      const t = setTimeout(() => fitView({ padding: 0.4, duration: 200 }), 100);
+      return () => clearTimeout(t);
+    }
+  }, [fitView]);
+
+  // Fit when nodes change
   useEffect(() => {
     if (nodeCount !== prevCount.current) {
       prevCount.current = nodeCount;
-      // Small delay so the new nodes render before fitting
-      const t = setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 50);
+      const t = setTimeout(() => fitView({ padding: 0.4, duration: 300 }), 50);
       return () => clearTimeout(t);
     }
   }, [nodeCount, fitView]);
@@ -326,8 +337,8 @@ function ExecutionGraphInner({ run }: ExecutionGraphProps) {
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
         fitView
-        fitViewOptions={{ padding: 0.3 }}
-        minZoom={0.3}
+        fitViewOptions={{ padding: 0.4, minZoom: 0.5, maxZoom: 1.5 }}
+        minZoom={0.2}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
         nodesDraggable={false}
@@ -335,37 +346,15 @@ function ExecutionGraphInner({ run }: ExecutionGraphProps) {
         elementsSelectable={true}
         panOnScroll
         zoomOnScroll
+        defaultEdgeOptions={{ type: "animated" }}
         className="execution-graph"
       >
-        <Background gap={16} size={0.5} color="var(--text-faint)" style={{ opacity: 0.15 }} />
-        <MiniMap
-          nodeColor={(node) => {
-            const data = node.data as GraphNodeData;
-            switch (data.status) {
-              case "success":
-                return "#10b981";
-              case "error":
-                return "#ef4444";
-              case "denied":
-              case "rejected":
-                return "#f59e0b";
-              case "running":
-                return "#3b82f6";
-              default:
-                return "#6b7280";
-            }
-          }}
-          maskColor="rgba(0, 0, 0, 0.15)"
-          style={{
-            backgroundColor: "var(--bg-card)",
-            border: "0.5px solid var(--border-primary)",
-            borderRadius: "6px",
-          }}
-          pannable
-          zoomable={false}
-        />
+        <Background gap={20} size={0.5} color="var(--text-faint)" style={{ opacity: 0.1 }} />
         <Controls
           showInteractive={false}
+          showFitView={true}
+          showZoom={true}
+          position="bottom-right"
           style={{
             borderRadius: "6px",
             border: "0.5px solid var(--border-primary)",

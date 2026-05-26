@@ -26,71 +26,103 @@ import type { GraphNodeData, GraphNodeStatus, GraphNodeKind } from "../Execution
 
 function StatusIcon({ status, kind }: { status: GraphNodeStatus; kind: GraphNodeKind }) {
   if (kind === "start") {
-    return <MessageSquare size={12} className="text-blue-400 flex-shrink-0" />;
+    return <MessageSquare size={11} className="text-blue-400 flex-shrink-0" />;
   }
   if (kind === "done") {
-    return <CheckCircle2 size={12} className="text-emerald-500 flex-shrink-0" />;
+    return <CheckCircle2 size={11} className="text-emerald-500 flex-shrink-0" />;
   }
   if (kind === "active") {
-    return <Loader2 size={12} className="text-blue-400 animate-spin flex-shrink-0" />;
+    return <Loader2 size={11} className="text-blue-400 animate-spin flex-shrink-0" />;
   }
   if (kind === "reflect") {
-    return <ScanEye size={12} className="text-violet-400 animate-spin flex-shrink-0" />;
+    return <ScanEye size={11} className="text-violet-400 animate-spin flex-shrink-0" />;
   }
   if (kind === "delegate") {
-    return <Users size={12} className="text-purple-400 flex-shrink-0" />;
+    return <Users size={11} className="text-purple-400 flex-shrink-0" />;
   }
 
   switch (status) {
     case "success":
-      return <CheckCircle2 size={12} className="text-emerald-500 flex-shrink-0" />;
+      return <CheckCircle2 size={11} className="text-emerald-500 flex-shrink-0" />;
     case "error":
-      return <XCircle size={12} className="text-red-500 flex-shrink-0" />;
+      return <XCircle size={11} className="text-red-500 flex-shrink-0" />;
     case "denied":
-      return <ShieldOff size={12} className="text-amber-500 flex-shrink-0" />;
+      return <ShieldOff size={11} className="text-amber-500 flex-shrink-0" />;
     case "rejected":
-      return <Ban size={12} className="text-red-500 flex-shrink-0" />;
+      return <Ban size={11} className="text-red-500 flex-shrink-0" />;
     case "running":
-      return <Loader2 size={12} className="text-blue-400 animate-spin flex-shrink-0" />;
+      return <Loader2 size={11} className="text-blue-400 animate-spin flex-shrink-0" />;
     default:
-      return <Brain size={12} className="t-faint flex-shrink-0" />;
+      return <Brain size={11} className="t-faint flex-shrink-0" />;
   }
 }
 
 // ── Border / style helpers ───────────────────────────
 
-function getNodeClasses(kind: GraphNodeKind, status: GraphNodeStatus): string {
-  const base =
-    "rounded-lg px-3 py-2 text-xs transition-all duration-200 cursor-pointer select-none min-w-[140px] max-w-[180px]";
+function getNodeStyle(kind: GraphNodeKind, status: GraphNodeStatus): {
+  className: string;
+  bg: string;
+} {
+  const base = "graph-node rounded-md px-2.5 py-1.5 cursor-pointer select-none";
 
   switch (kind) {
     case "start":
-      return `${base} bg-blue-600/10 border border-blue-500/30 hover:border-blue-500/50`;
+      return {
+        className: `${base} border border-blue-500/30 hover:border-blue-500/50`,
+        bg: "rgba(37, 99, 235, 0.1)",
+      };
     case "done":
-      return `${base} bg-emerald-600/10 border border-emerald-500/30 hover:border-emerald-500/50`;
+      return {
+        className: `${base} border border-emerald-500/30 hover:border-emerald-500/50`,
+        bg: "rgba(16, 185, 129, 0.1)",
+      };
     case "active":
-      return `${base} bg-blue-600/5 border border-blue-500/40 animate-pulse`;
+      return {
+        className: `${base} border border-blue-500/40 animate-pulse`,
+        bg: "rgba(37, 99, 235, 0.06)",
+      };
     case "reflect":
-      return `${base} bg-violet-600/5 border border-violet-500/40 animate-pulse`;
+      return {
+        className: `${base} border border-violet-500/40 animate-pulse`,
+        bg: "rgba(139, 92, 246, 0.06)",
+      };
     case "delegate":
-      return `${base} bg-purple-600/5 border-2 border-purple-500/40 hover:border-purple-500/60`;
+      return {
+        className: `${base} border-2 border-purple-500/40 hover:border-purple-500/60`,
+        bg: "rgba(139, 92, 246, 0.06)",
+      };
     case "tool":
       switch (status) {
         case "success":
-          return `${base} border border-emerald-500/30 hover:border-emerald-500/50`;
+          return {
+            className: `${base} border border-emerald-500/30 hover:border-emerald-500/50`,
+            bg: "transparent",
+          };
         case "error":
-          return `${base} border border-red-500/30 hover:border-red-500/50 bg-red-600/5`;
+          return {
+            className: `${base} border border-red-500/30 hover:border-red-500/50`,
+            bg: "rgba(239, 68, 68, 0.06)",
+          };
         case "denied":
-          return `${base} border border-amber-500/30 hover:border-amber-500/50 bg-amber-600/5`;
+          return {
+            className: `${base} border border-amber-500/30 hover:border-amber-500/50`,
+            bg: "rgba(245, 158, 11, 0.06)",
+          };
         case "rejected":
-          return `${base} border border-red-500/30 hover:border-red-500/50 bg-red-600/5`;
+          return {
+            className: `${base} border border-red-500/30 hover:border-red-500/50`,
+            bg: "rgba(239, 68, 68, 0.06)",
+          };
         case "running":
-          return `${base} border border-blue-500/30 bg-blue-600/5`;
+          return {
+            className: `${base} border border-blue-500/30`,
+            bg: "rgba(37, 99, 235, 0.06)",
+          };
         default:
-          return `${base} border border-app`;
+          return { className: `${base} border border-app`, bg: "transparent" };
       }
     default:
-      return `${base} border border-app`;
+      return { className: `${base} border border-app`, bg: "transparent" };
   }
 }
 
@@ -98,12 +130,13 @@ function getNodeClasses(kind: GraphNodeKind, status: GraphNodeStatus): string {
 
 function GraphNode({ data }: NodeProps) {
   const { kind, label, sublabel, status, toolName, riskLevel } = data as GraphNodeData;
+  const { className, bg } = getNodeStyle(kind, status);
 
   const riskBadge =
     riskLevel === "medium" ? (
-      <span className="badge-medium text-[9px] px-1 py-0 rounded">med</span>
+      <span className="badge-medium text-[8px] px-1 py-0 rounded leading-none">med</span>
     ) : riskLevel === "high" ? (
-      <span className="badge-high text-[9px] px-1 py-0 rounded">high</span>
+      <span className="badge-high text-[8px] px-1 py-0 rounded leading-none">high</span>
     ) : null;
 
   return (
@@ -115,38 +148,41 @@ function GraphNode({ data }: NodeProps) {
         className="!w-1.5 !h-1.5 !rounded-full !border-0 !bg-transparent"
       />
 
-      <div className={getNodeClasses(kind, status)} style={{ background: undefined }}>
+      <div className={className} style={{ background: bg, width: 200 }}>
         {/* Delegate inner border */}
         {kind === "delegate" && (
-          <div className="absolute inset-[3px] rounded-md border border-purple-500/20 pointer-events-none" />
+          <div className="absolute inset-[3px] rounded border border-purple-500/20 pointer-events-none" />
         )}
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
           <StatusIcon status={status} kind={kind} />
-          <span className="t-primary truncate font-medium text-[11px] flex-1 leading-tight">
+          <span className="t-primary truncate font-medium text-[10px] flex-1 leading-tight">
             {label}
           </span>
           {riskBadge}
         </div>
 
-        {/* Sublabel: tool name or status */}
+        {/* Sublabel: tool name when announcement replaced it */}
         {sublabel && kind === "tool" && toolName && toolName !== label && (
-          <div className="mt-0.5 text-[9px] font-mono t-faint truncate">
+          <div className="mt-0.5 text-[8px] font-mono t-faint truncate">
             {toolName}
           </div>
         )}
         {kind === "start" && (
-          <div className="mt-0.5 text-[9px] t-faint">start</div>
+          <div className="mt-0.5 text-[8px] t-faint">start</div>
+        )}
+        {kind === "done" && (
+          <div className="mt-0.5 text-[8px] t-faint">complete</div>
         )}
         {kind === "active" && (
-          <div className="mt-0.5 text-[9px] t-faint">planning next step…</div>
+          <div className="mt-0.5 text-[8px] t-faint">planning next step…</div>
         )}
         {kind === "reflect" && (
-          <div className="mt-0.5 text-[9px] text-violet-400/70">checking quality…</div>
+          <div className="mt-0.5 text-[8px] text-violet-400/70">checking quality…</div>
         )}
         {kind === "delegate" && (
-          <div className="mt-0.5 text-[9px] text-purple-400/70 flex items-center gap-0.5">
-            <Users size={8} /> sub-agent
+          <div className="mt-0.5 text-[8px] text-purple-400/70 flex items-center gap-0.5">
+            <Users size={7} /> sub-agent
           </div>
         )}
       </div>
