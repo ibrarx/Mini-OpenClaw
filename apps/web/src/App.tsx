@@ -2,7 +2,7 @@
  * App — root layout with header navigation, theme support, and page routing.
  */
 
-import { useState, useEffect, createContext, useContext, useCallback } from "react";
+import { useState, useEffect, createContext, useContext, useCallback, useRef } from "react";
 import {
   MessageSquare,
   History,
@@ -10,12 +10,14 @@ import {
   Wifi,
   WifiOff,
   Cog,
+  Clock,
 } from "lucide-react";
 import { useSession } from "./hooks/useSession";
-import { healthCheck } from "./api/client";
+import { healthCheck, getScheduledTasks } from "./api/client";
 import ChatPage from "./pages/ChatPage";
 import HistoryPage from "./pages/HistoryPage";
 import MemoryPage from "./pages/MemoryPage";
+import SchedulerPage from "./pages/SchedulerPage";
 import Settings from "./components/Settings";
 import type { ChatMessage } from "./api/types";
 
@@ -96,13 +98,16 @@ function ThemeProvider({ children }: { children: React.ReactNode }) {
 
 // ── App ───────────────────────────────────────────────
 
-type Page = "chat" | "history" | "memory" | "settings";
+type Page = "chat" | "history" | "memory" | "scheduler" | "settings";
 
 function AppContent() {
   const { sessionId, resetSession } = useSession();
   const [page, setPage] = useState<Page>("chat");
   const [backendUp, setBackendUp] = useState<boolean | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  // Track the last run_count the user has "seen" per task (ref to avoid re-render loops)
+  const seenRunCountsRef = useRef<Record<string, number> | null>(null); // null = not initialized
+  const [schedulerBadge, setSchedulerBadge] = useState(0);
 
   useEffect(() => {
     const check = () =>
@@ -110,15 +115,69 @@ function AppContent() {
         .then(() => setBackendUp(true))
         .catch(() => setBackendUp(false));
     check();
-    // Re-check periodically so the indicator recovers after backend restarts
     const id = setInterval(check, 10_000);
     return () => clearInterval(id);
   }, []);
+
+  // Poll scheduler for new runs (badge = unseen run count)
+  // Also detect pending approvals for an urgent indicator.
+  const [approvalNeeded, setApprovalNeeded] = useState(false);
+  useEffect(() => {
+    const poll = () =>
+      getScheduledTasks()
+        .then(async (tasks) => {
+          // First poll: initialize baseline so historical runs aren't "new"
+          if (seenRunCountsRef.current === null) {
+            const counts: Record<string, number> = {};
+            for (const t of tasks) counts[t.id] = t.run_count;
+            seenRunCountsRef.current = counts;
+            setSchedulerBadge(0);
+            // Still check for pending approvals below
+          }
+
+          // Check for inflight runs needing approval
+          let needsApproval = false;
+          for (const t of tasks) {
+            if (t.inflight_run_id) {
+              try {
+                const { getRun } = await import("./api/client");
+                const run = await getRun(t.inflight_run_id);
+                if (run.status === "awaiting_approval") {
+                  needsApproval = true;
+                  break;
+                }
+              } catch { /* ignore */ }
+            }
+          }
+          setApprovalNeeded(needsApproval);
+
+          // If user is on the scheduler page, mark all as seen
+          if (page === "scheduler") {
+            const counts: Record<string, number> = {};
+            for (const t of tasks) counts[t.id] = t.run_count;
+            seenRunCountsRef.current = counts;
+            setSchedulerBadge(0);
+            return;
+          }
+          // Count new runs since last seen
+          let unseen = 0;
+          for (const t of tasks) {
+            const seen = seenRunCountsRef.current[t.id] ?? 0;
+            if (t.run_count > seen) unseen += t.run_count - seen;
+          }
+          setSchedulerBadge(unseen);
+        })
+        .catch(() => {});
+    poll();
+    const id = setInterval(poll, 5_000);
+    return () => clearInterval(id);
+  }, [page]);
 
   const navItems: { id: Page; label: string; icon: typeof MessageSquare }[] = [
     { id: "chat", label: "Chat", icon: MessageSquare },
     { id: "history", label: "History", icon: History },
     { id: "memory", label: "Memory", icon: Brain },
+    { id: "scheduler", label: "Scheduler", icon: Clock },
     { id: "settings", label: "Settings", icon: Cog },
   ];
 
@@ -144,7 +203,7 @@ function AppContent() {
             <button
               key={id}
               onClick={() => setPage(id)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors ${
+              className={`relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors ${
                 page === id
                   ? "bg-blue-600/15 text-blue-400"
                   : "t-muted hover:t-secondary"
@@ -152,6 +211,13 @@ function AppContent() {
             >
               <Icon size={14} />
               <span className="hidden sm:inline">{label}</span>
+              {id === "scheduler" && (schedulerBadge > 0 || approvalNeeded) && (
+                <span className={`absolute -top-1 -right-1.5 flex h-4 min-w-4 px-1 items-center justify-center rounded-full text-[8px] font-bold text-white animate-pulse ${
+                  approvalNeeded ? "bg-amber-500" : "bg-emerald-500"
+                }`}>
+                  {approvalNeeded ? "!" : schedulerBadge > 99 ? "99+" : schedulerBadge}
+                </span>
+              )}
             </button>
           ))}
 
@@ -182,6 +248,7 @@ function AppContent() {
         )}
         {page === "history" && <HistoryPage sessionId={sessionId} />}
         {page === "memory" && <MemoryPage />}
+        {page === "scheduler" && <SchedulerPage />}
         {page === "settings" && (
           <div className="h-full overflow-y-auto">
             <Settings sessionId={sessionId} onResetSession={resetSession} />

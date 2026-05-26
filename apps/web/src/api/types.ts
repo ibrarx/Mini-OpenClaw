@@ -156,3 +156,31 @@ export interface ApiError {
     details?: Record<string, unknown>;
   };
 }
+
+// ── Scheduler ─────────────────────────────────────────
+
+export type ScheduleType = "once" | "interval";
+export type TaskStatus = "active" | "paused" | "completed" | "failed";
+
+export interface ScheduledTask {
+  id: string;
+  workspace_id: string;
+  session_id: string;
+  message: string;
+  schedule_type: ScheduleType;
+  run_at: string | null;
+  interval_seconds: number | null;
+  last_run_at: string | null;
+  next_run_at: string;
+  status: TaskStatus;
+  created_at: string;
+  updated_at: string;
+  run_count: number;
+  max_runs: number;
+  last_run_id: string | null;
+  error: string | null;
+  pre_approved_tools: string[];
+  approve_all_runs: boolean;
+  /** Set when a run is currently in-flight for this task. */
+  inflight_run_id: string | null;
+}

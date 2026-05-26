@@ -308,6 +308,7 @@ class TestOrchestratorReflection:
             use_react=True,
             react_self_reflect=False,
             anthropic_api_key="fake",
+            react_use_goals=False,
         )
         provider = FakeProvider()
         # Queue: react_step returns final_answer immediately
@@ -337,6 +338,7 @@ class TestOrchestratorReflection:
             react_reflect_max_retries=1,
             react_reflect_quality_threshold=0.7,
             anthropic_api_key="fake",
+            react_use_goals=False,
         )
         provider = FakeProvider()
         # react_step → final_answer
@@ -376,6 +378,7 @@ class TestOrchestratorReflection:
             react_reflect_max_retries=1,
             react_reflect_quality_threshold=0.7,
             anthropic_api_key="fake",
+            react_use_goals=False,
         )
         provider = FakeProvider()
         # react_step → final_answer
@@ -426,6 +429,7 @@ class TestOrchestratorReflection:
             react_reflect_max_retries=0,
             react_reflect_quality_threshold=0.7,
             anthropic_api_key="fake",
+            react_use_goals=False,
         )
         provider = FakeProvider()
         # react_step → final_answer
@@ -458,6 +462,7 @@ class TestOrchestratorReflection:
             react_reflect_max_retries=0,
             react_reflect_quality_threshold=0.7,
             anthropic_api_key="fake",
+            react_use_goals=False,
         )
         provider = FakeProvider()
         # react_step → final_answer
@@ -498,6 +503,7 @@ class TestOrchestratorReflection:
             react_reflect_max_retries=0,
             react_reflect_quality_threshold=0.5,
             anthropic_api_key="fake",
+            react_use_goals=False,
         )
         provider = FakeProvider()
         provider.queue({"action": "final_answer", "response": "Answer", "reasoning": "Done"})

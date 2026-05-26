@@ -16,11 +16,13 @@ from .config import get_settings
 from .database import create_tables, get_connection
 from .skills.registry import skill_registry
 from .core.orchestrator import Orchestrator
+from .core.scheduler import TaskScheduler
 from .routes.health import router as health_router
 from .routes.chat import router as chat_router
 from .routes.runs import router as runs_router
 from .routes.memory import router as memory_router
 from .routes.tools import router as tools_router
+from .routes.scheduler import router as scheduler_router
 
 settings = get_settings()
 
@@ -101,7 +103,26 @@ async def lifespan(app: FastAPI):
         memory_count,
     )
 
+    # 8. Start the task scheduler (if enabled)
+    scheduler_task = None
+    if settings.scheduler_enabled:
+        scheduler = TaskScheduler(
+            settings.resolved_database,
+            orchestrator,
+            max_tasks=settings.scheduler_max_tasks,
+        )
+        app.state.scheduler = scheduler
+        orchestrator._scheduler = scheduler  # enables schedule_fn in ToolContext
+        await scheduler.start()
+        logger.info("Task scheduler enabled (max %d tasks)", settings.scheduler_max_tasks)
+    else:
+        logger.info("Task scheduler disabled")
+
     yield
+
+    # Shutdown
+    if settings.scheduler_enabled and hasattr(app.state, "scheduler"):
+        await app.state.scheduler.stop()
 
     logger.info("Mini-OpenClaw shutting down")
 
@@ -132,3 +153,4 @@ app.include_router(chat_router, prefix="/api")
 app.include_router(runs_router, prefix="/api")
 app.include_router(memory_router, prefix="/api")
 app.include_router(tools_router, prefix="/api")
+app.include_router(scheduler_router, prefix="/api")

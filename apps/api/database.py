@@ -108,6 +108,27 @@ CREATE TABLE IF NOT EXISTS tool_manifests (
     output_schema     TEXT NOT NULL DEFAULT '{}',
     registered_at     TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS scheduled_tasks (
+    id                TEXT PRIMARY KEY,
+    workspace_id      TEXT DEFAULT 'default',
+    session_id        TEXT NOT NULL,
+    message           TEXT NOT NULL,
+    schedule_type     TEXT NOT NULL CHECK (schedule_type IN ('once', 'interval')),
+    run_at            TEXT,
+    interval_seconds  INTEGER,
+    last_run_at       TEXT,
+    next_run_at       TEXT NOT NULL,
+    status            TEXT DEFAULT 'active' CHECK (status IN ('active', 'paused', 'completed', 'failed')),
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    run_count         INTEGER DEFAULT 0,
+    max_runs          INTEGER DEFAULT 0,
+    last_run_id       TEXT,
+    error             TEXT,
+    pre_approved_tools TEXT DEFAULT '[]',
+    approve_all_runs  INTEGER DEFAULT 0
+);
 """
 
 
@@ -127,6 +148,9 @@ MIGRATIONS = [
     "ALTER TABLE runs ADD COLUMN parent_run_id TEXT",
     "ALTER TABLE runs ADD COLUMN depth INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE memory_items ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+    # Scheduled tasks — added in feat/scheduled-tasks
+    "ALTER TABLE scheduled_tasks ADD COLUMN pre_approved_tools TEXT DEFAULT '[]'",
+    "ALTER TABLE scheduled_tasks ADD COLUMN approve_all_runs INTEGER DEFAULT 0",
 ]
 
 # ---------------------------------------------------------------------------

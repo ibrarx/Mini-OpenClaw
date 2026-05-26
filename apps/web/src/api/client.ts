@@ -3,7 +3,7 @@
  * All functions match the endpoints defined in 05-api-spec.md.
  */
 
-import type { Run, MemoryItem, MemoryType, ToolManifest } from "./types";
+import type { Run, MemoryItem, MemoryType, ToolManifest, ScheduledTask } from "./types";
 
 const API_BASE = "/api";
 
@@ -159,4 +159,37 @@ export async function getTools(): Promise<ToolManifest[]> {
 
 export async function healthCheck(): Promise<{ status: string }> {
   return apiFetch("/health");
+}
+
+// ── Scheduler ────────────────────────────────────────
+
+export async function getScheduledTasks(
+  workspaceId?: string,
+  status?: string
+): Promise<ScheduledTask[]> {
+  const params = new URLSearchParams();
+  if (workspaceId) params.set("workspace_id", workspaceId);
+  if (status) params.set("status", status);
+  const qs = params.toString();
+  return apiFetch(`/tasks${qs ? `?${qs}` : ""}`);
+}
+
+export async function getScheduledTask(taskId: string): Promise<ScheduledTask> {
+  return apiFetch(`/tasks/${taskId}`);
+}
+
+export async function pauseTask(taskId: string): Promise<ScheduledTask> {
+  return apiFetch(`/tasks/${taskId}/pause`, { method: "POST" });
+}
+
+export async function resumeTask(taskId: string): Promise<ScheduledTask> {
+  return apiFetch(`/tasks/${taskId}/resume`, { method: "POST" });
+}
+
+export async function deleteTask(taskId: string): Promise<{ deleted: boolean }> {
+  return apiFetch(`/tasks/${taskId}`, { method: "DELETE" });
+}
+
+export async function getTaskRuns(taskId: string, limit: number = 5): Promise<Run[]> {
+  return apiFetch(`/tasks/${taskId}/runs?limit=${limit}`);
 }

@@ -128,6 +128,10 @@ class Settings(BaseSettings):
     delegate_max_children: int = 3         # max child runs per parent
     delegate_max_child_iterations: int = 5 # iteration cap per child
 
+    # ----- Task scheduler -----
+    scheduler_enabled: bool = True
+    scheduler_max_tasks: int = 20         # max active scheduled tasks
+
     # ----- Derived -----
     @property
     def temp_dir(self) -> Path:

@@ -94,7 +94,9 @@ class Orchestrator:
             logger.info("Indexed %d memory items into vector store", count)
 
     async def handle_message(self, session_id: str, message: str,
-                              workspace_id: str = "default") -> Run:
+                              workspace_id: str = "default",
+                              is_scheduled: bool = False,
+                              pre_approved_tools: list[str] | None = None) -> Run:
         run_id = f"run_{uuid.uuid4().hex[:12]}"
         now = datetime.now(timezone.utc).isoformat()
         run = Run(run_id=run_id, session_id=session_id, workspace_id=workspace_id,
@@ -104,9 +106,14 @@ class Orchestrator:
         await self._save_run(run)
         await self._store_message(session_id, "user", message, run_id)
         await self._audit.log("run_created", run_id=run_id,
-                               data={"message": message, "session_id": session_id})
+                               data={"message": message, "session_id": session_id,
+                                     "is_scheduled": is_scheduled,
+                                     "pre_approved_tools": pre_approved_tools or []})
         event_emitter.emit(run_id, "run_created")
-        task = asyncio.create_task(self._process_run(run))
+        task = asyncio.create_task(self._process_run(
+            run, is_scheduled=is_scheduled,
+            pre_approved_tools=pre_approved_tools or [],
+        ))
         task.add_done_callback(self._task_done)
         self._pending_tasks.append(task)
         # Clean up finished tasks
@@ -210,6 +217,38 @@ class Orchestrator:
             )
         return delegate_fn
 
+    def _make_schedule_fn(self) -> Any | None:
+        """Create the scheduling callback to pass into ToolContext.
+
+        Returns None if the scheduler is not attached (e.g. child runs or
+        scheduler disabled).
+        """
+        scheduler = getattr(self, "_scheduler", None)
+        if scheduler is None:
+            return None
+
+        async def schedule_fn(
+            session_id: str,
+            message: str,
+            workspace_id: str = "default",
+            delay_minutes: int = 0,
+            interval_minutes: int = 0,
+            max_runs: int = 0,
+            pre_approved_tools: list[str] | None = None,
+            approve_all_runs: bool = False,
+        ):
+            return await scheduler.create_task(
+                session_id=session_id,
+                message=message,
+                workspace_id=workspace_id,
+                delay_minutes=delay_minutes,
+                interval_minutes=interval_minutes,
+                max_runs=max_runs,
+                pre_approved_tools=pre_approved_tools,
+                approve_all_runs=approve_all_runs,
+            )
+        return schedule_fn
+
     async def wait_pending(self) -> None:
         """Await all pending background tasks. Used by tests for clean shutdown."""
         if self._pending_tasks:
@@ -224,7 +263,9 @@ class Orchestrator:
         if exc:
             logger.error("Background run task failed: %s", exc, exc_info=exc)
 
-    async def _process_run(self, run: Run, *, is_child: bool = False) -> None:
+    async def _process_run(self, run: Run, *, is_child: bool = False,
+                            is_scheduled: bool = False,
+                            pre_approved_tools: list[str] | None = None) -> None:
         try:
             if not self._planner:
                 run.status = RunStatus.FAILED
@@ -236,7 +277,10 @@ class Orchestrator:
                 return
 
             if self._settings.use_react:
-                await self._react_loop(run, is_child=is_child)
+                await self._react_loop(
+                    run, is_child=is_child, is_scheduled=is_scheduled,
+                    pre_approved_tools=pre_approved_tools or [],
+                )
             else:
                 await self._plan_and_execute(run)
 
@@ -266,7 +310,9 @@ class Orchestrator:
     # ReAct loop
     # ------------------------------------------------------------------
 
-    async def _react_loop(self, run: Run, *, is_child: bool = False) -> None:
+    async def _react_loop(self, run: Run, *, is_child: bool = False,
+                           is_scheduled: bool = False,
+                           pre_approved_tools: list[str] | None = None) -> None:
         """Iterative ReAct loop: think → act → observe, up to max_iterations.
 
         When ``react_use_goals`` is enabled, generates a goal checklist before
@@ -278,7 +324,15 @@ class Orchestrator:
         - Agent Dreams are skipped
         - Episode storage is skipped
         - delegate_fn is NOT passed to ToolContext (children can't delegate)
+
+        When ``is_scheduled`` is True (scheduler-initiated run):
+        - schedule_fn is NOT passed to ToolContext (no recursive scheduling)
+        - Approval-required tools still go through the normal approval flow
+          (SSE events notify the UI so the user can approve when online)
+        - Tools listed in ``pre_approved_tools`` bypass the approval check
+          (the user pre-approved them at task-creation time)
         """
+        _pre_approved = set(pre_approved_tools or [])
         memory_context = await self._retrieval.get_context_for_planner(
             message=run.user_message, workspace_id=run.workspace_id)
         workspace_info = f"Workspace root: {self._workspace}"
@@ -609,79 +663,104 @@ class Orchestrator:
 
             # APPROVAL CHECK
             if policy_result.classification == "approval_required":
-                # Create a PlanStep for the UI and pause
-                plan_step = PlanStep(
-                    step_id=step_id, tool=tool_name, args=tool_args,
-                    risk_level=manifest.risk_level,
-                    status=StepStatus.AWAITING_APPROVAL, reasoning=reasoning,
-                )
-                run.plan.steps.append(plan_step)
-                run.status = RunStatus.AWAITING_APPROVAL
-                # Store the pending observation (no result yet)
-                pending_obs = Observation(
-                    step_id=step_id, iteration=run.iterations,
-                    tool=tool_name, args=tool_args, reasoning=reasoning,
-                    user_announcement=decision.get("user_announcement", ""),
-                    timestamp=now,
-                    token_estimate=tokens_used, compression_level=compression_level,
-                )
-                run.observations.append(pending_obs)
-                await self._save_run(run)
-                await self._audit.log("approval_requested", run_id=run.run_id,
-                                       step_id=step_id, data={"tool": tool_name})
-                event_emitter.emit(run.run_id, "approval_requested")
-
-                # Wait for user decision
-                approved = await self._wait_for_approval(run.run_id, step_id)
-                logger.info("Run %s step %s: approval=%s", run.run_id, step_id, approved)
-
-                if not approved:
-                    rejected_result = ToolResult(
-                        tool_name=tool_name, status="rejected", input=tool_args,
-                        error="user declined",
+                # Pre-approval bypass: if this tool was pre-approved at
+                # schedule-creation time, skip the interactive approval.
+                if tool_name in _pre_approved:
+                    logger.info(
+                        "Run %s step %s: tool %s pre-approved by scheduler, skipping approval",
+                        run.run_id, step_id, tool_name,
                     )
-                    # Update the pending observation with rejection
-                    run.observations[-1].result = rejected_result
-                    plan_step.status = StepStatus.FAILED
-                    plan_step.result = rejected_result
+                    await self._audit.log(
+                        "approval_pre_approved", run_id=run.run_id,
+                        step_id=step_id,
+                        data={"tool": tool_name, "source": "scheduler_pre_approval"},
+                    )
+                    # Fall through to execution (create PlanStep as auto-execute)
+                    plan_step = PlanStep(
+                        step_id=step_id, tool=tool_name, args=tool_args,
+                        risk_level=manifest.risk_level,
+                        status=StepStatus.RUNNING, reasoning=reasoning,
+                    )
+                    run.plan.steps.append(plan_step)
                     await self._save_run(run)
-                    await self._audit.log("react_user_rejected", run_id=run.run_id,
+                else:
+                    # Normal interactive approval flow
+                    # Create a PlanStep for the UI and pause
+                    plan_step = PlanStep(
+                        step_id=step_id, tool=tool_name, args=tool_args,
+                        risk_level=manifest.risk_level,
+                        status=StepStatus.AWAITING_APPROVAL, reasoning=reasoning,
+                    )
+                    run.plan.steps.append(plan_step)
+                    run.status = RunStatus.AWAITING_APPROVAL
+                    # Store the pending observation (no result yet)
+                    pending_obs = Observation(
+                        step_id=step_id, iteration=run.iterations,
+                        tool=tool_name, args=tool_args, reasoning=reasoning,
+                        user_announcement=decision.get("user_announcement", ""),
+                        timestamp=now,
+                        token_estimate=tokens_used, compression_level=compression_level,
+                    )
+                    run.observations.append(pending_obs)
+                    await self._save_run(run)
+                    await self._audit.log("approval_requested", run_id=run.run_id,
                                            step_id=step_id, data={"tool": tool_name})
+                    event_emitter.emit(run.run_id, "approval_requested")
 
-                    # Saga compensation: undo previously completed mutating steps.
-                    # Without this, the LLM would try to "help" by calling write_file
-                    # with empty content, which is worse than a proper rollback.
-                    compensated = await self._compensate_completed_steps(run)
-
-                    # End the run — don't let the LLM improvise undo actions.
-                    comp_msg = ""
-                    if compensated:
-                        comp_names = [c.tool_name for c in compensated if c.status == "success"]
-                        if comp_names:
-                            comp_msg = (
-                                f" Rolled back {len(comp_names)} previous "
-                                f"step{'s' if len(comp_names) != 1 else ''}: "
-                                f"{', '.join(comp_names)}."
-                            )
-                    run.final_response = (
-                        f"Run stopped: you declined the {tool_name} action "
-                        f"(step {run.iterations}).{comp_msg}"
+                    # Wait for user decision
+                    approval_timeout = 300.0
+                    approved = await self._wait_for_approval(
+                        run.run_id, step_id, timeout=approval_timeout
                     )
-                    run.status = RunStatus.CANCELLED
-                    await self._save_run(run)
-                    if run.final_response:
-                        await self._store_message(
-                            run.session_id, "assistant", run.final_response, run.run_id)
-                    await self._audit.log("run_cancelled", run_id=run.run_id,
-                                           data={"reason": "user_rejected",
-                                                 "compensated": len(compensated)})
-                    event_emitter.emit(run.run_id, "run_cancelled")
-                    return
+                    logger.info("Run %s step %s: approval=%s", run.run_id, step_id, approved)
 
-                # Approved — fall through to execution
-                plan_step.status = StepStatus.RUNNING
-                run.status = RunStatus.REACTING
-                await self._save_run(run)
+                    if not approved:
+                        rejected_result = ToolResult(
+                            tool_name=tool_name, status="rejected", input=tool_args,
+                            error="user declined",
+                        )
+                        # Update the pending observation with rejection
+                        run.observations[-1].result = rejected_result
+                        plan_step.status = StepStatus.FAILED
+                        plan_step.result = rejected_result
+                        await self._save_run(run)
+                        await self._audit.log("react_user_rejected", run_id=run.run_id,
+                                               step_id=step_id, data={"tool": tool_name})
+
+                        # Saga compensation: undo previously completed mutating steps.
+                        # Without this, the LLM would try to "help" by calling write_file
+                        # with empty content, which is worse than a proper rollback.
+                        compensated = await self._compensate_completed_steps(run)
+
+                        # End the run — don't let the LLM improvise undo actions.
+                        comp_msg = ""
+                        if compensated:
+                            comp_names = [c.tool_name for c in compensated if c.status == "success"]
+                            if comp_names:
+                                comp_msg = (
+                                    f" Rolled back {len(comp_names)} previous "
+                                    f"step{'s' if len(comp_names) != 1 else ''}: "
+                                    f"{', '.join(comp_names)}."
+                                )
+                        run.final_response = (
+                            f"Run stopped: you declined the {tool_name} action "
+                            f"(step {run.iterations}).{comp_msg}"
+                        )
+                        run.status = RunStatus.CANCELLED
+                        await self._save_run(run)
+                        if run.final_response:
+                            await self._store_message(
+                                run.session_id, "assistant", run.final_response, run.run_id)
+                        await self._audit.log("run_cancelled", run_id=run.run_id,
+                                               data={"reason": "user_rejected",
+                                                     "compensated": len(compensated)})
+                        event_emitter.emit(run.run_id, "run_cancelled")
+                        return
+
+                    # Approved — fall through to execution
+                    plan_step.status = StepStatus.RUNNING
+                    run.status = RunStatus.REACTING
+                    await self._save_run(run)
             else:
                 # Auto-execute — create a PlanStep for the UI
                 plan_step = PlanStep(
@@ -706,6 +785,7 @@ class Orchestrator:
                 workspace_root=str(self._workspace), run_id=run.run_id,
                 step_id=step_id, db_path=str(self._db_path),
                 delegate_fn=self._make_delegate_fn() if not is_child else None,
+                schedule_fn=self._make_schedule_fn() if not (is_child or is_scheduled) else None,
             )
             result = await self._executor.execute_tool(tool_name, tool_args, context)
 
