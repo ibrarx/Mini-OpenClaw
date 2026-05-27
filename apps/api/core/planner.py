@@ -459,9 +459,29 @@ class Planner:
             valid_actions.add("replan")
 
         action = result.get("action")
+        if isinstance(action, str):
+            # Normalize casing, spaces, and hyphens (e.g., 'Final Answer' -> 'final_answer')
+            normalized = action.lower().strip().replace(" ", "_").replace("-", "_")
+            if normalized in valid_actions:
+                result["action"] = normalized
+                action = normalized
+            elif self._registry and self._registry.get(normalized):
+                result["action"] = normalized
+                action = normalized
+
         # Auto-correct: LLM sometimes puts the tool name as the action
         if action not in valid_actions and self._registry and self._registry.get(action):
             logger.info("Auto-correcting action=%r → tool call", action)
+
+            # 1. Identify which top-level keys are actually tool arguments
+            known_keys = {"action", "tool", "args", "reasoning", "user_announcement", "completed_goals", "skipped_goals"}
+            flat_args = {k: v for k, v in result.items() if k not in known_keys}
+
+            # 2. Populate args with any top-level flat arguments
+            result.setdefault("args", {})
+            result["args"].update(flat_args)
+            
+            # 3. Standardize the action keys
             result["tool"] = action
             result["action"] = "tool"
             action = "tool"

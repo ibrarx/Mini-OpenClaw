@@ -220,6 +220,33 @@ class TestReactStep:
         with pytest.raises(PlannerError, match="connection timeout"):
             await planner.react_step("test", [])
 
+    @pytest.mark.asyncio
+    async def test_action_normalization_handling(self, registry: SkillRegistry) -> None:
+        provider = FakeProvider()
+        planner = Planner(provider=provider, registry=registry)
+        
+        # Test casing and whitespace normalization (e.g. 'Final Answer' -> 'final_answer')
+        provider.queue(_react_json({
+            "action": "Final Answer",
+            "response": "Here is Paris.",
+            "reasoning": "Normalized casing and spacing test",
+        }))
+        result = await planner.react_step(user_message="test casing", observations=[])
+        assert result["action"] == "final_answer"
+        assert result["response"] == "Here is Paris."
+
+        # Test tool casing and hyphen/space/case normalization with flat arguments (e.g. 'list-files' -> 'list_files')
+        provider.queue(_react_json({
+            "action": "list-files",
+            "path": ".",
+            "reasoning": "Normalized tool name test",
+        }))
+        result2 = await planner.react_step(user_message="test tool normalization", observations=[])
+        assert result2["action"] == "tool"
+        assert result2["tool"] == "list_files"
+        assert result2["args"] == {"path": "."}
+
+
 
 # ---------------------------------------------------------------------------
 # Orchestrator ReAct integration tests
