@@ -31,7 +31,8 @@ Key features:
 - **Error classification** — transient errors are retried with backoff, permanent errors go straight to the LLM, side-effect errors are surfaced to the user
 - **Self-reflection quality gate** — optional critique step where the agent scores its own final answer (completeness, accuracy, clarity). When the score is below threshold and iteration budget remains, the agent re-enters the ReAct loop to take corrective action (re-read files, run additional searches, etc.). Falls back to a text-only rewrite if no budget remains. Live "Reviewing…" status and expandable score breakdown in the UI
 - **Retry failed runs** — a one-click retry button appears on failed or cancelled runs, re-submitting the original message without retyping
-- **LLM-provider-agnostic** — swap Claude for Gemini or a local Ollama model (or add your own) without touching core code
+- **Execution graph** — a real-time DAG visualization in the sidebar showing each run's execution flow: start → tool calls → answer. Delegate nodes branch right with always-visible child run cards. Click any node for a detail popover (with pin mode for comparing steps). Click the graph icon on any past message to load its graph. Animated edge draw-in and node fade-in
+- **LLM-provider-agnostic** — swap Claude for Gemini (AI Studio or Vertex AI) or a local Ollama model (or add your own) without touching core code
 - **Manifest-driven tool extensibility** — add a tool without rewriting the core agent loop
 - **Multi-layer security** — policy engine, command allowlists, and approval gates for risky operations
 - **Full audit trail** — every decision logged in an append-only audit table
@@ -42,7 +43,7 @@ Key features:
 - **Node.js 18+** and npm — [nodejs.org](https://nodejs.org/)
 - **An API key from either**:
   - **Anthropic** (default) — [console.anthropic.com](https://console.anthropic.com/), or
-  - **Google Gemini** — [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
+  - **Google Gemini** — [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey), or via **Vertex AI** with GCP credits (see [Switching LLM providers](#switching-llm-providers))
   - **Or no key at all** — use [Ollama](https://ollama.ai) for free local models
 
   See [Switching LLM providers](#switching-llm-providers) below.
@@ -244,6 +245,16 @@ The agent can schedule tasks for future or recurring execution via the `schedule
 38. **Nav badge** — leave the Scheduler page while tasks are running. A green badge appears on the Scheduler tab showing the count of new (unseen) runs. Navigate back → badge clears.
 39. **Delete** — delete a task and verify it disappears from the list.
 
+### Execution graph — visual DAG sidebar
+
+The execution graph renders a real-time directed acyclic graph (DAG) in the right sidebar during and after runs. Each tool call is a node, edges animate in with draw-in effects, and delegate nodes branch visually with inline child run cards.
+
+40. **Run any multi-step query** (e.g., *"Read the README and summarize it"*) — watch the sidebar graph build in real-time: Start → read_file ✓ → Answer ✓ with animated edges between nodes.
+41. **Click any node** in the graph — a popover appears showing tool arguments, result JSON, reasoning, and timing. Click the **pin icon** to keep the popover open while clicking other nodes (for comparing steps).
+42. **Delegation branching** — run *"Search for TODOs and separately summarize the README as independent sub-tasks"* — delegate nodes indent right with a purple left-border, and child run cards render inline showing the sub-agent's observations.
+43. **Past run graphs** — scroll up to a completed message. Click the small **↗ graph** link at the bottom of the message. The sidebar loads that run's execution graph. Click ✕ in the footer to dismiss.
+44. **Error paths** — run something that fails or gets denied. Error nodes show red borders and dashed edges. The graph makes the failure path visually obvious.
+
 ## Execution Modes
 
 ### Hybrid Plan → ReAct → Replan (default)
@@ -405,9 +416,16 @@ LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-...
 # ANTHROPIC_MODEL=claude-sonnet-4-20250514
 
-# OR use Gemini
+# OR use Gemini (AI Studio — API key)
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=AI...
+# GEMINI_MODEL=gemini-2.5-flash
+
+# OR use Gemini (Vertex AI — GCP credits)
+LLM_PROVIDER=gemini
+VERTEX_AI=true
+GCP_PROJECT=your-gcp-project-id
+GCP_LOCATION=us-central1
 # GEMINI_MODEL=gemini-2.5-flash
 
 # OR use Ollama (free, no API key)
@@ -415,6 +433,8 @@ LLM_PROVIDER=ollama
 # OLLAMA_BASE_URL=http://localhost:11434
 # OLLAMA_MODEL=llama3.2
 ```
+
+> **Using GCP credits with Vertex AI:** Vertex AI routes through `aiplatform.googleapis.com` instead of `generativelanguage.googleapis.com`. You need to: (1) run `gcloud auth application-default login`, (2) enable the Vertex AI API: `gcloud services enable aiplatform.googleapis.com --project=YOUR_PROJECT_ID`, and (3) set `VERTEX_AI=true` with your `GCP_PROJECT` in `.env`. The `GEMINI_API_KEY` is ignored in Vertex AI mode.
 
 Restart the backend. Verify with:
 
@@ -609,7 +629,10 @@ All settings are read from the `.env` file (see `.env.example`):
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `ANTHROPIC_API_KEY` | Your Anthropic API key | _(required if using Anthropic)_ |
-| `GEMINI_API_KEY` | Your Google Gemini API key | _(required if using Gemini)_ |
+| `GEMINI_API_KEY` | Your Google Gemini API key | _(required if using Gemini AI Studio)_ |
+| `VERTEX_AI` | Use Vertex AI endpoint instead of AI Studio (requires GCP auth) | `false` |
+| `GCP_PROJECT` | GCP project ID (required when `VERTEX_AI=true`) | _(empty)_ |
+| `GCP_LOCATION` | GCP region for Vertex AI | `us-central1` |
 | `LLM_PROVIDER` | Which LLM backend to use | `anthropic` |
 | `OLLAMA_BASE_URL` | Ollama server URL | `http://localhost:11434` |
 | `OLLAMA_MODEL` | Ollama model to use | `llama3.2` |
@@ -707,6 +730,11 @@ python scripts/export_memory.py
 | Strategies/Preferences tabs are empty | Agent Dreams needs at least 3 episodes and triggers every `DREAM_INTERVAL` runs (default: 5). Click the ✨ Dream button manually, or run more tasks |
 | Dream proposes no insights | Either not enough episodes (minimum 3), or the LLM didn't find patterns above the confidence threshold. Lower `DREAM_CONFIDENCE_THRESHOLD` in `.env` or run more diverse tasks |
 | Frontend won't start | Ensure Node.js 18+ is installed: `node --version` |
+| Sidebar graph is empty | The graph only appears during active runs or when you click the ↗ graph link on a completed message. For direct-answer runs (no tools used), no graph is shown |
+| Graph link not visible on message | The graph link only appears on assistant messages that had a run with tool execution. Hover over the message to see the ↗ graph link |
+| Vertex AI `PERMISSION_DENIED` | Enable the API: `gcloud services enable aiplatform.googleapis.com --project=YOUR_PROJECT`. Wait 1-2 minutes for propagation |
+| Vertex AI `DefaultCredentialsError` | Run `gcloud auth application-default login` and restart the backend |
+| Vertex AI `API_KEY_SERVICE_BLOCKED` | You're using AI Studio mode but the API is blocked on your GCP project. Switch to Vertex AI mode: set `VERTEX_AI=true` with `GCP_PROJECT` in `.env` |
 | Run appears stuck in chat | The SSE stream may have disconnected — click the input and send a new message, or refresh the page. Check that the backend is still running |
 | Retry button doesn't appear | Retry only shows on assistant messages from failed or cancelled runs, and only when no other run is active |
 | Self-check scores seem too harsh | Lower `REACT_REFLECT_QUALITY_THRESHOLD` (e.g. `0.5`) or disable with `REACT_SELF_REFLECT=false` |
@@ -731,7 +759,7 @@ mini-openclaw/
 │   ├── memory/            #   Memory manager, hybrid retrieval, embeddings, vector store, dreamer
 │   └── models/            #   Pydantic models (Run, ToolResult, ScheduledTask, ErrorKind, etc.)
 ├── apps/web/              # React + TypeScript frontend
-│   └── src/components/    #   ChatPanel, PlanPreview, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser, SchedulerPage
+│   └── src/components/    #   ChatPanel, PlanPreview, ExecutionGraph, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser, SchedulerPage
 ├── tests/                 # pytest test suite (367 tests)
 ├── scripts/               # seed_demo.py (workspace + memory setup), export_memory.py
 ├── docs/                  # Architecture and design documentation
