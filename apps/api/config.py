@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     # GOOGLE_API_KEY, but we keep the name explicit for clarity in our .env.
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
+    # Vertex AI mode — use GCP credentials instead of API key.
+    # Set VERTEX_AI=true + GCP_PROJECT + GCP_LOCATION in .env.
+    # Auth: run `gcloud auth application-default login` first.
+    vertex_ai: bool = False
+    gcp_project: str = ""
+    gcp_location: str = "us-central1"
 
     # ----- Ollama (local models) -----
     ollama_base_url: str = "http://localhost:11434"
