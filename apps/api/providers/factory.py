@@ -83,8 +83,12 @@ def build_provider(settings: "Settings") -> "LLMProvider":
         provider = GeminiProvider(
             api_key=settings.gemini_api_key,
             model=settings.gemini_model,
+            vertex_ai=settings.vertex_ai,
+            gcp_project=settings.gcp_project,
+            gcp_location=settings.gcp_location,
         )
-        logger.info("LLM provider: gemini (%s)", settings.gemini_model)
+        mode = "vertex-ai" if settings.vertex_ai else "ai-studio"
+        logger.info("LLM provider: gemini/%s (%s)", mode, settings.gemini_model)
         return provider
 
     if ptype is ProviderType.OLLAMA:

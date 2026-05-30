@@ -43,25 +43,43 @@ logger = logging.getLogger(__name__)
 class GeminiProvider(LLMProvider):
     """Google Gemini provider using ``google-genai`` async client.
 
+    Supports two modes:
+
+    1. **AI Studio** (default): uses an API key from
+       https://aistudio.google.com/app/apikey. Routes through
+       ``generativelanguage.googleapis.com``.
+
+    2. **Vertex AI**: uses GCP Application Default Credentials. Routes
+       through ``{location}-aiplatform.googleapis.com``. Required for
+       GCP billing / credits. Set ``vertex_ai=True`` and provide
+       ``gcp_project`` and ``gcp_location``.
+
     Parameters
     ----------
     api_key : str
-        Gemini Developer API key from https://aistudio.google.com/app/apikey.
+        Gemini Developer API key (AI Studio mode). Ignored when
+        ``vertex_ai=True``.
     model : str
-        Gemini model identifier (e.g. ``gemini-2.5-flash`` or
-        ``gemini-2.5-pro``).
+        Gemini model identifier (e.g. ``gemini-2.5-flash``).
+    vertex_ai : bool
+        If ``True``, use Vertex AI endpoint instead of AI Studio.
+    gcp_project : str
+        GCP project ID (required when ``vertex_ai=True``).
+    gcp_location : str
+        GCP region (default ``us-central1``).
     """
 
     name = "gemini"
 
-    def __init__(self, api_key: str, model: str) -> None:
-        if not api_key:
-            raise ProviderConfigError(
-                "GeminiProvider requires an API key. Set GEMINI_API_KEY in .env."
-            )
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        vertex_ai: bool = False,
+        gcp_project: str = "",
+        gcp_location: str = "us-central1",
+    ) -> None:
         try:
-            # ``google.genai`` is the new unified SDK. The legacy
-            # ``google.generativeai`` package is deprecated and we do NOT use it.
             from google import genai
         except ImportError as exc:
             raise ProviderConfigError(
@@ -69,8 +87,33 @@ class GeminiProvider(LLMProvider):
                 "Run: pip install google-genai"
             ) from exc
 
-        # Construct the client. The async surface is reached via ``.aio``.
-        self._client = genai.Client(api_key=api_key)
+        if vertex_ai:
+            # Vertex AI mode — uses Application Default Credentials.
+            # User must run: gcloud auth application-default login
+            if not gcp_project:
+                raise ProviderConfigError(
+                    "Vertex AI mode requires GCP_PROJECT in .env. "
+                    "Also run: gcloud auth application-default login"
+                )
+            self._client = genai.Client(
+                vertexai=True,
+                project=gcp_project,
+                location=gcp_location,
+            )
+            logger.info(
+                "Gemini: Vertex AI mode (project=%s, location=%s)",
+                gcp_project, gcp_location,
+            )
+        else:
+            # AI Studio mode — uses API key.
+            if not api_key:
+                raise ProviderConfigError(
+                    "GeminiProvider requires an API key. Set GEMINI_API_KEY in .env, "
+                    "or set VERTEX_AI=true with GCP_PROJECT for Vertex AI mode."
+                )
+            self._client = genai.Client(api_key=api_key)
+            logger.info("Gemini: AI Studio mode (api_key)")
+
         self._model = model
 
     # ------------------------------------------------------------------

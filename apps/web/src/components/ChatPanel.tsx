@@ -19,6 +19,8 @@ interface ChatPanelProps {
   onMessagesChange: (msgs: ChatMessage[]) => void;
   /** Called whenever a run updates so the sidebar can reflect it. */
   onRunUpdate?: (run: Run | null) => void;
+  /** Called when user clicks a graph icon on a completed run message. */
+  onSelectRun?: (run: Run) => void;
 }
 
 /** Small retry button shown below failed/cancelled run messages. */
@@ -59,6 +61,7 @@ export default function ChatPanel({
   messages,
   onMessagesChange,
   onRunUpdate,
+  onSelectRun,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
@@ -86,13 +89,13 @@ export default function ChatPanel({
       lastRunRef.current = run.run_id;
 
       if (run.final_response) {
-        addMessage("assistant", run.final_response, run.run_id, run.status);
+        addMessage("assistant", run.final_response, run.run_id, run.status, run);
       } else if (run.plan?.direct_response) {
-        addMessage("assistant", run.plan.direct_response, run.run_id, run.status);
+        addMessage("assistant", run.plan.direct_response, run.run_id, run.status, run);
       } else if (run.status === "failed") {
-        addMessage("assistant", "Run failed. Check the trace for details.", run.run_id, run.status);
+        addMessage("assistant", "Run failed. Check the trace for details.", run.run_id, run.status, run);
       } else if (run.status === "cancelled") {
-        addMessage("assistant", "Run cancelled.", run.run_id, run.status);
+        addMessage("assistant", "Run cancelled.", run.run_id, run.status, run);
       }
 
       setActiveRunId(null);
@@ -114,7 +117,8 @@ export default function ChatPanel({
     role: ChatMessage["role"],
     content: string,
     runId?: string,
-    runStatus?: RunStatus
+    runStatus?: RunStatus,
+    runSnapshot?: Run,
   ) => {
     const msg: ChatMessage = {
       id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -123,6 +127,7 @@ export default function ChatPanel({
       timestamp: new Date().toISOString(),
       run_id: runId,
       run_status: runStatus,
+      run: runSnapshot,
     };
     onMessagesChange([...messages, msg]);
   };
@@ -279,7 +284,14 @@ export default function ChatPanel({
 
         {messages.map((msg) => (
           <div key={msg.id}>
-            <MessageBubble message={msg} />
+            <MessageBubble
+              message={msg}
+              onGraphClick={
+                msg.run && onSelectRun
+                  ? () => onSelectRun(msg.run!)
+                  : undefined
+              }
+            />
             {/* Show retry button on assistant messages from failed/cancelled runs */}
             {msg.role === "assistant" &&
               msg.run_id &&

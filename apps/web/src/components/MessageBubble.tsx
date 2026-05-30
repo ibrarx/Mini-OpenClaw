@@ -1,15 +1,18 @@
 /**
  * MessageBubble — renders a single chat message with theme-aware colors.
+ * Assistant messages with an attached run show a graph icon for sidebar viewing.
  */
 
-import { Bot, User, Info } from "lucide-react";
+import { Bot, User, Info, GitBranch } from "lucide-react";
 import type { ChatMessage } from "../api/types";
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  /** If provided, shows a clickable graph icon on this message. */
+  onGraphClick?: () => void;
 }
 
-export default function MessageBubble({ message }: MessageBubbleProps) {
+export default function MessageBubble({ message, onGraphClick }: MessageBubbleProps) {
   const { role, content, timestamp } = message;
 
   if (role === "system") {
@@ -24,6 +27,7 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
   }
 
   const isUser = role === "user";
+  const hasGraph = !isUser && !!onGraphClick;
 
   return (
     <div
@@ -42,15 +46,28 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
 
       {/* Bubble */}
       <div
-        className={`max-w-[75%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed ${
+        className={`max-w-[75%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed relative ${
           isUser ? "bubble-user" : "bubble-assistant"
-        }`}
+        } ${hasGraph ? "group" : ""}`}
       >
         <div className="whitespace-pre-wrap break-words">{content}</div>
         <div
-          className={`text-[10px] mt-1.5 t-faint ${isUser ? "text-right" : ""}`}
+          className={`text-[10px] mt-1.5 t-faint flex items-center gap-2 ${isUser ? "justify-end" : ""}`}
         >
-          {formatTime(timestamp)}
+          <span>{formatTime(timestamp)}</span>
+          {hasGraph && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onGraphClick();
+              }}
+              className="inline-flex items-center gap-0.5 text-[10px] t-faint hover:text-blue-400 transition-colors opacity-50 group-hover:opacity-100"
+              title="View execution graph"
+            >
+              <GitBranch size={10} />
+              <span>graph</span>
+            </button>
+          )}
         </div>
       </div>
     </div>

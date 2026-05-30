@@ -177,3 +177,9 @@
   0%, 80%, 100% { transform: scale(0); opacity: 0.4; }
   40% { transform: scale(1); opacity: 1; }
 }
+
+/* ── Execution graph animations ────────────────────── */
+@keyframes edgeDrawIn {
+  from { stroke-dashoffset: 32; stroke-dasharray: 32; }
+  to { stroke-dashoffset: 0; }
+}
