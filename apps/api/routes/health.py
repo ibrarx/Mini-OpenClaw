@@ -43,6 +43,17 @@ async def health_check() -> dict:
         if provider_name == "ollama"
         else ("configured" if api_key_configured else "missing")
     )
+    # Mounts configuration
+    mounts_info = [
+        {
+            "name": name,
+            "path": str(path),
+            "read_only": read_only,
+            "exists": path.is_dir(),
+        }
+        for name, (path, read_only) in settings.resolved_mounts.items()
+    ]
+
     return {
         "status": "ok",
         "llm_provider": provider_name,
@@ -59,4 +70,5 @@ async def health_check() -> dict:
         "workspace_root": str(workspace),
         "workspace_exists": workspace.is_dir(),
         "memory_items_count": memory_count,
+        "mounts": mounts_info,
     }

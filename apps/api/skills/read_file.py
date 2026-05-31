@@ -14,7 +14,7 @@ from typing import Any
 
 from apps.api.models.run import ErrorKind, RetryPolicy, RiskLevel
 from apps.api.models.tool_manifest import ToolManifest
-from apps.api.skills.base import BaseTool, ToolContext
+from apps.api.skills.base import BaseTool, ToolContext, resolve_tool_path
 
 # Module-level defaults used when no settings are injected (backward compat)
 DEFAULT_MAX_BATCH = 10
@@ -108,9 +108,12 @@ class ReadFileTool(BaseTool):
         workspace: Path,
         started: str,
     ) -> Any:
-        target = (workspace / file_path).resolve()
+        try:
+            root, target = resolve_tool_path(file_path, context)
+        except ValueError as exc:
+            return self._error(args, str(exc), started, error_kind=ErrorKind.PERMANENT)
 
-        err = self._validate_target(target, file_path, workspace)
+        err = self._validate_target(target, file_path, root)
         if err is not None:
             return self._error(args, err, started, error_kind=ErrorKind.PERMANENT)
 
@@ -169,9 +172,13 @@ class ReadFileTool(BaseTool):
                 errors[file_path] = "Output budget exhausted"
                 continue
 
-            target = (workspace / file_path).resolve()
+            try:
+                root, target = resolve_tool_path(file_path, context)
+            except ValueError as exc:
+                errors[file_path] = str(exc)
+                continue
 
-            err = self._validate_target(target, file_path, workspace)
+            err = self._validate_target(target, file_path, root)
             if err is not None:
                 errors[file_path] = err
                 continue

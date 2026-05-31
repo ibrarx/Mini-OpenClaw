@@ -48,7 +48,7 @@ class Orchestrator:
         self._db_path = settings.resolved_database
         self._workspace = settings.resolved_workspace
         self._audit = AuditLogger(self._db_path)
-        self._policy = PolicyEngine(self._workspace)
+        self._policy = PolicyEngine(self._workspace, settings.resolved_mounts)
         self._executor = Executor(registry, self._audit)
 
         # Memory subsystem: embedding provider + vector store + retrieval + manager
@@ -92,6 +92,29 @@ class Orchestrator:
         count = await self._retrieval.reindex_all(workspace_id="default")
         if count > 0:
             logger.info("Indexed %d memory items into vector store", count)
+
+    def _tool_mounts(self) -> dict[str, tuple[str, bool]]:
+        """Build mounts dict for ToolContext (str paths, not Path objects)."""
+        return {
+            alias: (str(path), read_only)
+            for alias, (path, read_only) in self._settings.resolved_mounts.items()
+        }
+
+    def _build_workspace_info(self) -> str:
+        """Build workspace info string for the planner, including mounts."""
+        info = f"Workspace root: {self._workspace}"
+        mounts = self._settings.resolved_mounts
+        if mounts:
+            info += "\n\nAdditional directories (use 'mountname:path' prefix to access):"
+            for alias, (path, read_only) in mounts.items():
+                flag = " (read-only)" if read_only else ""
+                info += f"\n  - {alias}: → {path}{flag}"
+            info += (
+                "\n\nExamples: read_file(path=\"notes:todo.md\"), "
+                "list_files(path=\"data:.\"), search_in_files(path=\"notes:.\", query=\"TODO\")."
+                "\nPaths WITHOUT a prefix resolve to the primary workspace as usual."
+            )
+        return info
 
     async def handle_message(self, session_id: str, message: str,
                               workspace_id: str = "default",
@@ -335,7 +358,7 @@ class Orchestrator:
         _pre_approved = set(pre_approved_tools or [])
         memory_context = await self._retrieval.get_context_for_planner(
             message=run.user_message, workspace_id=run.workspace_id)
-        workspace_info = f"Workspace root: {self._workspace}"
+        workspace_info = self._build_workspace_info()
 
         # Ensure plan exists for step tracking
         if run.plan is None:
@@ -862,6 +885,7 @@ class Orchestrator:
             context = ToolContext(
                 workspace_root=str(self._workspace), run_id=run.run_id,
                 step_id=step_id, db_path=str(self._db_path),
+                mounts=self._tool_mounts(),
                 delegate_fn=self._make_delegate_fn() if not is_child else None,
                 schedule_fn=self._make_schedule_fn() if not (is_child or is_scheduled) else None,
             )
@@ -1365,6 +1389,7 @@ class Orchestrator:
         context = ToolContext(
             workspace_root=str(self._workspace), run_id=run.run_id,
             step_id="compensation", db_path=str(self._db_path),
+            mounts=self._tool_mounts(),
         )
         results = await self._executor.compensate_steps(run.plan.steps, context)
         for r in results:
@@ -1385,7 +1410,7 @@ class Orchestrator:
         event_emitter.emit(run.run_id, "planning_started")
         plan_dict = await self._planner.create_plan(
             user_message=run.user_message, memory_context=memory_context,
-            workspace_info=f"Workspace root: {self._workspace}")
+            workspace_info=self._build_workspace_info())
         steps = []
         for i, sd in enumerate(plan_dict.get("steps", [])):
             raw_risk = sd.get("risk_level", "safe")
@@ -1470,7 +1495,8 @@ class Orchestrator:
             run.status = RunStatus.RUNNING
             await self._save_run(run)
             context = ToolContext(workspace_root=str(self._workspace), run_id=run.run_id,
-                                   step_id=step.step_id, db_path=str(self._db_path))
+                                   step_id=step.step_id, db_path=str(self._db_path),
+                                   mounts=self._tool_mounts())
             result = await self._executor.execute_tool(step.tool, step.args, context)
             logger.info("Run %s step %s: tool=%s status=%s", run.run_id, step.step_id, step.tool, result.status)
             step.result = result
@@ -1589,7 +1615,8 @@ class Orchestrator:
                 run.status = RunStatus.RUNNING
                 await self._save_run(run)
                 context = ToolContext(workspace_root=str(self._workspace), run_id=run.run_id,
-                                       step_id=step.step_id, db_path=str(self._db_path))
+                                       step_id=step.step_id, db_path=str(self._db_path),
+                                       mounts=self._tool_mounts())
                 result = await self._executor.execute_tool(step.tool, step.args, context)
                 logger.info("Resume run %s step %s: tool=%s status=%s",
                              run.run_id, step.step_id, step.tool, result.status)

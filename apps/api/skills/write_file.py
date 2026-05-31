@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 from apps.api.models.run import ErrorKind, RetryPolicy, RiskLevel
 from apps.api.models.tool_manifest import ToolManifest
-from apps.api.skills.base import BaseTool, ToolContext
+from apps.api.skills.base import BaseTool, ToolContext, resolve_tool_path
 
 
 class WriteFileTool(BaseTool):
@@ -23,12 +23,10 @@ class WriteFileTool(BaseTool):
 
     async def validate(self, args: dict[str, Any], context: ToolContext) -> Any:
         """Pre-flight: check that workspace path is valid."""
-        workspace = Path(context.workspace_root).resolve()
-        target = (workspace / args.get("path", "")).resolve()
         try:
-            target.relative_to(workspace)
-        except ValueError:
-            return self._error(args, f"Path outside workspace: {target}", self._now(),
+            _root, target = resolve_tool_path(args.get("path", ""), context)
+        except ValueError as exc:
+            return self._error(args, str(exc), self._now(),
                                error_kind=ErrorKind.PERMANENT)
         mode = args.get("mode", "create")
         if mode == "overwrite" and not target.exists():
@@ -38,12 +36,10 @@ class WriteFileTool(BaseTool):
 
     async def execute(self, args: dict[str, Any], context: ToolContext) -> Any:
         started = self._now()
-        workspace = Path(context.workspace_root).resolve()
-        target = (workspace / args["path"]).resolve()
         try:
-            target.relative_to(workspace)
-        except ValueError:
-            return self._error(args, f"Path outside workspace: {target}", started,
+            _root, target = resolve_tool_path(args["path"], context)
+        except ValueError as exc:
+            return self._error(args, str(exc), started,
                                error_kind=ErrorKind.PERMANENT)
         mode = args.get("mode", "create")
         content = args.get("content", "")
@@ -74,12 +70,10 @@ class WriteFileTool(BaseTool):
     async def compensate(self, args: dict[str, Any], context: ToolContext, execution_id: str) -> Any:
         """Restore from .bak if overwrite, or delete if create."""
         started = self._now()
-        workspace = Path(context.workspace_root).resolve()
-        target = (workspace / args.get("path", "")).resolve()
         try:
-            target.relative_to(workspace)
+            _root, target = resolve_tool_path(args.get("path", ""), context)
         except ValueError:
-            return self._error(args, f"Compensation failed: path outside workspace", started)
+            return self._error(args, "Compensation failed: path outside workspace", started)
         mode = args.get("mode", "create")
         try:
             if mode == "overwrite":

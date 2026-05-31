@@ -15,6 +15,8 @@ import {
   ChevronDown,
   ChevronRight,
   ShieldCheck,
+  FolderOpen,
+  Lock,
 } from "lucide-react";
 import { getTools, healthCheck, getMemory } from "../api/client";
 import { RiskBadge } from "./PlanPreview";
@@ -37,6 +39,9 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
   const [tools, setTools] = useState<ToolManifest[]>([]);
   const [healthy, setHealthy] = useState<boolean | null>(null);
   const [memoryCounts, setMemoryCounts] = useState<Record<string, number>>({});
+  const [mounts, setMounts] = useState<
+    { name: string; path: string; read_only: boolean; exists: boolean }[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const { theme, setTheme } = useTheme();
 
@@ -48,7 +53,22 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
         getTools(),
         getMemory(),
       ]);
-      setHealthy(h.status === "fulfilled" && h.value.status === "ok");
+      if (h.status === "fulfilled") {
+        const data = h.value as Record<string, unknown>;
+        setHealthy(data.status === "ok");
+        if (Array.isArray(data.mounts)) {
+          setMounts(
+            data.mounts as {
+              name: string;
+              path: string;
+              read_only: boolean;
+              exists: boolean;
+            }[],
+          );
+        }
+      } else {
+        setHealthy(false);
+      }
       setTools(t.status === "fulfilled" ? t.value : []);
 
       if (m.status === "fulfilled") {
@@ -131,6 +151,70 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
           <button onClick={onResetSession} className="btn btn-ghost text-xs">
             Reset
           </button>
+        </div>
+      </Section>
+
+      {/* Directories */}
+      <Section title="Directories">
+        <div className="space-y-2">
+          {/* Primary workspace — prominent */}
+          <div className="card px-3 py-2.5 border-blue-500/30">
+            <div className="flex items-center gap-2">
+              <FolderOpen size={14} className="text-blue-400 flex-shrink-0" />
+              <span className="text-xs font-medium t-secondary flex-1">
+                Primary workspace
+              </span>
+              <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-medium">
+                read &amp; write
+              </span>
+            </div>
+            <code className="block font-mono text-[10px] t-muted mt-1.5 ml-[22px] break-all leading-relaxed">
+              ./workspace
+            </code>
+          </div>
+
+          {/* Mounts */}
+          {mounts.length === 0 ? (
+            <p className="text-xs t-faint italic px-1">
+              No extra mounts. Set WORKSPACE_MOUNTS in .env to add directories.
+            </p>
+          ) : (
+            <>
+              <div className="text-[10px] t-faint uppercase tracking-wider mt-1 mb-0.5 px-1">
+                Mounted directories
+              </div>
+              {mounts.map((m) => (
+                <div key={m.name} className="card px-3 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <FolderOpen size={13} className="t-muted flex-shrink-0" />
+                    <span className="font-mono text-xs t-secondary font-medium">
+                      {m.name}:
+                    </span>
+                    <span className="flex-1" />
+                    {m.read_only ? (
+                      <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-medium">
+                        <Lock size={9} />
+                        read-only
+                      </span>
+                    ) : (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-medium">
+                        read &amp; write
+                      </span>
+                    )}
+                    {!m.exists && (
+                      <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 font-medium">
+                        <XCircle size={9} />
+                        missing
+                      </span>
+                    )}
+                  </div>
+                  <code className="block font-mono text-[10px] t-muted mt-1.5 ml-[21px] break-all leading-relaxed">
+                    {m.path}
+                  </code>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       </Section>
 
