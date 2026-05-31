@@ -100,6 +100,22 @@ class Orchestrator:
             for alias, (path, read_only) in self._settings.resolved_mounts.items()
         }
 
+    def _build_workspace_info(self) -> str:
+        """Build workspace info string for the planner, including mounts."""
+        info = f"Workspace root: {self._workspace}"
+        mounts = self._settings.resolved_mounts
+        if mounts:
+            info += "\n\nAdditional directories (use 'mountname:path' prefix to access):"
+            for alias, (path, read_only) in mounts.items():
+                flag = " (read-only)" if read_only else ""
+                info += f"\n  - {alias}: → {path}{flag}"
+            info += (
+                "\n\nExamples: read_file(path=\"notes:todo.md\"), "
+                "list_files(path=\"data:.\"), search_in_files(path=\"notes:.\", query=\"TODO\")."
+                "\nPaths WITHOUT a prefix resolve to the primary workspace as usual."
+            )
+        return info
+
     async def handle_message(self, session_id: str, message: str,
                               workspace_id: str = "default",
                               is_scheduled: bool = False,
@@ -342,7 +358,7 @@ class Orchestrator:
         _pre_approved = set(pre_approved_tools or [])
         memory_context = await self._retrieval.get_context_for_planner(
             message=run.user_message, workspace_id=run.workspace_id)
-        workspace_info = f"Workspace root: {self._workspace}"
+        workspace_info = self._build_workspace_info()
 
         # Ensure plan exists for step tracking
         if run.plan is None:
@@ -1394,7 +1410,7 @@ class Orchestrator:
         event_emitter.emit(run.run_id, "planning_started")
         plan_dict = await self._planner.create_plan(
             user_message=run.user_message, memory_context=memory_context,
-            workspace_info=f"Workspace root: {self._workspace}")
+            workspace_info=self._build_workspace_info())
         steps = []
         for i, sd in enumerate(plan_dict.get("steps", [])):
             raw_risk = sd.get("risk_level", "safe")
