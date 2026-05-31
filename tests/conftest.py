@@ -29,9 +29,10 @@ def _isolate_from_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
     need a different provider pass it explicitly to Settings(...).
     """
     monkeypatch.setenv("LLM_PROVIDER", "anthropic")
-    # Clear API keys so tests must supply them explicitly
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    # Set API keys to empty so the env var blocks any value in .env.
+    # Using delenv would remove the env var entirely, letting .env leak through.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
 
 
 @pytest.fixture
