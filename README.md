@@ -32,6 +32,7 @@ Key features:
 - **Self-reflection quality gate** — optional critique step where the agent scores its own final answer (completeness, accuracy, clarity). When the score is below threshold and iteration budget remains, the agent re-enters the ReAct loop to take corrective action (re-read files, run additional searches, etc.). Falls back to a text-only rewrite if no budget remains. Live "Reviewing…" status and expandable score breakdown in the UI
 - **Retry failed runs** — a one-click retry button appears on failed or cancelled runs, re-submitting the original message without retyping
 - **Execution graph** — a real-time DAG visualization in the sidebar showing each run's execution flow: start → tool calls → answer. Delegate nodes branch right with always-visible child run cards. Click any node for a detail popover (with pin mode for comparing steps). Click the graph icon on any past message to load its graph. Animated edge draw-in and node fade-in
+- **Run explanations** — "Explain this run" button on any completed run generates a causal narrative tracing user intent → planner reasoning → tool selection → outcomes → reflection. Three detail levels: summary (one-paragraph overview), detailed (per-step reasoning with sections), and debug (includes raw JSON observations and audit events)
 - **LLM-provider-agnostic** — swap Claude for Gemini (AI Studio or Vertex AI) or a local Ollama model (or add your own) without touching core code
 - **Manifest-driven tool extensibility** — add a tool without rewriting the core agent loop
 - **Multi-layer security** — policy engine, command allowlists, and approval gates for risky operations
@@ -254,6 +255,7 @@ The execution graph renders a real-time directed acyclic graph (DAG) in the righ
 42. **Delegation branching** — run *"Search for TODOs and separately summarize the README as independent sub-tasks"* — delegate nodes indent right with a purple left-border, and child run cards render inline showing the sub-agent's observations.
 43. **Past run graphs** — scroll up to a completed message. Click the small **↗ graph** link at the bottom of the message. The sidebar loads that run's execution graph. Click ✕ in the footer to dismiss.
 44. **Error paths** — run something that fails or gets denied. Error nodes show red borders and dashed edges. The graph makes the failure path visually obvious.
+45. **Explain a run** — after any run completes, click **"Explain this run"** at the bottom of the execution graph (or in Run History). A compact summary paragraph appears; switch between **summary**, **detailed**, and **debug** tabs. Also available via `GET /api/runs/{run_id}/explain?detail_level=summary`.
 
 ## Execution Modes
 
@@ -414,7 +416,7 @@ To switch, edit `.env`:
 # Use Anthropic (default)
 LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-...
-# ANTHROPIC_MODEL=claude-sonnet-4-20250514
+# ANTHROPIC_MODEL=claude-sonnet-4-6
 
 # OR use Gemini (AI Studio — API key)
 LLM_PROVIDER=gemini
@@ -638,7 +640,7 @@ All settings are read from the `.env` file (see `.env.example`):
 | `OLLAMA_MODEL` | Ollama model to use | `llama3.2` |
 | `WORKSPACE_ROOT` | Directory the agent operates in | `./workspace` |
 | `DATABASE_PATH` | SQLite database file path | `./mini_openclaw.db` |
-| `ANTHROPIC_MODEL` | Claude model to use | `claude-sonnet-4-20250514` |
+| `ANTHROPIC_MODEL` | Claude model to use | `claude-sonnet-4-6` |
 | `GEMINI_MODEL` | Gemini model to use | `gemini-2.5-flash` |
 | `USE_REACT` | Use iterative ReAct loop (`true`) or legacy plan-and-execute (`false`) | `true` |
 | `REACT_MAX_ITERATIONS` | Maximum think→act→observe iterations per run | `10` |

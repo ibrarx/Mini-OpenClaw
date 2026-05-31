@@ -17,21 +17,23 @@ from apps.api.skills.base import ToolContext
 
 
 @pytest.fixture(autouse=True)
-def _isolate_from_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_from_dotenv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Prevent the local .env file from polluting test Settings.
 
     pydantic-settings reads .env from CWD automatically.  If a developer has
-    e.g. LLM_PROVIDER=ollama in their .env, it overrides the code default
-    inside the test suite, causing spurious failures.
+    e.g. GEMINI_API_KEY=xxx in their .env, it can leak into Settings() because
+    pydantic cannot distinguish ``Settings(field="")`` from ``Settings()``
+    when the default is also ``""``, so the init kwarg doesn't reliably
+    override the .env value.
 
-    Environment variables take precedence over .env values in pydantic-settings,
-    so we set the critical ones to their code defaults.  Individual tests that
-    need a different provider pass it explicitly to Settings(...).
+    Fix: chdir to a temp directory that has no .env file, then also set
+    critical env vars to safe defaults.  monkeypatch restores the original
+    CWD after each test automatically.
     """
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("LLM_PROVIDER", "anthropic")
-    # Clear API keys so tests must supply them explicitly
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
 
 
 @pytest.fixture

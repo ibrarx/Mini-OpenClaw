@@ -66,6 +66,28 @@ async def cancel_run(run_id: str, request: Request) -> dict:
     return run.model_dump()
 
 
+@router.get("/runs/{run_id}/explain")
+async def explain_run(run_id: str, request: Request, detail_level: str = "summary") -> dict:
+    """Generate a causal explanation of why the agent made each decision."""
+    from apps.api.config import get_settings
+    from apps.api.skills.base import ToolContext
+    from apps.api.skills.explain_run import ExplainRunTool
+
+    settings = get_settings()
+    tool = ExplainRunTool()
+    ctx = ToolContext(
+        workspace_root=str(settings.resolved_workspace),
+        run_id=run_id,
+        db_path=str(settings.resolved_database),
+    )
+    result = await tool.execute(
+        {"run_id": run_id, "detail_level": detail_level}, ctx
+    )
+    if result.status == "error":
+        raise HTTPException(status_code=404, detail=result.error or "Unknown error")
+    return result.model_dump()
+
+
 @router.get("/runs/{run_id}/stream")
 async def stream_run(run_id: str, request: Request) -> StreamingResponse:
     """SSE endpoint that streams run status updates in real-time."""

@@ -29,6 +29,7 @@ import {
   X,
 } from "lucide-react";
 import { useChildRunSSE } from "../hooks/useChildRunSSE";
+import ExplainPanel from "./ExplainPanel";
 import type { Run, Observation } from "../api/types";
 
 // ── Types ────────────────────────────────────────────
@@ -561,6 +562,13 @@ export default function ExecutionGraph({ run }: ExecutionGraphProps) {
           </div>
         );
       })}
+
+      {/* Explain button for terminal runs */}
+      {["completed", "failed", "cancelled"].includes(run.status) && (
+        <div className="w-full max-w-[240px] mt-2">
+          <ExplainPanel runId={run.run_id} />
+        </div>
+      )}
     </div>
   );
 }

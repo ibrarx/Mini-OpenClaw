@@ -43,7 +43,7 @@ Set `LLM_PROVIDER` in `.env`:
 # Use Claude
 LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-...
-# ANTHROPIC_MODEL=claude-sonnet-4-20250514   # optional override
+# ANTHROPIC_MODEL=claude-sonnet-4-6   # optional override
 
 # OR use Gemini
 LLM_PROVIDER=gemini

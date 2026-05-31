@@ -91,6 +91,29 @@ export async function cancelRun(runId: string): Promise<void> {
   await apiFetch(`/runs/${runId}/cancel`, { method: "POST" });
 }
 
+export type ExplainDetailLevel = "summary" | "detailed" | "debug";
+
+export interface ExplainResult {
+  tool_name: string;
+  status: string;
+  output: {
+    run_id: string;
+    detail_level: ExplainDetailLevel;
+    status: string;
+    explanation: string;
+  } | null;
+  error: string | null;
+}
+
+export async function explainRun(
+  runId: string,
+  detailLevel: ExplainDetailLevel = "summary"
+): Promise<ExplainResult> {
+  return apiFetch(
+    `/runs/${runId}/explain?detail_level=${encodeURIComponent(detailLevel)}`
+  );
+}
+
 // ── Memory ────────────────────────────────────────────
 
 export async function getMemory(

@@ -43,7 +43,7 @@ class AnthropicProvider(LLMProvider):
     api_key : str
         Anthropic API key. Required and non-empty.
     model : str
-        Claude model identifier (e.g. ``claude-sonnet-4-20250514``).
+        Claude model identifier (e.g. ``claude-sonnet-4-6``).
     """
 
     name = "anthropic"
