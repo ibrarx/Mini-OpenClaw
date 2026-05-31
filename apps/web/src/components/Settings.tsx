@@ -164,7 +164,7 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
               <span className="text-xs font-medium t-secondary flex-1">
                 Primary workspace
               </span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 font-medium">
+              <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-medium">
                 read &amp; write
               </span>
             </div>
@@ -192,12 +192,12 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
                     </span>
                     <span className="flex-1" />
                     {m.read_only ? (
-                      <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-medium">
+                      <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-medium">
                         <Lock size={9} />
                         read-only
                       </span>
                     ) : (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-medium">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-medium">
                         read &amp; write
                       </span>
                     )}
