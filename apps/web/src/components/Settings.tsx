@@ -156,40 +156,64 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
 
       {/* Directories */}
       <Section title="Directories">
-        <div className="space-y-1.5">
-          <div className="card px-2.5 py-2 flex items-center gap-2">
-            <FolderOpen size={12} className="t-muted flex-shrink-0" />
-            <span className="text-xs t-muted">Primary</span>
-            <code className="font-mono text-xs t-secondary flex-1 truncate ml-1">
-              workspace
+        <div className="space-y-2">
+          {/* Primary workspace — prominent */}
+          <div className="card px-3 py-2.5 border-blue-500/30">
+            <div className="flex items-center gap-2">
+              <FolderOpen size={14} className="text-blue-400 flex-shrink-0" />
+              <span className="text-xs font-medium t-secondary flex-1">
+                Primary workspace
+              </span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 font-medium">
+                read &amp; write
+              </span>
+            </div>
+            <code className="block font-mono text-[10px] t-muted mt-1.5 ml-[22px] break-all leading-relaxed">
+              ./workspace
             </code>
           </div>
+
+          {/* Mounts */}
           {mounts.length === 0 ? (
             <p className="text-xs t-faint italic px-1">
-              No extra mounts configured. Set WORKSPACE_MOUNTS in .env to add
-              directories.
+              No extra mounts. Set WORKSPACE_MOUNTS in .env to add directories.
             </p>
           ) : (
-            mounts.map((m) => (
-              <div
-                key={m.name}
-                className="card px-2.5 py-2 flex items-center gap-2"
-              >
-                <FolderOpen size={12} className="t-muted flex-shrink-0" />
-                <span className="font-mono text-xs t-secondary">
-                  {m.name}:
-                </span>
-                <code className="font-mono text-[10px] t-muted flex-1 truncate">
-                  {m.path}
-                </code>
-                {m.read_only && (
-                  <Lock size={10} className="text-amber-400 flex-shrink-0" />
-                )}
-                {!m.exists && (
-                  <XCircle size={10} className="text-red-400 flex-shrink-0" />
-                )}
+            <>
+              <div className="text-[10px] t-faint uppercase tracking-wider mt-1 mb-0.5 px-1">
+                Mounted directories
               </div>
-            ))
+              {mounts.map((m) => (
+                <div key={m.name} className="card px-3 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <FolderOpen size={13} className="t-muted flex-shrink-0" />
+                    <span className="font-mono text-xs t-secondary font-medium">
+                      {m.name}:
+                    </span>
+                    <span className="flex-1" />
+                    {m.read_only ? (
+                      <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-medium">
+                        <Lock size={9} />
+                        read-only
+                      </span>
+                    ) : (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-medium">
+                        read &amp; write
+                      </span>
+                    )}
+                    {!m.exists && (
+                      <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 font-medium">
+                        <XCircle size={9} />
+                        missing
+                      </span>
+                    )}
+                  </div>
+                  <code className="block font-mono text-[10px] t-muted mt-1.5 ml-[21px] break-all leading-relaxed">
+                    {m.path}
+                  </code>
+                </div>
+              ))}
+            </>
           )}
         </div>
       </Section>
