@@ -345,7 +345,7 @@ class TestExplainRun:
 
     @pytest.mark.asyncio
     async def test_summary_level(self):
-        """Summary level produces a shorter explanation."""
+        """Summary level produces a compact narrative paragraph, not sections."""
         run = _make_completed_run()
         await _insert_run(self.db_path, run)
 
@@ -357,12 +357,17 @@ class TestExplainRun:
         assert result.status == "success"
         explanation = result.output["explanation"]
         assert result.output["detail_level"] == "summary"
-        # Summary should be shorter — no debug section, less reasoning
-        assert "## Debug Data" not in explanation
+        # Summary should be a narrative paragraph, NOT sectioned markdown
+        assert "##" not in explanation
+        # Should contain key facts in prose form
+        assert "The user asked" in explanation
+        assert "list_files" in explanation
+        assert "confidence" in explanation.lower()
+        assert "iterations" in explanation.lower()
 
     @pytest.mark.asyncio
     async def test_detailed_level(self):
-        """Detailed level includes reasoning but no debug data."""
+        """Detailed level uses sectioned markdown with per-step reasoning."""
         run = _make_completed_run()
         await _insert_run(self.db_path, run)
 
@@ -374,7 +379,11 @@ class TestExplainRun:
         assert result.status == "success"
         explanation = result.output["explanation"]
         assert "## Debug Data" not in explanation
-        # Detailed should include reasoning
+        # Detailed uses markdown sections (summary does not)
+        assert "## Intent & Context" in explanation
+        assert "## Decision Chain" in explanation
+        assert "## Final Answer" in explanation
+        # Detailed includes per-step reasoning
         assert "Why" in explanation or "reasoning" in explanation.lower()
 
     @pytest.mark.asyncio

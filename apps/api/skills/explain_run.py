@@ -201,6 +201,9 @@ class ExplainRunTool(BaseTool):
         detail_level: str,
     ) -> str:
         """Assemble the markdown explanation from run data."""
+        if detail_level == "summary":
+            return self._build_summary_narrative(run, child_runs)
+
         sections: list[str] = []
 
         sections.append(self._section_intent(run, audit_events, detail_level))
@@ -225,6 +228,84 @@ class ExplainRunTool(BaseTool):
             sections.append(self._section_debug(run, audit_events))
 
         return "\n\n".join(s for s in sections if s)
+
+    # -- Summary narrative (compact paragraph form) --
+
+    def _build_summary_narrative(
+        self, run: Run, child_runs: list[Run]
+    ) -> str:
+        """Build a ~200-word narrative paragraph summarizing the run."""
+        parts: list[str] = []
+
+        # Intent
+        parts.append(f'The user asked: "{run.user_message}".')
+
+        # Planner assessment
+        if run.plan:
+            if run.plan.task_type == "direct_answer":
+                parts.append(
+                    "The planner classified this as a direct knowledge question "
+                    f"(confidence: {run.plan.confidence:.0%}) and answered without "
+                    "using any tools."
+                )
+            else:
+                parts.append(
+                    f"The planner classified this as `{run.plan.task_type}` "
+                    f"(confidence: {run.plan.confidence:.0%})."
+                )
+
+        # Tool usage summary
+        tool_obs = [o for o in run.observations if o.tool is not None]
+        if tool_obs:
+            tool_names = list(dict.fromkeys(o.tool for o in tool_obs))  # unique, ordered
+            successes = sum(1 for o in tool_obs if o.result and o.result.status == "success")
+            errors = sum(1 for o in tool_obs if o.result and o.result.status == "error")
+            denied = sum(1 for o in tool_obs if o.result and o.result.status in ("denied", "rejected"))
+
+            tools_str = ", ".join(f"`{t}`" for t in tool_names)
+            parts.append(f"It used {tools_str} across {len(tool_obs)} step(s).")
+
+            outcome_parts = []
+            if successes:
+                outcome_parts.append(f"{successes} succeeded")
+            if errors:
+                outcome_parts.append(f"{errors} failed")
+            if denied:
+                outcome_parts.append(f"{denied} blocked")
+            if outcome_parts:
+                parts.append(f"Outcomes: {', '.join(outcome_parts)}.")
+
+        # Goals summary
+        if run.plan and run.plan.goals:
+            done = sum(1 for g in run.plan.goals if g.status.value == "done")
+            total = len(run.plan.goals)
+            parts.append(f"Goals: {done}/{total} completed.")
+
+        # Delegation
+        if child_runs:
+            child_statuses = [c.status.value for c in child_runs]
+            parts.append(
+                f"Delegated {len(child_runs)} sub-task(s) "
+                f"({', '.join(child_statuses)})."
+            )
+
+        # Reflection
+        if run.reflection:
+            parts.append(
+                f"Self-reflection scored {run.reflection.overall_score:.0%}."
+            )
+            if run.reflection.improved:
+                parts.append("The answer was rewritten to improve quality.")
+            if run.reflection.reentry:
+                parts.append("The agent re-entered the loop to take corrective action.")
+
+        # Final status
+        parts.append(
+            f"Finished in {run.iterations}/{run.max_iterations} iterations "
+            f"with status: {run.status.value}."
+        )
+
+        return " ".join(parts)
 
     # -- Section 1: Intent & Context --
 
