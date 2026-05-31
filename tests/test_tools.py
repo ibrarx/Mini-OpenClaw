@@ -31,7 +31,7 @@ class TestRegistry:
     def test_all_seven_registered(self) -> None:
         r = SkillRegistry()
         r.discover()
-        assert r.tool_count == 8
+        assert r.tool_count == 7
 
     def test_get_known_tool(self) -> None:
         r = SkillRegistry()
@@ -50,13 +50,13 @@ class TestRegistry:
         names = {m.name for m in manifests}
         assert "list_files" in names
         assert "write_file" in names
-        assert len(manifests) == 8
+        assert len(manifests) == 7
 
     def test_planner_descriptions(self) -> None:
         r = SkillRegistry()
         r.discover()
         descs = r.get_planner_descriptions()
-        assert len(descs) == 8
+        assert len(descs) == 7
         assert all("name" in d and "description" in d for d in descs)
 
 

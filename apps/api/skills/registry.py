@@ -13,13 +13,12 @@ from apps.api.skills.remember_fact import RememberFactTool
 from apps.api.skills.search_memory import SearchMemoryTool
 from apps.api.skills.delegate_task import DelegateTaskTool
 from apps.api.skills.schedule_task import ScheduleTaskTool
-from apps.api.skills.explain_run import ExplainRunTool
 
 logger = logging.getLogger(__name__)
 
 _TOOL_CLASSES: list[type[BaseTool]] = [
     ListFilesTool, ReadFileTool, WriteFileTool, SearchInFilesTool,
-    RunShellSafeTool, RememberFactTool, SearchMemoryTool, ExplainRunTool,
+    RunShellSafeTool, RememberFactTool, SearchMemoryTool,
 ]
 
 # Delegation tool is registered separately — excluded in child runs
