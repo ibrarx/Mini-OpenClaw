@@ -9,12 +9,37 @@ LLM provider selection
 Set ``LLM_PROVIDER`` to one of ``anthropic`` (default) or ``gemini`` to
 choose which backend the planner uses. Each provider has its own
 ``<vendor>_api_key`` and ``<vendor>_model`` settings, all loaded from .env.
-"""
 
+Named mounts
+-------------
+Set ``WORKSPACE_MOUNTS`` to a JSON array to expose extra directories:
+
+    WORKSPACE_MOUNTS='[{"name":"notes","path":"/home/me/notes","read_only":true}]'
+
+Tools address them with a ``name:`` prefix, e.g. ``read_file("notes:todo.md")``.
+Unprefixed paths resolve against the primary ``WORKSPACE_ROOT`` as before.
+"""
+from __future__ import annotations
+
+import re
 import tempfile
 from pathlib import Path
 
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# ── Named mount configuration ──────────────────────────────────
+
+_MOUNT_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
+_RESERVED_NAMES = frozenset({"workspace", "system", "root", "self"})
+
+
+class MountConfig(BaseModel):
+    """A named secondary directory the agent can access."""
+    name: str          # alias used in paths, e.g. "notes"
+    path: Path         # absolute or relative directory
+    read_only: bool = False
 
 
 class Settings(BaseSettings):
@@ -55,6 +80,10 @@ class Settings(BaseSettings):
     workspace_root: Path = Path("./workspace")
     database_path: Path = Path("./mini_openclaw.db")
 
+    # Named mounts — JSON-encoded list of MountConfig objects from env.
+    # Example: WORKSPACE_MOUNTS='[{"name":"notes","path":"/tmp/notes"}]'
+    workspace_mounts: list[MountConfig] = []
+
     # ----- Server -----
     backend_port: int = 8000
     frontend_port: int = 5173
@@ -87,6 +116,23 @@ class Settings(BaseSettings):
         # Budget warning percentage: 10..80
         pct = max(10, min(80, self.react_budget_warn_pct))
         object.__setattr__(self, "react_budget_warn_pct", pct)
+
+        # Validate workspace mount names
+        seen: set[str] = set()
+        for mount in self.workspace_mounts:
+            name = mount.name
+            if not name or not _MOUNT_NAME_RE.match(name):
+                raise ValueError(
+                    f"Mount name must be non-empty, alphanumeric/underscore only: {name!r}"
+                )
+            if name.lower() in _RESERVED_NAMES:
+                raise ValueError(
+                    f"Mount name {name!r} is reserved (cannot use: {', '.join(sorted(_RESERVED_NAMES))})"
+                )
+            if name in seen:
+                raise ValueError(f"Duplicate mount name: {name!r}")
+            seen.add(name)
+
         return self
 
     # ----- Tool limits -----
@@ -154,6 +200,14 @@ class Settings(BaseSettings):
     def resolved_database(self) -> Path:
         """Database path resolved to an absolute path."""
         return self.database_path.resolve()
+
+    @property
+    def resolved_mounts(self) -> dict[str, tuple[Path, bool]]:
+        """alias -> (resolved_absolute_path, read_only)."""
+        out: dict[str, tuple[Path, bool]] = {}
+        for m in self.workspace_mounts:
+            out[m.name] = (m.path.resolve(), m.read_only)
+        return out
 
     @property
     def active_provider_key(self) -> str:

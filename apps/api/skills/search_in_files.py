@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 from apps.api.models.run import ErrorKind, RetryPolicy, RiskLevel
 from apps.api.models.tool_manifest import ToolManifest
-from apps.api.skills.base import BaseTool, ToolContext
+from apps.api.skills.base import BaseTool, ToolContext, resolve_tool_path
 
 class SearchInFilesTool(BaseTool):
     def manifest(self) -> ToolManifest:
@@ -21,12 +21,10 @@ class SearchInFilesTool(BaseTool):
 
     async def execute(self, args: dict[str, Any], context: ToolContext) -> Any:
         started = self._now()
-        workspace = Path(context.workspace_root).resolve()
-        target = (workspace / args["path"]).resolve()
         try:
-            target.relative_to(workspace)
-        except ValueError:
-            return self._error(args, f"Path outside workspace: {target}", started)
+            root, target = resolve_tool_path(args["path"], context)
+        except ValueError as exc:
+            return self._error(args, str(exc), started)
         if not target.exists():
             return self._error(args, f"Path does not exist: {args['path']}", started)
         query = args["query"].lower()
@@ -36,7 +34,7 @@ class SearchInFilesTool(BaseTool):
         for fpath in files:
             if not fpath.is_file(): continue
             try:
-                fpath.relative_to(workspace)
+                fpath.relative_to(root)
             except ValueError:
                 continue
             try:
@@ -45,7 +43,7 @@ class SearchInFilesTool(BaseTool):
                 continue
             for ln, line in enumerate(text.splitlines(), 1):
                 if query in line.lower():
-                    matches.append({"file": str(fpath.relative_to(workspace)), "line": ln, "content": line.strip()[:200]})
+                    matches.append({"file": str(fpath.relative_to(root)), "line": ln, "content": line.strip()[:200]})
                     if len(matches) >= 100: break
             if len(matches) >= 100: break
         return self._success(args, {"query": args["query"], "matches": matches,

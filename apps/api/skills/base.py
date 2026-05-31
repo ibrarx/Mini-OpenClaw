@@ -1,7 +1,9 @@
 """skills/base — Abstract base class for all tools."""
 from __future__ import annotations
 import abc
+import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Coroutine
 from pydantic import BaseModel
 from apps.api.models.run import ErrorKind, RetryPolicy, RiskLevel, ToolResult
@@ -19,6 +21,7 @@ ScheduleFn = Callable[..., Coroutine[Any, Any, Any]]
 class ToolContext(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
     workspace_root: str
+    mounts: dict[str, tuple[str, bool]] = {}   # alias -> (abs_path, read_only)
     run_id: str = ""
     step_id: str = ""
     db_path: str = ""
@@ -75,3 +78,31 @@ class BaseTool(abc.ABC):
     @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
+
+
+def resolve_tool_path(path: str, context: ToolContext) -> tuple[Path, Path]:
+    """Resolve a (possibly mount-prefixed) path against the correct root.
+
+    Returns ``(root, resolved_target)`` where *root* is the workspace or
+    mount directory the path belongs to.  Raises ``ValueError`` if the
+    alias is unknown or the resolved target escapes the root.
+    """
+    _PREFIX = re.compile(r"^(?P<alias>[A-Za-z0-9_]+):(?P<rest>.*)$")
+
+    workspace = Path(context.workspace_root).resolve()
+    m = _PREFIX.match(path)
+    if m:
+        alias = m.group("alias")
+        rest = m.group("rest")
+        if alias in context.mounts:
+            mount_path_str, _read_only = context.mounts[alias]
+            root = Path(mount_path_str).resolve()
+            target = (root / rest).resolve()
+            # Containment check
+            target.relative_to(root)
+            return root, target
+        raise ValueError(f"Unknown mount alias: {alias!r}")
+
+    target = (workspace / path).resolve()
+    target.relative_to(workspace)
+    return workspace, target

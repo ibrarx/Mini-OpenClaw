@@ -6,7 +6,7 @@ from typing import Any
 from apps.api.models.run import ErrorKind, RetryPolicy, RiskLevel
 from apps.api.models.tool_manifest import ToolManifest
 from apps.api.platform_utils import IS_WINDOWS, get_shell_allowlist
-from apps.api.skills.base import BaseTool, ToolContext
+from apps.api.skills.base import BaseTool, ToolContext, resolve_tool_path
 
 logger = logging.getLogger(__name__)
 
@@ -26,17 +26,16 @@ class RunShellSafeTool(BaseTool):
 
     async def execute(self, args: dict[str, Any], context: ToolContext) -> Any:
         started = self._now()
-        workspace = Path(context.workspace_root).resolve()
         command = args["command"]
         cmd_args: list[str] = args.get("args", [])
-        cwd = (workspace / args.get("cwd", ".")).resolve()
+        cwd_arg = args.get("cwd", ".")
         try:
-            cwd.relative_to(workspace)
-        except ValueError:
-            return self._error(args, f"Working directory outside workspace: {cwd}", started,
+            _root, cwd = resolve_tool_path(cwd_arg, context)
+        except ValueError as exc:
+            return self._error(args, f"Working directory error: {exc}", started,
                                error_kind=ErrorKind.PERMANENT)
         if not cwd.is_dir():
-            return self._error(args, f"Working directory not found: {args.get('cwd','.')}", started,
+            return self._error(args, f"Working directory not found: {cwd_arg}", started,
                                error_kind=ErrorKind.PERMANENT)
         allowlist = get_shell_allowlist()
         if command not in allowlist:

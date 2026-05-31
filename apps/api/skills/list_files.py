@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 from apps.api.models.run import ErrorKind, RetryPolicy, RiskLevel
 from apps.api.models.tool_manifest import ToolManifest
-from apps.api.skills.base import BaseTool, ToolContext
+from apps.api.skills.base import BaseTool, ToolContext, resolve_tool_path
 
 class ListFilesTool(BaseTool):
     def manifest(self) -> ToolManifest:
@@ -20,12 +20,10 @@ class ListFilesTool(BaseTool):
 
     async def execute(self, args: dict[str, Any], context: ToolContext) -> Any:
         started = self._now()
-        workspace = Path(context.workspace_root).resolve()
-        target = (workspace / args["path"]).resolve()
         try:
-            target.relative_to(workspace)
-        except ValueError:
-            return self._error(args, f"Path outside workspace: {target}", started)
+            root, target = resolve_tool_path(args["path"], context)
+        except ValueError as exc:
+            return self._error(args, str(exc), started)
         if not target.exists():
             return self._error(args, f"Path does not exist: {args['path']}", started)
         if not target.is_dir():
@@ -35,11 +33,11 @@ class ListFilesTool(BaseTool):
         max_depth = args.get("max_depth", 2)
         entries = []
         if recursive:
-            entries = self._walk(target, workspace, max_depth, 0)
+            entries = self._walk(target, root, max_depth, 0)
         else:
             for item in sorted(target.iterdir()):
                 kind = "directory" if item.is_dir() else "file"
-                entries.append({"name": item.name, "path": str(item.relative_to(workspace)), "kind": kind})
+                entries.append({"name": item.name, "path": str(item.relative_to(root)), "kind": kind})
         return self._success(args, {"path": args["path"], "entries": entries}, started)
 
     def _walk(self, d: Path, ws: Path, max_d: int, cur: int) -> list[dict[str, str]]:
