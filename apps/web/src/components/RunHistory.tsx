@@ -16,6 +16,7 @@ import {
 import { getRuns } from "../api/client";
 import PlanPreview from "./PlanPreview";
 import ToolTrace from "./ToolTrace";
+import ExplainPanel from "./ExplainPanel";
 import type { Run, RunStatus } from "../api/types";
 
 interface RunHistoryProps {
@@ -147,6 +148,11 @@ function RunRow({ run, expanded, onToggle }: { run: Run; expanded: boolean; onTo
           )}
           {!run.plan && !run.final_response && (
             <p className="text-xs t-faint italic">No plan data</p>
+          )}
+
+          {/* Explain button for completed/failed/cancelled runs */}
+          {["completed", "failed", "cancelled"].includes(run.status) && (
+            <ExplainPanel runId={run.run_id} />
           )}
         </div>
       )}
