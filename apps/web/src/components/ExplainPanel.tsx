@@ -21,7 +21,7 @@ export default function ExplainPanel({ runId, compact = false }: ExplainPanelPro
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [explanation, setExplanation] = useState<string | null>(null);
-  const [detailLevel, setDetailLevel] = useState<ExplainDetailLevel>("detailed");
+  const [detailLevel, setDetailLevel] = useState<ExplainDetailLevel>("summary");
 
   const fetchExplanation = useCallback(
     async (level: ExplainDetailLevel) => {

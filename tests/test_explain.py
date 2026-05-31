@@ -189,7 +189,7 @@ class TestExplainRun:
         await _insert_run(self.db_path, run)
 
         tool = ExplainRunTool()
-        result = await tool.execute({"run_id": run.run_id}, self._tool_ctx())
+        result = await tool.execute({"run_id": run.run_id, "detail_level": "detailed"}, self._tool_ctx())
 
         assert result.status == "success"
         explanation = result.output["explanation"]
@@ -218,7 +218,7 @@ class TestExplainRun:
         await _insert_run(self.db_path, run)
 
         tool = ExplainRunTool()
-        result = await tool.execute({"run_id": run.run_id}, self._tool_ctx())
+        result = await tool.execute({"run_id": run.run_id, "detail_level": "detailed"}, self._tool_ctx())
 
         assert result.status == "success"
         explanation = result.output["explanation"]
@@ -242,7 +242,7 @@ class TestExplainRun:
         await _insert_run(self.db_path, child)
 
         tool = ExplainRunTool()
-        result = await tool.execute({"run_id": "run_parent"}, self._tool_ctx())
+        result = await tool.execute({"run_id": "run_parent", "detail_level": "detailed"}, self._tool_ctx())
 
         assert result.status == "success"
         explanation = result.output["explanation"]
@@ -281,7 +281,7 @@ class TestExplainRun:
         await _insert_run(self.db_path, run)
 
         tool = ExplainRunTool()
-        result = await tool.execute({"run_id": run.run_id}, self._tool_ctx())
+        result = await tool.execute({"run_id": run.run_id, "detail_level": "detailed"}, self._tool_ctx())
 
         assert result.status == "success"
         explanation = result.output["explanation"]
@@ -426,7 +426,7 @@ class TestExplainRun:
         await _insert_run(self.db_path, run)
 
         tool = ExplainRunTool()
-        result = await tool.execute({"run_id": run.run_id}, self._tool_ctx())
+        result = await tool.execute({"run_id": run.run_id, "detail_level": "detailed"}, self._tool_ctx())
 
         assert result.status == "success"
         explanation = result.output["explanation"]
@@ -441,7 +441,7 @@ class TestExplainRun:
         await _insert_run(self.db_path, run)
 
         tool = ExplainRunTool()
-        result = await tool.execute({"run_id": run.run_id}, self._tool_ctx())
+        result = await tool.execute({"run_id": run.run_id, "detail_level": "detailed"}, self._tool_ctx())
 
         assert result.status == "success"
         explanation = result.output["explanation"]
@@ -456,7 +456,7 @@ class TestExplainRun:
         await _insert_run(self.db_path, run)
 
         tool = ExplainRunTool()
-        result = await tool.execute({"run_id": run.run_id}, self._tool_ctx())
+        result = await tool.execute({"run_id": run.run_id, "detail_level": "detailed"}, self._tool_ctx())
 
         assert result.status == "success"
         explanation = result.output["explanation"]
@@ -528,7 +528,7 @@ class TestExplainRun:
         await _insert_run(self.db_path, run)
 
         tool = ExplainRunTool()
-        result = await tool.execute({"run_id": run.run_id}, self._tool_ctx())
+        result = await tool.execute({"run_id": run.run_id, "detail_level": "detailed"}, self._tool_ctx())
 
         assert result.status == "success"
         explanation = result.output["explanation"]
@@ -577,7 +577,7 @@ class TestExplainRun:
         )
 
         tool = ExplainRunTool()
-        result = await tool.execute({"run_id": run.run_id}, self._tool_ctx())
+        result = await tool.execute({"run_id": run.run_id, "detail_level": "detailed"}, self._tool_ctx())
 
         assert result.status == "success"
         explanation = result.output["explanation"]

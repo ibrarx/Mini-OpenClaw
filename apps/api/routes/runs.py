@@ -67,7 +67,7 @@ async def cancel_run(run_id: str, request: Request) -> dict:
 
 
 @router.get("/runs/{run_id}/explain")
-async def explain_run(run_id: str, request: Request, detail_level: str = "detailed") -> dict:
+async def explain_run(run_id: str, request: Request, detail_level: str = "summary") -> dict:
     """Generate a causal explanation of why the agent made each decision."""
     from apps.api.config import get_settings
     from apps.api.skills.base import ToolContext

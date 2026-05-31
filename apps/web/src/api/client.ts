@@ -107,7 +107,7 @@ export interface ExplainResult {
 
 export async function explainRun(
   runId: string,
-  detailLevel: ExplainDetailLevel = "detailed"
+  detailLevel: ExplainDetailLevel = "summary"
 ): Promise<ExplainResult> {
   return apiFetch(
     `/runs/${runId}/explain?detail_level=${encodeURIComponent(detailLevel)}`

@@ -66,13 +66,13 @@ class ExplainRunTool(BaseTool):
         """Build a causal explanation for the given run."""
         started = self._now()
         run_id: str = args.get("run_id", "")
-        detail_level: str = args.get("detail_level", "detailed")
+        detail_level: str = args.get("detail_level", "summary")
 
         if not run_id.strip():
             return self._error(args, "run_id is required", started)
 
         if detail_level not in ("summary", "detailed", "debug"):
-            detail_level = "detailed"
+            detail_level = "summary"
 
         db_path = context.db_path
         if not db_path:
