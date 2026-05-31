@@ -36,6 +36,7 @@ Key features:
 - **LLM-provider-agnostic** — swap Claude for Gemini (AI Studio or Vertex AI) or a local Ollama model (or add your own) without touching core code
 - **Manifest-driven tool extensibility** — add a tool without rewriting the core agent loop
 - **Multi-layer security** — policy engine, command allowlists, and approval gates for risky operations
+- **Named directory mounts** — configure multiple directories beyond the primary workspace, each with optional read-only enforcement. Tools address mounts with a `name:path` prefix (e.g., `read_file("notes:todo.md")`). The Settings page shows all mounts with access badges
 - **Full audit trail** — every decision logged in an append-only audit table
 
 ## Prerequisites
@@ -614,6 +615,56 @@ This context is injected into the LLM system prompt with explicit instructions t
 
 All proposed actions pass through a four-layer security model: (1) the planner may only reference registered tools with validated JSON schemas, (2) the policy engine enforces workspace path boundaries and shell command allowlists, (3) risky actions require explicit user approval tied to the exact step payload, and (4) an append-only audit log records every decision for post-hoc inspection. See [docs/threat-model.md](docs/threat-model.md) for the full threat model.
 
+## Named Directory Mounts
+
+By default the agent can only operate inside the primary `WORKSPACE_ROOT`. Named mounts let you expose additional directories — your codebase, a Google Drive folder, a shared dataset — without moving files into the workspace.
+
+### Configuration
+
+Add a `WORKSPACE_MOUNTS` line to `.env` with a JSON array. Each entry has a `name` (alphanumeric/underscore), a `path`, and an optional `read_only` flag:
+
+```dotenv
+WORKSPACE_MOUNTS=[{"name":"codebase","path":"D:/Projects/MyApp","read_only":true},{"name":"notes","path":"C:/Users/Me/notes","read_only":false}]
+```
+
+Use forward slashes in paths — Python handles them on all platforms. Mount names must be alphanumeric/underscore only (no spaces, no colons).
+
+### How it works
+
+Tools address mounts with a `name:path` prefix. Unprefixed paths resolve against the primary workspace as before:
+
+| Path argument | Resolves to |
+|---|---|
+| `README.md` | `<workspace>/README.md` (primary) |
+| `codebase:src/main.py` | `D:/Projects/MyApp/src/main.py` (mount) |
+| `notes:todo.md` | `C:/Users/Me/notes/todo.md` (mount) |
+| `notes:.` | Root of the notes mount |
+
+The planner is told about available mounts and their access level, so natural-language requests like *"search my notes for TODO"* automatically route to the correct mount.
+
+### Security
+
+- **Path traversal blocked** — `notes:../../etc/passwd` is rejected after alias resolution. The containment check runs against the mount root, not the primary workspace.
+- **Read-only enforcement** — writes to a read-only mount are forbidden at the policy layer. The tool never executes — no approval card appears.
+- **Unknown alias = forbidden** — `bogus:file.txt` is rejected (colon is invalid in filenames on Windows and unusual on Unix).
+
+### Settings UI
+
+The Settings page shows all directories with color-coded access badges:
+
+- **Green** `read-only` — safe, no write risk (consistent with `safe` tool badges)
+- **Amber** `read & write` — elevated risk (consistent with `medium` tool badges)
+- **Red** `missing` — directory does not exist on disk
+
+### Demo commands
+
+After configuring mounts, try:
+
+46. **"List files in the codebase"** — `list_files(path="codebase:.")`, auto-executes
+47. **"Search for TODO in my notes"** — `search_in_files(path="notes:.", query="TODO")`
+48. **"Read the README from codebase and write a summary to notes"** — cross-directory workflow: reads from read-only mount, writes to writable mount (approval required)
+49. **"Create a file in the codebase directory"** — blocked: mount is read-only. Policy denies without showing an approval card
+
 ## Adding a New Tool
 
 1. Create a new Python file in `apps/api/skills/` (e.g., `my_tool.py`)
@@ -639,6 +690,7 @@ All settings are read from the `.env` file (see `.env.example`):
 | `OLLAMA_BASE_URL` | Ollama server URL | `http://localhost:11434` |
 | `OLLAMA_MODEL` | Ollama model to use | `llama3.2` |
 | `WORKSPACE_ROOT` | Directory the agent operates in | `./workspace` |
+| `WORKSPACE_MOUNTS` | JSON array of named secondary directories (see [Named mounts](#named-directory-mounts)) | `[]` |
 | `DATABASE_PATH` | SQLite database file path | `./mini_openclaw.db` |
 | `ANTHROPIC_MODEL` | Claude model to use | `claude-sonnet-4-6` |
 | `GEMINI_MODEL` | Gemini model to use | `gemini-2.5-flash` |
@@ -692,6 +744,7 @@ The test suite covers:
 | `test_policy.py` | Path validation, shell blocking, injection detection, risk classification | 38 |
 | `test_providers.py` | Anthropic/Gemini/Ollama provider translation, factory, JSON extraction | 48 |
 | `test_tools.py` | Each V1 tool in isolation (including batch read_file) | 42 |
+| `test_mounts.py` | Named mounts: config validation, policy resolution, per-mount read-only, tool-level path handling, traversal blocking, backward compatibility | 33 |
 | `test_react.py` | ReAct loop, hybrid Plan-ReAct, goal tracking, replanning, saga compensation, error classification, loop detection, approval flow, batch reads, budget awareness, graceful max-iterations degradation | 63 |
 | `test_reflection.py` | Self-reflection critique, loop re-entry on low score, text-rewrite fallback when no budget, quality scoring, flag gating, graceful failure, DB persistence | 18 |
 | `test_planner.py` | Plan parsing, provider error handling, summary generation | 13 |
@@ -723,6 +776,11 @@ python scripts/export_memory.py
 | `Model 'X' not found` (Ollama) | Pull the model first: `ollama pull X` |
 | Ollama response is slow | First call loads the model into memory — subsequent calls are faster. Try a smaller model like `phi3` |
 | `CORS error in browser` | Ensure the backend is running on port 8000 |
+| `python-dotenv could not parse statement` | Check `WORKSPACE_MOUNTS` in `.env`: use forward slashes in paths, no spaces in mount names, no trailing characters after the JSON array |
+| Mount shows `missing` badge in Settings | The path in `WORKSPACE_MOUNTS` doesn't exist on disk. Create the directory or fix the path |
+| Agent doesn't use mount prefix | The planner may not recognize the mount name from natural language. Be explicit: *"read notes:todo.md"* or *"list files in the notes directory"* |
+| `Duplicate mount name` error on startup | Two entries in `WORKSPACE_MOUNTS` have the same name — each must be unique |
+| `Mount name is reserved` error | Names `workspace`, `system`, `root`, `self` are reserved — choose a different name |
 | `No tools registered` | Check `apps/api/skills/` for import errors — run `python -c "from apps.api.skills.registry import SkillRegistry"` |
 | `Database locked` | Close other server instances accessing the same `.db` file |
 | `ModuleNotFoundError` | Ensure you installed deps: `pip install -r requirements.txt` |
@@ -762,7 +820,7 @@ mini-openclaw/
 │   └── models/            #   Pydantic models (Run, ToolResult, ScheduledTask, ErrorKind, etc.)
 ├── apps/web/              # React + TypeScript frontend
 │   └── src/components/    #   ChatPanel, PlanPreview, ExecutionGraph, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser, SchedulerPage
-├── tests/                 # pytest test suite (367 tests)
+├── tests/                 # pytest test suite (417 tests)
 ├── scripts/               # seed_demo.py (workspace + memory setup), export_memory.py
 ├── docs/                  # Architecture and design documentation
 └── requirements.txt       # Python dependencies
