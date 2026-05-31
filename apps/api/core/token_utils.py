@@ -13,7 +13,8 @@ def estimate_tokens(text: str) -> int:
 # Context window sizes by model family
 MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     # Anthropic
-    "claude-sonnet-4-20250514": 200_000,
+    "claude-sonnet-4-6": 200_000,
+    "claude-sonnet-4-20250514": 200_000,  # deprecated, kept for existing runs
     "claude-haiku-3.5-20241022": 200_000,
     # Gemini
     "gemini-2.5-flash": 1_000_000,
@@ -34,12 +35,12 @@ def get_context_window(model: str) -> int:
     """Return the context window size for a model.
 
     Tries exact match first, then prefix match (e.g. "claude-sonnet-4"
-    matches "claude-sonnet-4-20250514").
+    matches "claude-sonnet-4-6").
     """
     # Exact match first
     if model in MODEL_CONTEXT_WINDOWS:
         return MODEL_CONTEXT_WINDOWS[model]
-    # Prefix match (e.g., "claude-sonnet-4" matches "claude-sonnet-4-20250514")
+    # Prefix match (e.g., "claude-sonnet-4" matches "claude-sonnet-4-6")
     for key, value in MODEL_CONTEXT_WINDOWS.items():
         if model.startswith(key.rsplit("-", 1)[0]):
             return value

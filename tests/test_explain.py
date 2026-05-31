@@ -156,7 +156,7 @@ def _make_completed_run(
         iterations=1,
         max_iterations=10,
         observations=observations,
-        model_name="claude-sonnet-4-20250514",
+        model_name="claude-sonnet-4-6",
         reflection=reflection,
         parent_run_id=parent_run_id,
         depth=depth,

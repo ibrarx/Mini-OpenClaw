@@ -33,7 +33,7 @@ class Settings(BaseSettings):
 
     # ----- Anthropic -----
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-4-20250514"
+    anthropic_model: str = "claude-sonnet-4-6"
 
     # ----- Gemini -----
     # GEMINI_API_KEY is read directly. The google-genai SDK also recognises

@@ -414,7 +414,7 @@ To switch, edit `.env`:
 # Use Anthropic (default)
 LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-...
-# ANTHROPIC_MODEL=claude-sonnet-4-20250514
+# ANTHROPIC_MODEL=claude-sonnet-4-6
 
 # OR use Gemini (AI Studio — API key)
 LLM_PROVIDER=gemini
@@ -638,7 +638,7 @@ All settings are read from the `.env` file (see `.env.example`):
 | `OLLAMA_MODEL` | Ollama model to use | `llama3.2` |
 | `WORKSPACE_ROOT` | Directory the agent operates in | `./workspace` |
 | `DATABASE_PATH` | SQLite database file path | `./mini_openclaw.db` |
-| `ANTHROPIC_MODEL` | Claude model to use | `claude-sonnet-4-20250514` |
+| `ANTHROPIC_MODEL` | Claude model to use | `claude-sonnet-4-6` |
 | `GEMINI_MODEL` | Gemini model to use | `gemini-2.5-flash` |
 | `USE_REACT` | Use iterative ReAct loop (`true`) or legacy plan-and-execute (`false`) | `true` |
 | `REACT_MAX_ITERATIONS` | Maximum think→act→observe iterations per run | `10` |

@@ -48,6 +48,9 @@ class TestGetContextWindow:
     """Test model → context window mapping."""
 
     def test_exact_match_anthropic(self) -> None:
+        assert get_context_window("claude-sonnet-4-6") == 200_000
+
+    def test_exact_match_anthropic_deprecated(self) -> None:
         assert get_context_window("claude-sonnet-4-20250514") == 200_000
 
     def test_exact_match_gemini(self) -> None:
@@ -112,7 +115,7 @@ class TestBuildObservationContext:
 
     def test_few_observations_no_compression(self) -> None:
         """With a large context window and few observations, no compression."""
-        planner = self._make_planner("claude-sonnet-4-20250514")
+        planner = self._make_planner("claude-sonnet-4-6")
         obs = _make_observations(3, output_size=100)
         result = planner._build_observation_context(
             observations=obs,
