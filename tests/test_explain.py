@@ -222,7 +222,7 @@ class TestExplainRun:
 
         assert result.status == "success"
         explanation = result.output["explanation"]
-        assert "direct_answer" in explanation
+        assert "direct answer" in explanation
         assert "No tools were used" in explanation
 
     # ── Delegated run (parent + child) ──

@@ -243,15 +243,31 @@ class ExplainRunTool(BaseTool):
         # Planner assessment
         if run.plan:
             if run.plan.task_type == "direct_answer":
+                confidence_note = (
+                    f" (confidence: {run.plan.confidence:.0%})"
+                    if run.plan.confidence > 0
+                    else ""
+                )
                 parts.append(
-                    "The planner classified this as a direct knowledge question "
-                    f"(confidence: {run.plan.confidence:.0%}) and answered without "
-                    "using any tools."
+                    f"The planner treated this as a direct knowledge question{confidence_note} "
+                    "and answered without using any tools."
                 )
             else:
+                # Translate internal task_type to plain language
+                mode_label = {
+                    "react": "a tool-assisted task",
+                    "tool_needed": "a tool-assisted task",
+                    "multi_step": "a multi-step task",
+                    "clarification_needed": "a request needing clarification",
+                }.get(run.plan.task_type, f"a `{run.plan.task_type}` task")
+
+                confidence_note = (
+                    f" with {run.plan.confidence:.0%} confidence"
+                    if run.plan.confidence > 0
+                    else ""
+                )
                 parts.append(
-                    f"The planner classified this as `{run.plan.task_type}` "
-                    f"(confidence: {run.plan.confidence:.0%})."
+                    f"The agent approached this as {mode_label}{confidence_note}."
                 )
 
         # Tool usage summary
@@ -344,10 +360,19 @@ class ExplainRunTool(BaseTool):
 
         # Planner's initial assessment
         if run.plan:
-            lines.append(
-                f"**Planner assessment:** task_type=`{run.plan.task_type}`, "
-                f"confidence={run.plan.confidence:.2f}"
-            )
+            mode_label = {
+                "react": "tool-assisted (ReAct)",
+                "tool_needed": "tool-assisted",
+                "multi_step": "multi-step",
+                "direct_answer": "direct answer",
+                "clarification_needed": "clarification needed",
+            }.get(run.plan.task_type, run.plan.task_type)
+
+            assessment = f"**Approach:** {mode_label}"
+            if run.plan.confidence > 0:
+                assessment += f" (confidence: {run.plan.confidence:.0%})"
+            lines.append(assessment)
+
             if detail_level != "summary" and run.plan.reasoning:
                 lines.append(f"**Planner reasoning:** {run.plan.reasoning}")
 
