@@ -17,6 +17,7 @@ The agent uses a **Hybrid Plan → ReAct → Replan** architecture as its defaul
 Key features:
 
 - **Sub-agent delegation** — complex multi-part tasks are decomposed into child runs, each executed by a focused sub-agent with its own iteration budget, approval gates, and real-time SSE streaming in the UI
+- **Confidence-gated clarification** — when the planner is genuinely unsure what the user wants (confidence below threshold or `clarification_needed` task type), the agent asks specific clarifying questions and pauses before acting. Configurable threshold and max rounds, adjustable live from the Settings page. Child runs never pause (no human attached)
 - **Scheduled tasks** — one-time or recurring tasks via a heap-based scheduler with advance approval, per-run approval, pre-approved tools, and a dedicated Scheduler page with live run history and an approval card for background runs that need user consent
 - **Hybrid Plan-ReAct with replanning** — goal checklist generated before execution, tracked live in the UI, with automatic or LLM-requested replanning when the plan goes off-track
 - **ReAct loop** with iterative reasoning and real-time adaptation to failures
@@ -210,6 +211,17 @@ Once the app is running, type these into the chat:
 24. **"Read every file in the workspace and give me a complete summary of the entire project — include all file names, their purposes, and any TODOs you find."** — the agent will likely give an incomplete first answer. The self-check flags it, and the agent **re-enters the ReAct loop** to call more tools (re-read files, run searches). Watch the iteration count jump and look for the blue **"agent retried"** pill on the self-check badge. The final answer will be more thorough than the first attempt.
 25. **"Read the README and summarize it"** — if the answer passes the quality threshold, a green self-check badge appears (e.g., 85%). Click it to expand the score breakdown (completeness, accuracy, clarity).
 26. To force a text-only fallback, set `REACT_MAX_ITERATIONS=1` and repeat the command. With no budget for re-entry, the self-check rewrites the prose instead — look for the violet **"answer rewritten"** pill.
+
+### Clarification gate
+The agent asks clarifying questions before acting when it is genuinely unsure what you want. Controlled by a confidence threshold (adjustable live in Settings).
+
+27. Set the threshold high first: go to **Settings → Clarification Gate**, enable it, and slide the threshold to **0.80**.
+28. **"do something"** — vague request triggers a blue "Clarification Needed" card with specific questions. Type an answer in the input box and press Enter — the run resumes and completes.
+29. **"List all files in the workspace"** — clear request, high confidence — no pause, proceeds directly.
+30. **"process the file"** — ambiguous which file. The agent asks which one. Answer — completes.
+31. Answer vaguely twice in a row — after `CLARIFICATION_MAX_ROUNDS` (default 2) the agent proceeds best-effort instead of asking forever.
+32. In **Settings**, slide threshold to **0.00** — the agent never asks (everything is confident enough). Slide to **1.00** — asks on every request.
+33. Toggle the gate off entirely — behavior is exactly as before the feature existed.
 
 ### Sub-agent delegation
 27. **"Delegate reading all the Python files to a sub-agent, then use its findings to create a summary document."** — the parent agent spawns a child run (visible as a purple "sub-agent" badge), the child reads and analyses all files, then the parent uses the child's findings to write a summary. Approval is requested before delegation starts.
@@ -725,6 +737,9 @@ All settings are read from the `.env` file (see `.env.example`):
 | `DATABASE_PATH` | SQLite database file path | `./mini_openclaw.db` |
 | `ANTHROPIC_MODEL` | Claude model to use | `claude-sonnet-4-6` |
 | `GEMINI_MODEL` | Gemini model to use | `gemini-2.5-flash` |
+| `CLARIFICATION_ENABLED` | Ask clarifying questions before acting when planner confidence is low | `true` |
+| `CLARIFICATION_THRESHOLD` | Confidence score (0.0–1.0) below which the agent asks clarifying questions. Adjustable live from Settings | `0.5` |
+| `CLARIFICATION_MAX_ROUNDS` | Maximum clarification rounds before proceeding best-effort (clamped 0–5) | `2` |
 | `USE_REACT` | Use iterative ReAct loop (`true`) or legacy plan-and-execute (`false`) | `true` |
 | `REACT_MAX_ITERATIONS` | Maximum think→act→observe iterations per run | `10` |
 | `REACT_DUPLICATE_CAP` | Block after N consecutive identical tool+args calls (minimum: 2) | `3` |
@@ -822,6 +837,7 @@ The test suite covers:
 | `test_dreams.py` | Agent Dreams: dreamer core, pending review lifecycle, FIFO eviction, interval logic, planner context integration, DB migration | 21 |
 | `test_scheduler.py` | Task scheduler: CRUD, lifecycle (pause/resume/delete), heap-based execution, inflight tracking, one-time and interval tasks, max_runs, pre-approval (once/recurring/approve_all), persistence roundtrip | 26 |
 | `test_integration.py` | End-to-end legacy plan-and-execute path, provider switching, retry failed runs | 12 |
+| `test_clarification.py` | Clarification gate: low/high confidence, task_type trigger, max rounds cap, clarify endpoint, child run bypass, feature toggle, DB persistence | 13 |
 
 ## Memory Export
 
@@ -869,6 +885,9 @@ python scripts/export_memory.py
 | Retry button doesn't appear | Retry only shows on assistant messages from failed or cancelled runs, and only when no other run is active |
 | Self-check scores seem too harsh | Lower `REACT_REFLECT_QUALITY_THRESHOLD` (e.g. `0.5`) or disable with `REACT_SELF_REFLECT=false` |
 | Runs are slow with self-reflection enabled | Self-reflection adds 1–2 extra LLM calls per run and may re-enter the loop. Disable it (`REACT_SELF_REFLECT=false`) for faster responses, or raise the threshold (`REACT_REFLECT_QUALITY_THRESHOLD=0.9`) so only poor answers trigger re-entry |
+| Agent never asks clarifying questions | Check that `CLARIFICATION_ENABLED=true` and the threshold is high enough (e.g. `0.8`). The LLM must also return questions — if confident enough it proceeds silently |
+| Agent asks too many questions | Lower `CLARIFICATION_THRESHOLD` (e.g. `0.3`) or set `CLARIFICATION_MAX_ROUNDS=1`. Or disable entirely with `CLARIFICATION_ENABLED=false` |
+| Clarification card not visible | If you switched tabs during clarification, return to Chat — the card auto-recovers. If still missing, check the browser console for errors and verify the backend is running |
 | Agent doesn't delegate when expected | The planner only delegates when it sees distinct independent sub-parts. Use explicit cues: "do these as independent sub-tasks", numbered lists, or "and also" joining unrelated tasks. Or explicitly say "delegate" |
 | Delegation approval keeps appearing | Each child run is gated by a separate approval. This is by design — the user controls what work gets spawned. Set `DELEGATE_ENABLED=false` to disable delegation entirely |
 | Child run appears stuck | The child has its own iteration budget (max 5 by default). Check if it's waiting for approval on a `write_file` or `run_shell_safe` call inside the child |
@@ -890,7 +909,7 @@ mini-openclaw/
 │   └── models/            #   Pydantic models (Run, ToolResult, ScheduledTask, ErrorKind, etc.)
 ├── apps/web/              # React + TypeScript frontend
 │   └── src/components/    #   ChatPanel, PlanPreview, ExecutionGraph, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser, SchedulerPage
-├── tests/                 # pytest test suite (417 tests)
+├── tests/                 # pytest test suite (459 tests)
 ├── scripts/               # seed_demo.py (workspace + memory setup), export_memory.py
 ├── docs/                  # Architecture and design documentation
 └── requirements.txt       # Python dependencies
