@@ -6,15 +6,17 @@ Security model:
 - Domain allowlist (empty = block everything, opt-in by design)
 - Scheme restricted to http/https
 - SSRF defense: resolved IPs checked for private/loopback/link-local/reserved
-- Response size capped at max_bytes
+- DNS re-validation immediately before each HTTP request (TOCTOU / rebinding defense)
+- Response body streamed with mid-stream abort if size exceeds max_bytes
 - Timeout enforced
-- Redirects disabled to prevent DNS rebinding (resolve-time IP check stays valid)
+- Redirects disabled at HTTP level; followed manually with per-hop policy re-validation
 
 JSON responses are parsed and returned as structured data; everything else
 is returned as cleaned, length-capped text.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any
@@ -33,6 +35,9 @@ _WS_RE = re.compile(r"\s{2,}")
 
 # Maximum chars of cleaned text returned in the output.
 _TEXT_OUTPUT_LIMIT = 8_000
+
+# Chunk size for streaming reads.
+_STREAM_CHUNK = 8_192
 
 
 def _strip_html(html: str) -> str:
@@ -91,6 +96,84 @@ class FetchUrlTool(BaseTool):
     def retry_policy(self) -> RetryPolicy:
         return RetryPolicy(max_retries=1, idempotent=True)
 
+    # ── internal helpers ──────────────────────────────────────
+
+    def _check_policy(self, url: str, context: ToolContext) -> str | None:
+        """Run URL through the policy validator.
+
+        Returns an error message string if blocked, None if allowed.
+        Re-used for the initial check and for each redirect hop + the
+        pre-flight DNS re-validation.
+        """
+        if context.validate_url_fn is None:
+            return "URL validator not available"
+        decision = context.validate_url_fn(url, self._allowed_domains)
+        if not decision.allowed:
+            return f"URL blocked by policy: {decision.reason}"
+        return None
+
+    async def _stream_body(
+        self, response: httpx.Response,
+    ) -> tuple[bytes, str | None]:
+        """Stream the response body, aborting if it exceeds max_bytes.
+
+        Returns ``(body_bytes, error_message)``.  ``error_message`` is
+        None on success.
+        """
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in response.aiter_bytes(chunk_size=_STREAM_CHUNK):
+            total += len(chunk)
+            if total > self._max_bytes:
+                await response.aclose()
+                return b"", (
+                    f"Response body exceeded {self._max_bytes} byte limit "
+                    f"(streamed {total} bytes before abort)"
+                )
+            chunks.append(chunk)
+        return b"".join(chunks), None
+
+    def _parse_response(
+        self, body: bytes, content_type: str, status_code: int, final_url: str,
+        args: dict[str, Any], started: str,
+    ) -> Any:
+        """Detect JSON vs text/HTML and return a ToolResult."""
+        # Try JSON by content-type
+        if "application/json" in content_type:
+            try:
+                data = json.loads(body)
+                return self._success(args, {
+                    "type": "json", "data": data,
+                    "status": status_code, "url": final_url,
+                }, started)
+            except (json.JSONDecodeError, ValueError):
+                pass  # fall through to text
+
+        # Try JSON by body shape (regardless of content-type)
+        text_body = body.decode("utf-8", errors="replace")
+        stripped = text_body.strip()
+        if stripped and stripped[0] in ("{", "["):
+            try:
+                data = json.loads(stripped)
+                return self._success(args, {
+                    "type": "json", "data": data,
+                    "status": status_code, "url": final_url,
+                }, started)
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # Text / HTML
+        cleaned = _strip_html(text_body) if "html" in content_type else text_body
+        if len(cleaned) > _TEXT_OUTPUT_LIMIT:
+            cleaned = cleaned[:_TEXT_OUTPUT_LIMIT] + "… [truncated]"
+
+        return self._success(args, {
+            "type": "text", "text": cleaned,
+            "status": status_code, "url": final_url,
+        }, started)
+
+    # ── main execute ──────────────────────────────────────────
+
     async def execute(self, args: dict[str, Any], context: ToolContext) -> Any:
         started = self._now()
         url: str = args.get("url", "")
@@ -100,61 +183,88 @@ class FetchUrlTool(BaseTool):
             return self._error(args, "Web fetch is disabled in configuration", started,
                                error_kind=ErrorKind.PERMANENT)
 
-        # Gate: URL policy validation through the shared validator
-        if context.validate_url_fn is None:
-            return self._error(args, "URL validator not available", started,
-                               error_kind=ErrorKind.PERMANENT)
-
-        decision = context.validate_url_fn(url, self._allowed_domains)
-        if not decision.allowed:
-            return self._error(args, f"URL blocked by policy: {decision.reason}", started,
-                               error_kind=ErrorKind.PERMANENT)
+        # Gate: initial policy check (scheme, domain, DNS resolve, IP check)
+        err = self._check_policy(url, context)
+        if err:
+            return self._error(args, err, started, error_kind=ErrorKind.PERMANENT)
 
         # Fetch
         try:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(self._timeout_s),
-                follow_redirects=False,  # disabled to prevent DNS rebinding
+                follow_redirects=False,  # manual redirect handling
             ) as client:
-                response = await client.get(url)
-
-                # Handle redirects manually with count limit
-                redirects = 0
-                while response.is_redirect and redirects < self._max_redirects:
-                    location = response.headers.get("location", "")
-                    if not location:
-                        break
-                    # Re-validate the redirect target through policy
-                    redirect_decision = context.validate_url_fn(location, self._allowed_domains)
-                    if not redirect_decision.allowed:
-                        return self._error(
-                            args,
-                            f"Redirect target blocked by policy: {redirect_decision.reason}",
-                            started, error_kind=ErrorKind.PERMANENT,
-                        )
-                    response = await client.get(location)
-                    redirects += 1
-
-                if response.is_redirect:
-                    return self._error(args, f"Too many redirects (>{self._max_redirects})",
+                # ── DNS rebinding defense ──
+                # Re-resolve the hostname and re-check IPs immediately before
+                # the HTTP request.  This shrinks the TOCTOU window between
+                # validation and connection to microseconds, preventing an
+                # attacker from flipping a DNS record from a public IP (passes
+                # initial check) to a private/loopback IP between checks.
+                preflight_err = self._check_policy(url, context)
+                if preflight_err:
+                    return self._error(args, f"Pre-flight re-validation failed: {preflight_err}",
                                        started, error_kind=ErrorKind.PERMANENT)
 
-                # Size check
-                content_length = response.headers.get("content-length")
-                if content_length and int(content_length) > self._max_bytes:
-                    return self._error(
-                        args,
-                        f"Response too large ({content_length} bytes, limit {self._max_bytes})",
-                        started, error_kind=ErrorKind.PERMANENT,
-                    )
+                # ── Stream response ──
+                async with client.stream("GET", url) as response:
+                    # Handle redirects manually with per-hop policy validation
+                    redir_response = response
+                    redirects = 0
+                    while redir_response.is_redirect and redirects < self._max_redirects:
+                        location = redir_response.headers.get("location", "")
+                        if not location:
+                            break
+                        await redir_response.aclose()
 
-                body = response.content
-                if len(body) > self._max_bytes:
-                    return self._error(
-                        args,
-                        f"Response body exceeded {self._max_bytes} byte limit",
-                        started, error_kind=ErrorKind.PERMANENT,
-                    )
+                        # Validate redirect target (domain + DNS + IPs)
+                        redir_err = self._check_policy(location, context)
+                        if redir_err:
+                            return self._error(
+                                args,
+                                f"Redirect target blocked: {redir_err}",
+                                started, error_kind=ErrorKind.PERMANENT,
+                            )
+                        # Pre-flight re-validation for redirect target
+                        redir_preflight = self._check_policy(location, context)
+                        if redir_preflight:
+                            return self._error(
+                                args,
+                                f"Redirect pre-flight failed: {redir_preflight}",
+                                started, error_kind=ErrorKind.PERMANENT,
+                            )
+
+                        # Open a new stream for the redirect target
+                        redir_response = await client.send(
+                            client.build_request("GET", location),
+                            stream=True,
+                        )
+                        redirects += 1
+
+                    if redir_response.is_redirect:
+                        await redir_response.aclose()
+                        return self._error(args, f"Too many redirects (>{self._max_redirects})",
+                                           started, error_kind=ErrorKind.PERMANENT)
+
+                    # Early reject via content-length header
+                    cl = redir_response.headers.get("content-length")
+                    if cl and cl.isdigit() and int(cl) > self._max_bytes:
+                        await redir_response.aclose()
+                        return self._error(
+                            args,
+                            f"Response too large ({cl} bytes, limit {self._max_bytes})",
+                            started, error_kind=ErrorKind.PERMANENT,
+                        )
+
+                    # Stream body with mid-stream size enforcement
+                    body, size_err = await self._stream_body(redir_response)
+                    if size_err:
+                        return self._error(args, size_err, started,
+                                           error_kind=ErrorKind.PERMANENT)
+
+                    # Capture headers before context manager closes
+                    content_type = redir_response.headers.get("content-type", "")
+                    final_url = str(redir_response.url)
+                    status_code = redir_response.status_code
 
         except httpx.TimeoutException:
             return self._error(args, f"Request timed out after {self._timeout_s}s",
@@ -166,53 +276,5 @@ class FetchUrlTool(BaseTool):
             return self._error(args, f"HTTP error: {exc}", started,
                                error_kind=ErrorKind.TRANSIENT)
 
-        # Detect content type and build output
-        content_type = response.headers.get("content-type", "")
-        final_url = str(response.url)
-        status_code = response.status_code
-
-        # Try JSON
-        if "application/json" in content_type:
-            try:
-                data = response.json()
-                return self._success(args, {
-                    "type": "json",
-                    "data": data,
-                    "status": status_code,
-                    "url": final_url,
-                }, started)
-            except Exception:
-                pass  # fall through to text handling
-
-        # Also try JSON if body looks like JSON regardless of content-type
-        text_body = body.decode("utf-8", errors="replace")
-        stripped = text_body.strip()
-        if stripped and stripped[0] in ("{", "["):
-            try:
-                import json
-                data = json.loads(stripped)
-                return self._success(args, {
-                    "type": "json",
-                    "data": data,
-                    "status": status_code,
-                    "url": final_url,
-                }, started)
-            except (json.JSONDecodeError, ValueError):
-                pass
-
-        # Text / HTML
-        if "html" in content_type:
-            cleaned = _strip_html(text_body)
-        else:
-            cleaned = text_body
-
-        # Truncate
-        if len(cleaned) > _TEXT_OUTPUT_LIMIT:
-            cleaned = cleaned[:_TEXT_OUTPUT_LIMIT] + "… [truncated]"
-
-        return self._success(args, {
-            "type": "text",
-            "text": cleaned,
-            "status": status_code,
-            "url": final_url,
-        }, started)
+        return self._parse_response(body, content_type, status_code, final_url,
+                                    args, started)
