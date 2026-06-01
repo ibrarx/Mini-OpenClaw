@@ -472,7 +472,7 @@ class Planner:
             result = await self._provider.generate_json(
                 messages=[LLMMessage(role="user", content=content)],
                 system=system,
-                max_tokens=2048,
+                max_tokens=8192,
                 timeout=60.0,
             )
         except LLMProviderError as exc:

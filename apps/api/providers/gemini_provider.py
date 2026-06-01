@@ -228,6 +228,13 @@ class GeminiProvider(LLMProvider):
             return json.loads(repaired.strip())
         except json.JSONDecodeError:
             pass
+        # Repair: truncated output — Gemini hit max_tokens mid-string.
+        # Try closing unclosed strings and braces.
+        for suffix in ['"]}', '"}', '"]', '"}}', '}']:
+            try:
+                return json.loads(repaired.strip() + suffix)
+            except json.JSONDecodeError:
+                continue
         # Fallback: extract first balanced { … } block.
         parsed = self._extract_json_object(text.strip())
         if parsed is not None:
