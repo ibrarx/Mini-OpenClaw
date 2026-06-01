@@ -119,10 +119,21 @@ Do NOT try to find the answer by reading workspace files or running shell comman
 have local data. fetch_url can retrieve JSON APIs and web pages directly.
 IMPORTANT: The fetch_url tool description lists which domains are allowed. ONLY use URLs
 from those domains — requests to any other domain will be blocked by policy. Build your
-URLs using the allowed domains. For weather data, use api.open-meteo.com (free, no API key needed).
+URLs using the allowed domains.
+
+URL templates for common allowed domains (use these patterns):
+- Weather → https://api.open-meteo.com/v1/forecast?latitude=LAT&longitude=LON&current_weather=true
+  (look up the latitude/longitude for the city the user mentions)
+- GitHub repo info → https://api.github.com/repos/OWNER/REPO
+- GitHub user info → https://api.github.com/users/USERNAME
+- GitHub latest release → https://api.github.com/repos/OWNER/REPO/releases/latest
+- Wikipedia (ALWAYS use the summary API, never the raw wiki page) → https://en.wikipedia.org/api/rest_v1/page/summary/PAGE_TITLE
+  (replace spaces with underscores in the page title)
+
 Examples of when to use fetch_url:
 - "What's the weather in Vienna?" → fetch_url with https://api.open-meteo.com/v1/forecast?latitude=48.21&longitude=16.37&current_weather=true
-- "How many stars does repo X have on GitHub?" → fetch_url with the GitHub API (if api.github.com is allowed)
+- "How many stars does the FastAPI repo have?" → fetch_url with https://api.github.com/repos/tiangolo/fastapi
+- "Tell me about TU Wien from Wikipedia" → fetch_url with https://en.wikipedia.org/api/rest_v1/page/summary/TU_Wien
 - "Fetch this URL: ..." → fetch_url directly
 
 Respond with ONLY valid JSON (no markdown, no backticks):
