@@ -136,6 +136,11 @@ Examples of when to use fetch_url:
 - "Tell me about TU Wien from Wikipedia" → fetch_url with https://en.wikipedia.org/w/api.php?action=query&prop=extracts&titles=TU_Wien&format=json&explaintext=true
 - "Fetch this URL: ..." → fetch_url directly
 
+RESPONSE DETAIL for fetched content:
+- If the user asks for a "page", "article", or "full content", include ALL the fetched content in your response — do NOT summarize or condense it. Relay the text fully, organized with sections and headings where appropriate.
+- If the user asks a specific question (e.g. "what's the weather", "how many stars"), extract and present the relevant data concisely.
+- When in doubt, include MORE detail rather than less — the user asked you to fetch the content for a reason.
+
 Respond with ONLY valid JSON (no markdown, no backticks):
 
 To call a tool:
