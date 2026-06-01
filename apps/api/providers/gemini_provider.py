@@ -221,8 +221,19 @@ class GeminiProvider(LLMProvider):
             return json.loads(text.strip())
         except json.JSONDecodeError:
             pass
+        # Repair: Gemini often fails to escape newlines inside JSON strings.
+        # Replace literal control characters with spaces and retry.
+        repaired = text.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+        try:
+            return json.loads(repaired.strip())
+        except json.JSONDecodeError:
+            pass
         # Fallback: extract first balanced { … } block.
         parsed = self._extract_json_object(text.strip())
+        if parsed is not None:
+            return parsed
+        # Last resort: try balanced extraction on repaired text too.
+        parsed = self._extract_json_object(repaired.strip())
         if parsed is not None:
             return parsed
         raise LLMProviderError(
