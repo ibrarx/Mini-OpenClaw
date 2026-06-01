@@ -9,7 +9,7 @@ import MessageBubble from "./MessageBubble";
 import PlanPreview from "./PlanPreview";
 import ApprovalCard from "./ApprovalCard";
 import ToolTrace from "./ToolTrace";
-import { submitChat, approveStep, rejectStep, cancelRun, retryRun, clarifyRun } from "../api/client";
+import { submitChat, approveStep, rejectStep, cancelRun, retryRun, clarifyRun, getRuns } from "../api/client";
 import { useRunSSE } from "../hooks/useRunSSE";
 import type { ChatMessage, Run, RunStatus } from "../api/types";
 
@@ -112,6 +112,32 @@ export default function ChatPanel({
       behavior: "smooth",
     });
   }, [messages, run]);
+
+  // Auto-resume: if we mount and there's an active run for this session
+  // (e.g. user switched tabs during clarification), pick it back up.
+  useEffect(() => {
+    if (activeRunId) return; // already tracking a run
+    let cancelled = false;
+    (async () => {
+      try {
+        const runs = await getRuns(sessionId, 5);
+        const active = runs.find(
+          (r) =>
+            r.status === "awaiting_clarification" ||
+            r.status === "awaiting_approval" ||
+            r.status === "planning" ||
+            r.status === "reacting" ||
+            r.status === "reflecting"
+        );
+        if (active && !cancelled) {
+          setActiveRunId(active.run_id);
+        }
+      } catch {
+        // ignore — best-effort
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sessionId]); // only on mount / session change
 
   const addMessage = (
     role: ChatMessage["role"],
