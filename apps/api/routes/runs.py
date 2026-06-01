@@ -157,6 +157,68 @@ async def explain_run(run_id: str, request: Request, detail_level: str = "summar
     return result.model_dump()
 
 
+@router.get("/usage/summary")
+async def usage_summary(request: Request, session_id: str | None = None) -> dict:
+    """Return aggregated token usage and cost across runs.
+
+    If ``session_id`` is given, scope to that session. Otherwise, all runs.
+    Returns per-model split, total tokens, total cost, and the pricing
+    verification date.
+    """
+    from apps.api.core.token_utils import PRICING_LAST_VERIFIED
+
+    orchestrator = request.app.state.orchestrator
+    runs = await orchestrator.list_runs(session_id=session_id, limit=500)
+
+    totals: dict[str, float] = {
+        "input_tokens": 0, "output_tokens": 0,
+        "cache_read_tokens": 0, "cache_write_tokens": 0,
+        "cost_usd": 0.0, "llm_calls": 0,
+    }
+    by_model: dict[str, dict[str, float]] = {}
+    by_phase: dict[str, int] = {}
+    has_estimates = False
+    run_count = 0
+
+    for r in runs:
+        u = r.usage
+        if u.llm_calls == 0:
+            continue
+        run_count += 1
+        totals["input_tokens"] += u.input_tokens
+        totals["output_tokens"] += u.output_tokens
+        totals["cache_read_tokens"] += u.cache_read_tokens
+        totals["cache_write_tokens"] += u.cache_write_tokens
+        totals["cost_usd"] += u.cost_usd
+        totals["llm_calls"] += u.llm_calls
+        if u.has_estimates:
+            has_estimates = True
+
+        model_key = u.model or r.model_name or "unknown"
+        if model_key not in by_model:
+            by_model[model_key] = {
+                "input_tokens": 0, "output_tokens": 0,
+                "cost_usd": 0.0, "llm_calls": 0, "provider": u.provider or "",
+            }
+        by_model[model_key]["input_tokens"] += u.input_tokens
+        by_model[model_key]["output_tokens"] += u.output_tokens
+        by_model[model_key]["cost_usd"] += u.cost_usd
+        by_model[model_key]["llm_calls"] += u.llm_calls
+
+        for phase, tokens in u.by_phase.items():
+            by_phase[phase] = by_phase.get(phase, 0) + tokens
+
+    return {
+        "session_id": session_id,
+        "run_count": run_count,
+        "totals": totals,
+        "by_model": by_model,
+        "by_phase": by_phase,
+        "has_estimates": has_estimates,
+        "pricing_last_verified": PRICING_LAST_VERIFIED,
+    }
+
+
 @router.get("/runs/{run_id}/stream")
 async def stream_run(run_id: str, request: Request) -> StreamingResponse:
     """SSE endpoint that streams run status updates in real-time."""

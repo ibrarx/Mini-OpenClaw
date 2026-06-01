@@ -141,7 +141,7 @@ class Dreamer:
         # 6. Call LLM
         from apps.api.providers.base import LLMMessage
         try:
-            result = await self._provider.generate_json(
+            result, _usage = await self._provider.generate_json(
                 messages=[LLMMessage(role="user", content=content)],
                 system=DREAM_SYSTEM_PROMPT,
                 max_tokens=1024,

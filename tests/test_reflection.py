@@ -66,7 +66,8 @@ class FakeProvider(LLMProvider):
         self, messages: list[LLMMessage], *, system: str | None = None,
         tools: list[LLMToolSchema] | None = None, max_tokens: int = 2048,
         temperature: float | None = None, timeout: float = 60.0,
-    ) -> dict[str, Any] | list[Any]:
+    ) -> tuple[dict[str, Any] | list[Any], Any]:
+        from apps.api.providers.base import TokenUsage
         self.calls.append({"messages": messages, "system": system, "method": "generate_json"})
         if not self._responses:
             raise LLMProviderError("No more responses queued")
@@ -74,11 +75,11 @@ class FakeProvider(LLMProvider):
         if isinstance(resp, Exception):
             raise resp
         if isinstance(resp, dict):
-            return resp
+            return resp, TokenUsage()
         if isinstance(resp, list):
-            return resp
+            return resp, TokenUsage()
         if isinstance(resp, str):
-            return json.loads(resp)
+            return json.loads(resp), TokenUsage()
         raise LLMProviderError(f"Unexpected response type: {type(resp)}")
 
     @property

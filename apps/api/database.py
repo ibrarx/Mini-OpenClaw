@@ -156,6 +156,8 @@ MIGRATIONS = [
     # Clarification — added in feat/clarify-before-react
     "ALTER TABLE runs ADD COLUMN clarifying_questions TEXT NOT NULL DEFAULT '[]'",
     "ALTER TABLE runs ADD COLUMN clarification_rounds INTEGER NOT NULL DEFAULT 0",
+    # Usage tracking — added in feat/cost-token-dashboard
+    "ALTER TABLE runs ADD COLUMN usage TEXT NOT NULL DEFAULT '{}'",
 ]
 
 # ---------------------------------------------------------------------------

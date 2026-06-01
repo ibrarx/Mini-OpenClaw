@@ -120,6 +120,9 @@ class Observation(BaseModel):
     timestamp: str = ""
     token_estimate: int = 0         # estimated tokens consumed at this iteration
     compression_level: str = ""     # "none" | "partial" | "aggressive" — context compression state
+    # Real token usage from the LLM call that produced this step
+    usage: dict[str, Any] | None = None   # serialized TokenUsage
+    cost_usd: float = 0.0
 
 
 class ReflectionResult(BaseModel):
@@ -133,6 +136,31 @@ class ReflectionResult(BaseModel):
     improved: bool = False   # whether the answer was text-rewritten (fallback)
     reentry: bool = False    # whether the agent re-entered the loop to take action
     attempt: int = 0         # which reflection attempt (0 = first)
+
+
+class RunUsage(BaseModel):
+    """Aggregated token usage and cost across all LLM calls in a run.
+
+    ``by_phase`` tracks tokens per orchestrator phase ("planning", "react",
+    "reflection", "goals", "replan", "synthesis", "summary", "dream").
+    ``by_tool`` tracks tokens spent in the LLM call that *selected* each
+    tool — not the tool's intrinsic cost (local tools cost zero tokens).
+    """
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    cost_usd: float = 0.0
+    llm_calls: int = 0
+    has_estimates: bool = False      # True if any call fell back to heuristic
+    by_phase: dict[str, int] = Field(default_factory=dict)
+    by_tool: dict[str, int] = Field(default_factory=dict)
+    model: str = ""
+    provider: str = ""
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
 
 
 class Run(BaseModel):
@@ -158,3 +186,5 @@ class Run(BaseModel):
     # Clarification fields
     clarifying_questions: list[str] = Field(default_factory=list)
     clarification_rounds: int = 0
+    # Usage tracking
+    usage: RunUsage = Field(default_factory=RunUsage)

@@ -22,7 +22,7 @@ from apps.api.core.events import event_emitter
 from apps.api.core.executor import Executor
 from apps.api.core.planner import Planner, PlannerError
 from apps.api.core.policy import PolicyEngine
-from apps.api.core.token_utils import get_context_window
+from apps.api.core.token_utils import get_context_window, compute_cost
 from apps.api.database import get_connection
 from apps.api.memory.embeddings import EmbeddingProvider
 from apps.api.memory.dreamer import Dreamer
@@ -33,7 +33,7 @@ from apps.api.models.run import (
     Goal, GoalStatus, Observation, Plan, PlanStep, ReflectionResult, Run, RunStatus, StepStatus, RiskLevel, ToolResult,
 )
 from apps.api.providers import build_provider
-from apps.api.providers.base import LLMMessage
+from apps.api.providers.base import LLMMessage, TokenUsage
 from apps.api.providers.errors import ProviderConfigError
 from apps.api.skills.base import ToolContext
 from apps.api.skills.registry import SkillRegistry
@@ -286,6 +286,78 @@ class Orchestrator:
         if exc:
             logger.error("Background run task failed: %s", exc, exc_info=exc)
 
+    # ------------------------------------------------------------------
+    # Usage tracking
+    # ------------------------------------------------------------------
+
+    def _record_usage(
+        self,
+        run: Run,
+        phase: str,
+        usage_dict: dict[str, Any] | None,
+        tool_name: str | None = None,
+    ) -> None:
+        """Accumulate a single LLM call's token usage onto *run.usage*.
+
+        Parameters
+        ----------
+        run : Run
+            The run to update.
+        phase : str
+            Orchestrator phase label: "planning", "react", "reflection",
+            "goals", "replan", "synthesis", "summary", "improve".
+        usage_dict : dict | None
+            A serialized ``TokenUsage`` dict (from ``_usage`` key or
+            ``planner._last_usage``). ``None`` means usage unavailable.
+        tool_name : str | None
+            If the LLM call was a ReAct step that chose a tool, attribute
+            tokens to that tool in ``by_tool``. This is "tokens spent
+            reasoning about X", not the tool's own cost.
+        """
+        if usage_dict is None:
+            return
+
+        from apps.api.providers.base import TokenUsage
+
+        try:
+            usage = TokenUsage.model_validate(usage_dict)
+        except Exception:
+            return
+
+        ru = run.usage
+        ru.input_tokens += usage.input_tokens
+        ru.output_tokens += usage.output_tokens
+        ru.cache_read_tokens += usage.cache_read_tokens
+        ru.cache_write_tokens += usage.cache_write_tokens
+        ru.llm_calls += 1
+        if usage.is_estimated:
+            ru.has_estimates = True
+
+        cost = compute_cost(run.model_name or self._settings.active_provider_model, usage)
+        ru.cost_usd += cost
+
+        # Phase bucket
+        ru.by_phase[phase] = ru.by_phase.get(phase, 0) + usage.total_tokens
+
+        # Tool bucket (only for react steps that picked a tool)
+        if tool_name:
+            ru.by_tool[tool_name] = ru.by_tool.get(tool_name, 0) + usage.total_tokens
+
+        # Provider info (set once)
+        if not ru.model:
+            ru.model = run.model_name or self._settings.active_provider_model
+            ru.provider = self._settings.llm_provider
+
+    def _cost_from_dict(self, run: Run, usage_dict: dict[str, Any] | None) -> float:
+        """Compute cost for a single step from its serialized usage dict."""
+        if not usage_dict:
+            return 0.0
+        try:
+            usage = TokenUsage.model_validate(usage_dict)
+            return compute_cost(run.model_name or self._settings.active_provider_model, usage)
+        except Exception:
+            return 0.0
+
     async def _process_run(self, run: Run, *, is_child: bool = False,
                             is_scheduled: bool = False,
                             pre_approved_tools: list[str] | None = None) -> None:
@@ -387,6 +459,7 @@ class Orchestrator:
                     workspace_info=workspace_info,
                     max_iterations=run.max_iterations,
                 )
+                self._record_usage(run, "goals", self._planner._last_usage)
                 goals = [
                     Goal(goal_id=g["goal_id"], description=g["description"])
                     for g in raw_goals
@@ -415,6 +488,7 @@ class Orchestrator:
                     memory_context=memory_context,
                     workspace_info=workspace_info,
                 )
+                self._record_usage(run, "planning", initial_plan.pop("_usage", None))
                 questions = initial_plan.get("clarifying_questions", [])
                 needs_clarification = (
                     (
@@ -546,6 +620,11 @@ class Orchestrator:
             tokens_used = context_meta.get("tokens_used", 0)
             compression_level = context_meta.get("compression", "")
 
+            # Extract and record real usage from this LLM call
+            step_usage_dict = decision.pop("_usage", None)
+            react_tool = decision.get("tool") if action == "tool" else None
+            self._record_usage(run, "react", step_usage_dict, tool_name=react_tool)
+
             # FINAL ANSWER
             if action == "final_answer":
                 # FLAG-GATED: Update goal statuses from final_answer response
@@ -567,6 +646,8 @@ class Orchestrator:
                     reasoning=decision.get("reasoning", ""),
                     timestamp=now,
                     token_estimate=tokens_used, compression_level=compression_level,
+                    usage=step_usage_dict,
+                    cost_usd=self._cost_from_dict(run, step_usage_dict),
                 )
                 run.observations.append(obs)
                 run.final_response = decision.get("response", "Task completed.")
@@ -648,6 +729,7 @@ class Orchestrator:
                                 },
                                 observations_summary=self._build_obs_summary(run),
                             )
+                            self._record_usage(run, "improve", self._planner._last_usage)
                             if improved_answer != run.final_response:
                                 run.final_response = improved_answer
                                 reflection.improved = True
@@ -1089,6 +1171,8 @@ class Orchestrator:
             logger.warning("Reflection critique failed: %s", exc)
             return None
 
+        self._record_usage(run, "reflection", critique.pop("_usage", None))
+
         return ReflectionResult(
             overall_score=critique.get("overall_score", 1.0),
             completeness=critique.get("completeness", 1.0),
@@ -1170,6 +1254,7 @@ class Orchestrator:
                 workspace_info=workspace_info,
                 remaining_budget=remaining_budget,
             )
+            self._record_usage(run, "replan", self._planner._last_usage)
 
             if not new_raw_goals and not completed_goals:
                 # Replan produced nothing and nothing is completed — keep existing goals
@@ -1280,6 +1365,7 @@ class Orchestrator:
                 timeout=35.0,
             )
             text = (response.text or "").strip()
+            self._record_usage(run, "synthesis", response.usage.model_dump())
             return text if text else None
         except Exception as exc:
             logger.warning("Final answer synthesis failed: %s", exc)
@@ -1796,6 +1882,7 @@ class Orchestrator:
         ) if run.observations else "[]"
         reflection_json = run.reflection.model_dump_json() if run.reflection else None
         clarifying_questions_json = json.dumps(run.clarifying_questions) if run.clarifying_questions else "[]"
+        usage_json = run.usage.model_dump_json()
         conn = await get_connection(self._db_path)
         try:
             existing = await conn.execute_fetchall("SELECT id FROM runs WHERE id=?", (run.run_id,))
@@ -1804,26 +1891,28 @@ class Orchestrator:
                     "UPDATE runs SET status=?, plan=?, final_response=?, updated_at=?, "
                     "iterations=?, max_iterations=?, observations=?, context_window=?, "
                     "model_name=?, reflection=?, parent_run_id=?, depth=?, "
-                    "clarifying_questions=?, clarification_rounds=? WHERE id=?",
+                    "clarifying_questions=?, clarification_rounds=?, usage=? WHERE id=?",
                     (run.status.value, plan_json, run.final_response, run.updated_at,
                      run.iterations, run.max_iterations, observations_json,
                      run.context_window, run.model_name, reflection_json,
                      run.parent_run_id, run.depth,
                      clarifying_questions_json, run.clarification_rounds,
+                     usage_json,
                      run.run_id))
             else:
                 await conn.execute(
                     "INSERT INTO runs (id,session_id,workspace_id,status,user_message,plan,"
                     "final_response,created_at,updated_at,iterations,max_iterations,observations,"
                     "context_window,model_name,reflection,parent_run_id,depth,"
-                    "clarifying_questions,clarification_rounds) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "clarifying_questions,clarification_rounds,usage) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (run.run_id, run.session_id, run.workspace_id, run.status.value,
                      run.user_message, plan_json, run.final_response, run.created_at,
                      run.updated_at, run.iterations, run.max_iterations, observations_json,
                      run.context_window, run.model_name, reflection_json,
                      run.parent_run_id, run.depth,
-                     clarifying_questions_json, run.clarification_rounds))
+                     clarifying_questions_json, run.clarification_rounds,
+                     usage_json))
             await conn.commit()
         finally:
             await conn.close()
@@ -1897,6 +1986,8 @@ class Orchestrator:
 
     @staticmethod
     def _row_to_run(row: aiosqlite.Row) -> Run:
+        from apps.api.models.run import RunUsage
+
         plan = None
         if row["plan"]:
             try:
@@ -1918,6 +2009,14 @@ class Orchestrator:
                 reflection = ReflectionResult.model_validate_json(reflection_raw)
             except Exception:
                 pass
+        # Deserialize usage — gracefully handle old rows without column
+        usage = RunUsage()
+        usage_raw = row["usage"] if "usage" in row.keys() else None
+        if usage_raw:
+            try:
+                usage = RunUsage.model_validate_json(usage_raw)
+            except Exception:
+                pass
         iterations = row["iterations"] if "iterations" in row.keys() else 0
         max_iterations = row["max_iterations"] if "max_iterations" in row.keys() else 10
         context_window = row["context_window"] if "context_window" in row.keys() else 0
@@ -1937,4 +2036,5 @@ class Orchestrator:
             depth=row["depth"] if "depth" in row.keys() else 0,
             clarifying_questions=json.loads(row["clarifying_questions"]) if "clarifying_questions" in row.keys() and row["clarifying_questions"] else [],
             clarification_rounds=row["clarification_rounds"] if "clarification_rounds" in row.keys() else 0,
+            usage=usage,
         )

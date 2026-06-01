@@ -32,6 +32,7 @@ from apps.api.providers.base import (
     LLMProvider,
     LLMResponse,
     LLMToolSchema,
+    TokenUsage,
 )
 from apps.api.providers.errors import (
     LLMProviderError,
@@ -132,12 +133,14 @@ class OllamaProvider(LLMProvider):
         system: str | None = None,
         max_tokens: int = 2048,
         timeout: float = _DEFAULT_TIMEOUT,
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], TokenUsage]:
         """Override using Ollama's native JSON mode for higher reliability.
 
         Sets ``"format": "json"`` in the request body so Ollama constrains
         its output to syntactically valid JSON. The base class fallback
         (brace-scanning) is kept as a safety net.
+
+        Returns ``(parsed_json, usage)`` tuple.
         """
         response = await self._call_ollama(
             messages=messages,
@@ -147,6 +150,7 @@ class OllamaProvider(LLMProvider):
             timeout=timeout,
             json_mode=True,
         )
+        usage = response.usage
         text = (response.text or "").strip()
 
         # Defence-in-depth: strip markdown fences if the model wrapped output.
@@ -158,7 +162,7 @@ class OllamaProvider(LLMProvider):
 
         # Fast path: direct parse.
         try:
-            return json.loads(text)
+            return json.loads(text), usage
         except json.JSONDecodeError:
             pass
 
@@ -252,9 +256,19 @@ class OllamaProvider(LLMProvider):
             text = (message.get("content") or "").strip()
             finish_reason = choices[0].get("finish_reason")
 
+        # Extract real token usage from Ollama's OpenAI-compatible response.
+        # Ollama also reports usage in the top-level "usage" dict.
+        usage_data = data.get("usage", {})
+        usage = TokenUsage(
+            input_tokens=usage_data.get("prompt_tokens", 0) or 0,
+            output_tokens=usage_data.get("completion_tokens", 0) or 0,
+            is_estimated=len(usage_data) == 0,
+        )
+
         return LLMResponse(
             text=text,
             tool_calls=[],
             finish_reason=finish_reason,
             raw=data,
+            usage=usage,
         )

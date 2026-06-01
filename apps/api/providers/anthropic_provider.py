@@ -23,6 +23,7 @@ from apps.api.providers.base import (
     LLMResponse,
     LLMToolCall,
     LLMToolSchema,
+    TokenUsage,
 )
 from apps.api.providers.errors import (
     LLMProviderError,
@@ -180,4 +181,11 @@ class AnthropicProvider(LLMProvider):
             tool_calls=tool_calls,
             finish_reason=getattr(response, "stop_reason", None),
             raw=None,  # Skip raw dump — content already captured above.
+            usage=TokenUsage(
+                input_tokens=getattr(response.usage, "input_tokens", 0) if hasattr(response, "usage") else 0,
+                output_tokens=getattr(response.usage, "output_tokens", 0) if hasattr(response, "usage") else 0,
+                cache_read_tokens=getattr(response.usage, "cache_read_input_tokens", 0) if hasattr(response, "usage") else 0,
+                cache_write_tokens=getattr(response.usage, "cache_creation_input_tokens", 0) if hasattr(response, "usage") else 0,
+                is_estimated=False,
+            ),
         )

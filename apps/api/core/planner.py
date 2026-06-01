@@ -307,6 +307,10 @@ class Planner:
         self._observation_max_chars = observation_max_chars
         self._read_file_obs_single = read_file_obs_single
         self._read_file_obs_batch = read_file_obs_batch
+        # Usage tracking: set after every generate/generate_json call.
+        # Methods returning dicts inject _usage into the dict; methods
+        # returning strings/lists expose it here instead.
+        self._last_usage: dict[str, Any] | None = None
 
     # ------------------------------------------------------------------
     # Public API — unchanged shape so the orchestrator does not care which
@@ -342,7 +346,7 @@ class Planner:
             system += f"\n\nWorkspace info:\n{workspace_info}"
 
         try:
-            plan = await self._provider.generate_json(
+            plan, usage = await self._provider.generate_json(
                 messages=[LLMMessage(role="user", content=user_message)],
                 system=system,
                 max_tokens=2048,
@@ -364,6 +368,8 @@ class Planner:
         plan.setdefault("direct_response", None)
         plan.setdefault("steps", [])
         plan.setdefault("clarifying_questions", [])
+        # Inject usage metadata for the orchestrator to pop
+        plan["_usage"] = usage.model_dump()
         logger.info(
             "Plan: type=%s confidence=%.2f steps=%d questions=%d",
             plan["task_type"],
@@ -477,7 +483,7 @@ class Planner:
         )
 
         try:
-            result = await self._provider.generate_json(
+            result, usage = await self._provider.generate_json(
                 messages=[LLMMessage(role="user", content=content)],
                 system=system,
                 max_tokens=8192,
@@ -549,6 +555,7 @@ class Planner:
             "context_window": context_result["context_window"],
             "compression": context_result["compression_level"],
         }
+        result["_usage"] = usage.model_dump()
         return result
 
     # ------------------------------------------------------------------
@@ -586,6 +593,7 @@ class Planner:
                 max_tokens=1024,
                 timeout=30.0,
             )
+            self._last_usage = response.usage.model_dump()
             text = (response.text or "").strip()
             # Strip markdown fences if present
             if text.startswith("```"):
@@ -649,6 +657,7 @@ class Planner:
                 max_tokens=1024,
                 timeout=30.0,
             )
+            self._last_usage = response.usage.model_dump()
             text = (response.text or "").strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1] if "\n" in text else text[3:]
@@ -845,7 +854,7 @@ class Planner:
         )
 
         try:
-            result = await self._provider.generate_json(
+            result, usage = await self._provider.generate_json(
                 messages=[LLMMessage(role="user", content=content)],
                 system=REFLECT_SYSTEM_PROMPT,
                 max_tokens=1024,
@@ -855,6 +864,7 @@ class Planner:
             result.setdefault("overall_score", 0.8)
             result.setdefault("issues", [])
             result.setdefault("suggestion", "")
+            result["_usage"] = usage.model_dump()
             return result
         except Exception as exc:
             logger.warning("Reflection failed (non-fatal): %s", exc)
@@ -894,6 +904,7 @@ class Planner:
                 max_tokens=2048,
                 timeout=30.0,
             )
+            self._last_usage = response.usage.model_dump()
             return (response.text or original_answer).strip()
         except Exception as exc:
             logger.warning("Answer improvement failed: %s", exc)
@@ -929,6 +940,7 @@ class Planner:
                 max_tokens=1024,
                 timeout=30.0,
             )
+            self._last_usage = response.usage.model_dump()
             return (response.text or "Task completed.").strip() or "Task completed."
         except LLMProviderError as exc:
             logger.warning("Summary failed: %s", exc)

@@ -59,6 +59,7 @@ export interface Run {
   depth?: number;
   clarifying_questions?: string[];
   clarification_rounds?: number;
+  usage?: RunUsage;
 }
 
 export interface Observation {
@@ -72,6 +73,30 @@ export interface Observation {
   timestamp: string;
   token_estimate?: number;
   compression_level?: string;
+  usage?: TokenUsage | null;
+  cost_usd?: number;
+}
+
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  is_estimated: boolean;
+}
+
+export interface RunUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd: number;
+  llm_calls: number;
+  has_estimates: boolean;
+  by_phase: Record<string, number>;
+  by_tool: Record<string, number>;
+  model: string;
+  provider: string;
 }
 
 export type GoalStatus = "pending" | "in_progress" | "done" | "skipped";

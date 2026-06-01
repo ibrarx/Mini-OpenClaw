@@ -189,7 +189,8 @@ async def test_dream_passes_existing_and_rejected_to_llm(db_path: Path, fake_pro
     async def capturing_generate_json(messages, **kwargs):
         for m in messages:
             captured_messages.append(m.content)
-        return {"strategies": [], "preferences": []}
+        from apps.api.providers.base import TokenUsage
+        return {"strategies": [], "preferences": []}, TokenUsage()
 
     fake_provider.generate_json = capturing_generate_json  # type: ignore
 

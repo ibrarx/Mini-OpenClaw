@@ -22,6 +22,7 @@ import {
 import { getTools, healthCheck, getMemory, getClarificationSettings, updateClarificationSettings } from "../api/client";
 import type { ClarificationSettings } from "../api/client";
 import { RiskBadge } from "./PlanPreview";
+import SessionUsageDashboard from "./UsageDashboard";
 import { useTheme } from "../App";
 import type { ThemeMode } from "../App";
 import type { ToolManifest } from "../api/types";
@@ -339,6 +340,11 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
             </div>
           ))}
         </div>
+      </Section>
+
+      {/* Usage dashboard */}
+      <Section title="Usage">
+        <SessionUsageDashboard sessionId={sessionId} />
       </Section>
     </div>
   );
