@@ -225,10 +225,10 @@ The agent asks clarifying questions before acting when it is genuinely unsure wh
 33. Toggle the gate off entirely — behavior is exactly as before the feature existed.
 
 ### Sub-agent delegation
-27. **"Delegate reading all the Python files to a sub-agent, then use its findings to create a summary document."** — the parent agent spawns a child run (visible as a purple "sub-agent" badge), the child reads and analyses all files, then the parent uses the child's findings to write a summary. Approval is requested before delegation starts.
-28. **"First, search all files for TODO comments and list them. Separately, read the README and create a summary. Do these as independent sub-tasks."** — the agent spawns **two** sub-agents, each handling one independent sub-task. Both child runs stream their progress in real-time within the parent's observation timeline.
-29. **"Find all Python files and summarize each one, and also search for bugs or TODOs across the codebase"** — the "and also" joining two unrelated tasks triggers delegation without needing to explicitly say "delegate".
-30. Expand a delegation observation row — the nested **Sub-agent** card shows the child's task description, iteration count, individual observation steps, and final response. The child run also appears separately in the Run History tab.
+34. **"Delegate reading all the Python files to a sub-agent, then use its findings to create a summary document."** — the parent agent spawns a child run (visible as a purple "sub-agent" badge), the child reads and analyses all files, then the parent uses the child's findings to write a summary. Approval is requested before delegation starts.
+35. **"First, search all files for TODO comments and list them. Separately, read the README and create a summary. Do these as independent sub-tasks."** — the agent spawns **two** sub-agents, each handling one independent sub-task. Both child runs stream their progress in real-time within the parent's observation timeline.
+36. **"Find all Python files and summarize each one, and also search for bugs or TODOs across the codebase"** — the "and also" joining two unrelated tasks triggers delegation without needing to explicitly say "delegate".
+37. Expand a delegation observation row — the nested **Sub-agent** card shows the child's task description, iteration count, individual observation steps, and final response. The child run also appears separately in the Run History tab.
 
 ### Scheduled tasks — recurring and one-time
 
@@ -236,30 +236,30 @@ The agent can schedule tasks for future or recurring execution via the `schedule
 
 **Recurring task (safe tools — fully autonomous):**
 
-31. **"Every 2 minutes, list all files in the workspace and tell me the total count"** — approve the scheduling step → navigate to the Scheduler tab → watch the badge appear as runs complete → expand "View runs" to see each run's output. Uses only safe tools, so no further approval needed.
+38. **"Every 2 minutes, list all files in the workspace and tell me the total count"** — approve the scheduling step → navigate to the Scheduler tab → watch the badge appear as runs complete → expand "View runs" to see each run's output. Uses only safe tools, so no further approval needed.
 
 **Recurring task with pre-approved writes (approve once, runs autonomously):**
 
-32. **"Every 5 minutes, read the README and write a one-line summary to workspace-summary.txt. Approve all future runs automatically."** — the LLM pre-approves `write_file` with `approve_all_runs=true`. One approval card appears at scheduling time. All subsequent runs auto-execute. The Scheduler page shows the amber `write_file` badge with "(all runs auto-approved)".
+39. **"Every 5 minutes, read the README and write a one-line summary to workspace-summary.txt. Approve all future runs automatically."** — the LLM pre-approves `write_file` with `approve_all_runs=true`. One approval card appears at scheduling time. All subsequent runs auto-execute. The Scheduler page shows the amber `write_file` badge with "(all runs auto-approved)".
 
 **Recurring task with per-run approval (approve each execution):**
 
-33. **"Every 2 minutes, read the README and write a one-line summary to workspace-summary.txt. Ask me for approval each time."** — the LLM sets `approve_all_runs=false`. Every run triggers an approval card on the Scheduler page. An amber **"!"** badge pulses on the Scheduler nav tab when approval is needed.
+40. **"Every 2 minutes, read the README and write a one-line summary to workspace-summary.txt. Ask me for approval each time."** — the LLM sets `approve_all_runs=false`. Every run triggers an approval card on the Scheduler page. An amber **"!"** badge pulses on the Scheduler nav tab when approval is needed.
 
 **One-time scheduled task:**
 
-34. **"In 1 minute, list all files in the workspace and tell me the count"** — the task fires once and its status changes to "Completed". Check the Scheduler page to see the result in the run history.
+41. **"In 1 minute, list all files in the workspace and tell me the count"** — the task fires once and its status changes to "Completed". Check the Scheduler page to see the result in the run history.
 
 **Search-based recurring (output changes between runs):**
 
-35. **"Every 3 minutes, search for TODO comments in all files and count how many there are"** — add a `# TODO: fix this` to a file between runs and watch the count change. Good for demonstrating that each run is independent.
+42. **"Every 3 minutes, search for TODO comments in all files and count how many there are"** — add a `# TODO: fix this` to a file between runs and watch the count change. Good for demonstrating that each run is independent.
 
 **Scheduler page features to demonstrate:**
 
-36. **Pause/Resume** — create a recurring task, let it run 2–3 times, hit **Pause**. Verify runs stop. Hit **Resume** — runs restart on schedule.
-37. **View runs** — expand a task's run history. Click a run to see the full response. Change the dropdown to "Last 10" or "Last 25" to see more.
-38. **Nav badge** — leave the Scheduler page while tasks are running. A green badge appears on the Scheduler tab showing the count of new (unseen) runs. Navigate back → badge clears.
-39. **Delete** — delete a task and verify it disappears from the list.
+43. **Pause/Resume** — create a recurring task, let it run 2–3 times, hit **Pause**. Verify runs stop. Hit **Resume** — runs restart on schedule.
+44. **View runs** — expand a task's run history. Click a run to see the full response. Change the dropdown to "Last 10" or "Last 25" to see more.
+45. **Nav badge** — leave the Scheduler page while tasks are running. A green badge appears on the Scheduler tab showing the count of new (unseen) runs. Navigate back → badge clears.
+46. **Delete** — delete a task and verify it disappears from the list.
 
 ### Web fetch — live data from the internet
 
@@ -273,33 +273,33 @@ WEB_FETCH_ALLOWED_DOMAINS=["api.open-meteo.com","api.github.com","en.wikipedia.o
 
 **Weather (JSON API):**
 
-46. **"What's the weather in Vienna right now?"** — the agent constructs an Open-Meteo API URL, requests approval, fetches live JSON weather data, and presents the result.
-47. **"Compare the current temperature in Berlin and Tokyo"** — two fetch_url calls, each requiring approval.
+47. **"What's the weather in Vienna right now?"** — the agent constructs an Open-Meteo API URL, requests approval, fetches live JSON weather data, and presents the result.
+48. **"Compare the current temperature in Berlin and Tokyo"** — two fetch_url calls, each requiring approval.
 
 **GitHub (JSON API):**
 
-48. **"How many stars does the FastAPI repo have on GitHub?"** — fetches `api.github.com/repos/tiangolo/fastapi` and extracts the stargazer count.
+49. **"How many stars does the FastAPI repo have on GitHub?"** — fetches `api.github.com/repos/tiangolo/fastapi` and extracts the stargazer count.
 
 **Wikipedia (extract API):**
 
-49. **"Get me the Wikipedia page about TU Wien"** — fetches the full article as plain text via the MediaWiki API and relays the content.
+50. **"Get me the Wikipedia page about TU Wien"** — fetches the full article as plain text via the MediaWiki API and relays the content.
 
 **Security (should be blocked):**
 
-50. **"Fetch https://google.com"** — domain not in allowlist, blocked immediately.
-51. **"Fetch http://169.254.169.254/latest/meta-data/"** — cloud metadata IP, blocked by SSRF defense.
-52. **"Fetch file:///etc/passwd"** — non-HTTP scheme, blocked by policy.
+51. **"Fetch https://google.com"** — domain not in allowlist, blocked immediately.
+52. **"Fetch http://169.254.169.254/latest/meta-data/"** — cloud metadata IP, blocked by SSRF defense.
+53. **"Fetch file:///etc/passwd"** — non-HTTP scheme, blocked by policy.
 
 ### Execution graph — visual DAG sidebar
 
 The execution graph renders a real-time directed acyclic graph (DAG) in the right sidebar during and after runs. Each tool call is a node, edges animate in with draw-in effects, and delegate nodes branch visually with inline child run cards.
 
-40. **Run any multi-step query** (e.g., *"Read the README and summarize it"*) — watch the sidebar graph build in real-time: Start → read_file ✓ → Answer ✓ with animated edges between nodes.
-41. **Click any node** in the graph — a popover appears showing tool arguments, result JSON, reasoning, and timing. Click the **pin icon** to keep the popover open while clicking other nodes (for comparing steps).
-42. **Delegation branching** — run *"Search for TODOs and separately summarize the README as independent sub-tasks"* — delegate nodes indent right with a purple left-border, and child run cards render inline showing the sub-agent's observations.
-43. **Past run graphs** — scroll up to a completed message. Click the small **↗ graph** link at the bottom of the message. The sidebar loads that run's execution graph. Click ✕ in the footer to dismiss.
-44. **Error paths** — run something that fails or gets denied. Error nodes show red borders and dashed edges. The graph makes the failure path visually obvious.
-45. **Explain a run** — after any run completes, click **"Explain this run"** at the bottom of the execution graph (or in Run History). A compact summary paragraph appears; switch between **summary**, **detailed**, and **debug** tabs. Also available via `GET /api/runs/{run_id}/explain?detail_level=summary`.
+54. **Run any multi-step query** (e.g., *"Read the README and summarize it"*) — watch the sidebar graph build in real-time: Start → read_file ✓ → Answer ✓ with animated edges between nodes.
+55. **Click any node** in the graph — a popover appears showing tool arguments, result JSON, reasoning, and timing. Click the **pin icon** to keep the popover open while clicking other nodes (for comparing steps).
+56. **Delegation branching** — run *"Search for TODOs and separately summarize the README as independent sub-tasks"* — delegate nodes indent right with a purple left-border, and child run cards render inline showing the sub-agent's observations.
+57. **Past run graphs** — scroll up to a completed message. Click the small **↗ graph** link at the bottom of the message. The sidebar loads that run's execution graph. Click ✕ in the footer to dismiss.
+58. **Error paths** — run something that fails or gets denied. Error nodes show red borders and dashed edges. The graph makes the failure path visually obvious.
+59. **Explain a run** — after any run completes, click **"Explain this run"** at the bottom of the execution graph (or in Run History). A compact summary paragraph appears; switch between **summary**, **detailed**, and **debug** tabs. Also available via `GET /api/runs/{run_id}/explain?detail_level=summary`.
 
 ## Execution Modes
 
@@ -425,7 +425,7 @@ The ReAct loop sends all previous observations to the LLM on every iteration. Wi
 
 Mini-OpenClaw manages this with three mechanisms:
 
-**Token estimation.** LLMs process text as tokens (sub-word fragments), not characters. Exact tokenization requires model-specific tokenizers like `tiktoken`, which add dependencies and complexity. Mini-OpenClaw uses a lightweight heuristic instead: **1 token ≈ 4 characters** of English text. This ratio holds reasonably well across most tokenizers (GPT-style BPE averages ~3.5–4.5 chars/token for English prose). The estimate is used only for budget management — deciding when to compress observations — not for billing or exact measurement, so ±20% accuracy is sufficient. The implementation lives in `core/token_utils.py` (`estimate_tokens()`). A built-in lookup table maps model names to their context window sizes (e.g. `claude-sonnet-4` → 200K, `llama3.2` → 8K, `phi3` → 4K). Unknown models fall back to a conservative 8K default.
+**Token estimation.** LLMs process text as tokens (sub-word fragments), not characters. Exact tokenization requires model-specific tokenizers like `tiktoken`, which add dependencies and complexity. Mini-OpenClaw uses a lightweight heuristic for **context budget management**: **1 token ≈ 4 characters** of English text. This ratio holds reasonably well across most tokenizers (GPT-style BPE averages ~3.5–4.5 chars/token for English prose). The heuristic is used only for deciding when to compress observations, not for billing — real token counts come from the provider SDK and are tracked per-step and per-run (see [Token Tracking & Cost Dashboard](#token-tracking--cost-dashboard)). The implementation lives in `core/token_utils.py` (`estimate_tokens()`). A built-in lookup table maps model names to their context window sizes (e.g. `claude-sonnet-4` → 200K, `llama3.2` → 128K, `phi3` → 4K). Unknown models fall back to a conservative 8K default.
 
 **Progressive summarization.** Before each ReAct iteration, the planner's `_build_observation_context()` method calculates a token budget (context window minus 30% reserve for the response, minus system prompt and user message), then decides how to format observations:
 
@@ -653,6 +653,7 @@ This context is injected into the LLM system prompt with explicit instructions t
 | `remember_fact` | Store a durable fact in memory | Safe | No |
 | `search_memory` | Query stored facts, episodes, and summaries | Safe | No |
 | `delegate_task` | Spawn a sub-agent to handle an independent sub-task — child runs with own iteration budget, restricted tool set (no delegation, no memory writes), and real-time SSE streaming | Medium | Yes |
+| `schedule_task` | Schedule a one-time or recurring task for future execution — configurable interval, max runs, and per-tool pre-approval | Medium | Yes |
 | `fetch_url` | Fetch content from a public URL — auto-detects JSON vs HTML/text, domain allowlist + SSRF defense (private-IP blocking), size cap, timeout | High | Yes |
 
 ## Security Model
@@ -704,10 +705,10 @@ The Settings page shows all directories with color-coded access badges:
 
 After configuring mounts, try:
 
-46. **"List files in the codebase"** — `list_files(path="codebase:.")`, auto-executes
-47. **"Search for TODO in my notes"** — `search_in_files(path="notes:.", query="TODO")`
-48. **"Read the README from codebase and write a summary to notes"** — cross-directory workflow: reads from read-only mount, writes to writable mount (approval required)
-49. **"Create a file in the codebase directory"** — blocked: mount is read-only. Policy denies without showing an approval card
+60. **"List files in the codebase"** — `list_files(path="codebase:.")`, auto-executes
+61. **"Search for TODO in my notes"** — `search_in_files(path="notes:.", query="TODO")`
+62. **"Read the README from codebase and write a summary to notes"** — cross-directory workflow: reads from read-only mount, writes to writable mount (approval required)
+63. **"Create a file in the codebase directory"** — blocked: mount is read-only. Policy denies without showing an approval card
 
 ## Adding a New Tool
 
