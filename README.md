@@ -248,6 +248,35 @@ The agent can schedule tasks for future or recurring execution via the `schedule
 38. **Nav badge** — leave the Scheduler page while tasks are running. A green badge appears on the Scheduler tab showing the count of new (unseen) runs. Navigate back → badge clears.
 39. **Delete** — delete a task and verify it disappears from the list.
 
+### Web fetch — live data from the internet
+
+The `fetch_url` tool retrieves live data from the public web. It is opt-in: only domains listed in `WEB_FETCH_ALLOWED_DOMAINS` are reachable. All requests require user approval, and SSRF defenses block private/loopback IPs.
+
+**Setup:** Add allowed domains to `.env` and restart the backend:
+
+```dotenv
+WEB_FETCH_ALLOWED_DOMAINS=["api.open-meteo.com","api.github.com","en.wikipedia.org"]
+```
+
+**Weather (JSON API):**
+
+46. **"What's the weather in Vienna right now?"** — the agent constructs an Open-Meteo API URL, requests approval, fetches live JSON weather data, and presents the result.
+47. **"Compare the current temperature in Berlin and Tokyo"** — two fetch_url calls, each requiring approval.
+
+**GitHub (JSON API):**
+
+48. **"How many stars does the FastAPI repo have on GitHub?"** — fetches `api.github.com/repos/tiangolo/fastapi` and extracts the stargazer count.
+
+**Wikipedia (extract API):**
+
+49. **"Get me the Wikipedia page about TU Wien"** — fetches the full article as plain text via the MediaWiki API and relays the content.
+
+**Security (should be blocked):**
+
+50. **"Fetch https://google.com"** — domain not in allowlist, blocked immediately.
+51. **"Fetch http://169.254.169.254/latest/meta-data/"** — cloud metadata IP, blocked by SSRF defense.
+52. **"Fetch file:///etc/passwd"** — non-HTTP scheme, blocked by policy.
+
 ### Execution graph — visual DAG sidebar
 
 The execution graph renders a real-time directed acyclic graph (DAG) in the right sidebar during and after runs. Each tool call is a node, edges animate in with draw-in effects, and delegate nodes branch visually with inline child run cards.
@@ -730,6 +759,40 @@ All settings are read from the `.env` file (see `.env.example`):
 | `WEB_FETCH_MAX_REDIRECTS` | Maximum HTTP redirects to follow | `3` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
 | `BACKEND_PORT` | Backend server port | `8000` |
+
+## Web Fetch
+
+The `fetch_url` tool is the first tool that crosses the network boundary. It retrieves live data from the public web — weather APIs, GitHub metadata, Wikipedia articles, documentation — with strong security guardrails.
+
+### How it works
+
+The tool auto-detects the response type: JSON responses are parsed and returned as structured data; HTML pages are stripped to clean text. A `User-Agent` header identifies the request source.
+
+### Security model
+
+All network policy lives in `PolicyEngine.validate_url()`, enforcing five checks in order (fail-closed on any):
+
+1. **Scheme restriction** — only `http` and `https` (blocks `file:`, `ftp:`, etc.)
+2. **Host present** — URL must contain a hostname
+3. **Domain allowlist** — host must match an entry in `WEB_FETCH_ALLOWED_DOMAINS` (subdomain-aware). Empty list blocks everything
+4. **SSRF defense** — resolves the hostname via DNS and rejects any IP that is private, loopback, link-local, reserved, multicast, or the cloud metadata address `169.254.169.254`
+5. **DNS rebinding defense** — re-resolves and re-validates IPs immediately before each HTTP request to close the TOCTOU window. Redirects are followed manually with per-hop re-validation
+
+Additionally, responses are **streamed** with a mid-stream abort if the body exceeds `WEB_FETCH_MAX_BYTES`, and a timeout is enforced on every request.
+
+### Configuration
+
+Add allowed domains to `.env` — the list is opt-in (empty = block everything):
+
+```dotenv
+WEB_FETCH_ALLOWED_DOMAINS=["api.open-meteo.com","api.github.com","en.wikipedia.org"]
+```
+
+Subdomains are included automatically: adding `example.com` also allows `sub.example.com`. Set `WEB_FETCH_ENABLED=false` to disable the tool entirely.
+
+### Excluded from child runs
+
+Delegated sub-agents do not have access to `fetch_url` — network access in child runs without parent-level approval is too risky.
 
 ## Running Tests
 
