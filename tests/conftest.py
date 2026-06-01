@@ -34,6 +34,9 @@ def _isolate_from_dotenv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     monkeypatch.setenv("LLM_PROVIDER", "anthropic")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     monkeypatch.setenv("GEMINI_API_KEY", "")
+    # Disable clarification by default in tests so existing tests that mock
+    # react_step aren't surprised by an extra create_plan call.
+    monkeypatch.setenv("CLARIFICATION_ENABLED", "false")
 
 
 @pytest.fixture

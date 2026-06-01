@@ -400,6 +400,58 @@ class Orchestrator:
                 logger.warning("Goal generation failed (non-fatal): %s", exc)
                 # Continue without goals — falls back to pure ReAct behavior
 
+        # ── Clarification gate ──────────────────────────────────────
+        # Before entering the ReAct loop, check if the planner is confident
+        # enough to proceed. If not, pause for user clarification.
+        # Skipped for child runs (no human attached) and when disabled.
+        if (
+            self._settings.clarification_enabled
+            and not is_child
+            and run.clarification_rounds < self._settings.clarification_max_rounds
+        ):
+            try:
+                initial_plan = await self._planner.create_plan(
+                    user_message=run.user_message,
+                    memory_context=memory_context,
+                    workspace_info=workspace_info,
+                )
+                questions = initial_plan.get("clarifying_questions", [])
+                needs_clarification = (
+                    (
+                        initial_plan.get("task_type") == "clarification_needed"
+                        or (
+                            initial_plan.get("confidence") is not None
+                            and initial_plan["confidence"] < self._settings.clarification_threshold
+                        )
+                    )
+                    and questions  # only pause if we actually have questions
+                )
+                if needs_clarification:
+                    run.status = RunStatus.AWAITING_CLARIFICATION
+                    run.clarifying_questions = questions[:3]  # cap at 3
+                    run.plan.clarifying_questions = run.clarifying_questions
+                    run.plan.confidence = initial_plan.get("confidence", 0.0)
+                    run.plan.reasoning = initial_plan.get("reasoning", "")
+                    run.plan.task_type = initial_plan.get("task_type", "clarification_needed")
+                    await self._save_run(run)
+                    await self._store_message(
+                        run.session_id, "assistant",
+                        self._format_questions(run.clarifying_questions), run.run_id,
+                    )
+                    await self._audit.log(
+                        "awaiting_clarification", run_id=run.run_id,
+                        data={"questions": run.clarifying_questions,
+                              "confidence": initial_plan.get("confidence", 0.0),
+                              "round": run.clarification_rounds},
+                    )
+                    event_emitter.emit(run.run_id, "awaiting_clarification")
+                    return  # pause — do NOT enter the ReAct loop
+            except PlannerError:
+                raise
+            except Exception as exc:
+                logger.warning("Clarification check failed (non-fatal): %s", exc)
+                # Proceed into the ReAct loop without pausing
+
         while run.iterations < run.max_iterations:
             run.iterations += 1
             run.status = RunStatus.REACTING
@@ -1658,6 +1710,63 @@ class Orchestrator:
             event_emitter.emit(run.run_id, "run_failed")
 
     # ------------------------------------------------------------------
+    # Clarification
+    # ------------------------------------------------------------------
+
+    async def provide_clarification(self, run_id: str, answer: str) -> Run:
+        """User answered the clarifying questions. Fold the answer into the
+        original message, increment the round counter, and re-plan/resume."""
+        run = await self.get_run(run_id)
+        if run is None:
+            raise ValueError(f"Run not found: {run_id}")
+        if run.status != RunStatus.AWAITING_CLARIFICATION:
+            raise ValueError(
+                f"Run {run_id} is not awaiting clarification (status={run.status.value})"
+            )
+
+        # Store the user's clarification as a message
+        await self._store_message(run.session_id, "user", answer, run.run_id)
+
+        # Increment round counter
+        run.clarification_rounds += 1
+        run.clarifying_questions = []  # clear — will be refilled if still ambiguous
+
+        # Build augmented message with the Q&A context
+        q_and_a = "\n".join(
+            f"Q: {q}" for q in (run.plan.clarifying_questions if run.plan else [])
+        )
+        augmented_message = (
+            f"{run.user_message}\n\n"
+            f"[Clarification context]\n{q_and_a}\n"
+            f"User's answer: {answer}"
+        )
+        run.user_message = augmented_message
+
+        # Resume planning
+        run.status = RunStatus.PLANNING
+        await self._save_run(run)
+        await self._audit.log(
+            "clarification_provided", run_id=run.run_id,
+            data={"answer": answer, "round": run.clarification_rounds},
+        )
+        event_emitter.emit(run.run_id, "planning_started")
+
+        # Re-process the run (will hit the clarification gate again if still ambiguous)
+        task = asyncio.create_task(self._process_run(run))
+        task.add_done_callback(self._task_done)
+        self._pending_tasks.append(task)
+        self._pending_tasks = [t for t in self._pending_tasks if not t.done()]
+        return run
+
+    @staticmethod
+    def _format_questions(questions: list[str]) -> str:
+        """Render clarifying questions as a friendly assistant message."""
+        if len(questions) == 1:
+            return f"Before I proceed, I need to ask:\n\n{questions[0]}"
+        lines = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
+        return f"I have a few questions before I proceed:\n\n{lines}"
+
+    # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
 
@@ -1668,6 +1777,7 @@ class Orchestrator:
             [o.model_dump() for o in run.observations], default=str
         ) if run.observations else "[]"
         reflection_json = run.reflection.model_dump_json() if run.reflection else None
+        clarifying_questions_json = json.dumps(run.clarifying_questions) if run.clarifying_questions else "[]"
         conn = await get_connection(self._db_path)
         try:
             existing = await conn.execute_fetchall("SELECT id FROM runs WHERE id=?", (run.run_id,))
@@ -1675,22 +1785,27 @@ class Orchestrator:
                 await conn.execute(
                     "UPDATE runs SET status=?, plan=?, final_response=?, updated_at=?, "
                     "iterations=?, max_iterations=?, observations=?, context_window=?, "
-                    "model_name=?, reflection=?, parent_run_id=?, depth=? WHERE id=?",
+                    "model_name=?, reflection=?, parent_run_id=?, depth=?, "
+                    "clarifying_questions=?, clarification_rounds=? WHERE id=?",
                     (run.status.value, plan_json, run.final_response, run.updated_at,
                      run.iterations, run.max_iterations, observations_json,
                      run.context_window, run.model_name, reflection_json,
-                     run.parent_run_id, run.depth, run.run_id))
+                     run.parent_run_id, run.depth,
+                     clarifying_questions_json, run.clarification_rounds,
+                     run.run_id))
             else:
                 await conn.execute(
                     "INSERT INTO runs (id,session_id,workspace_id,status,user_message,plan,"
                     "final_response,created_at,updated_at,iterations,max_iterations,observations,"
-                    "context_window,model_name,reflection,parent_run_id,depth) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "context_window,model_name,reflection,parent_run_id,depth,"
+                    "clarifying_questions,clarification_rounds) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (run.run_id, run.session_id, run.workspace_id, run.status.value,
                      run.user_message, plan_json, run.final_response, run.created_at,
                      run.updated_at, run.iterations, run.max_iterations, observations_json,
                      run.context_window, run.model_name, reflection_json,
-                     run.parent_run_id, run.depth))
+                     run.parent_run_id, run.depth,
+                     clarifying_questions_json, run.clarification_rounds))
             await conn.commit()
         finally:
             await conn.close()
@@ -1802,4 +1917,6 @@ class Orchestrator:
             reflection=reflection,
             parent_run_id=row["parent_run_id"] if "parent_run_id" in row.keys() else None,
             depth=row["depth"] if "depth" in row.keys() else 0,
+            clarifying_questions=json.loads(row["clarifying_questions"]) if "clarifying_questions" in row.keys() and row["clarifying_questions"] else [],
+            clarification_rounds=row["clarification_rounds"] if "clarification_rounds" in row.keys() else 0,
         )

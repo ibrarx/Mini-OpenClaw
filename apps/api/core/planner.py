@@ -56,6 +56,7 @@ Respond with ONLY a valid JSON object (no markdown, no backticks). Structure:
   "confidence": 0.0 to 1.0,
   "reasoning": "Brief explanation",
   "direct_response": "Your answer (only for direct_answer, null otherwise)",
+  "clarifying_questions": ["Question 1?", "Question 2?"],
   "steps": [
     {{
       "step_id": "step_1",
@@ -69,6 +70,11 @@ Respond with ONLY a valid JSON object (no markdown, no backticks). Structure:
 
 For direct_answer: task_type="direct_answer", answer in direct_response, empty steps.
 For tool tasks: fill steps array.
+For clarification_needed: set task_type="clarification_needed", include 1-3 SPECIFIC questions
+  in "clarifying_questions" that help disambiguate the user's intent. Questions should be
+  concrete (e.g. "Which directory — `project` or `notes`?") not vague ("Can you clarify?").
+  Ground questions in known context (workspace contents, memory) when possible.
+  Only use this when you genuinely cannot proceed — prefer making a reasonable assumption.
 """
 
 
@@ -357,11 +363,13 @@ class Planner:
         plan.setdefault("reasoning", "")
         plan.setdefault("direct_response", None)
         plan.setdefault("steps", [])
+        plan.setdefault("clarifying_questions", [])
         logger.info(
-            "Plan: type=%s confidence=%.2f steps=%d",
+            "Plan: type=%s confidence=%.2f steps=%d questions=%d",
             plan["task_type"],
             plan["confidence"],
             len(plan["steps"]),
+            len(plan["clarifying_questions"]),
         )
         return plan
 

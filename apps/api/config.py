@@ -89,6 +89,14 @@ class Settings(BaseSettings):
     frontend_port: int = 5173
     log_level: str = "INFO"
 
+    # ----- Clarification -----
+    clarification_enabled: bool = True
+    # If planner confidence is below this (or task_type == clarification_needed),
+    # the agent asks clarifying questions before entering the ReAct loop.
+    clarification_threshold: float = 0.5   # 0.0-1.0
+    # Max clarification rounds before proceeding best-effort (prevents infinite loops).
+    clarification_max_rounds: int = 2
+
     # ----- ReAct loop -----
     use_react: bool = True
     react_max_iterations: int = 10
@@ -116,6 +124,13 @@ class Settings(BaseSettings):
         # Budget warning percentage: 10..80
         pct = max(10, min(80, self.react_budget_warn_pct))
         object.__setattr__(self, "react_budget_warn_pct", pct)
+
+        # Clarification threshold: 0.0..1.0
+        thresh = max(0.0, min(1.0, self.clarification_threshold))
+        object.__setattr__(self, "clarification_threshold", thresh)
+        # Clarification max rounds: 0..5
+        clar_rounds = max(0, min(5, self.clarification_max_rounds))
+        object.__setattr__(self, "clarification_max_rounds", clar_rounds)
 
         # Validate workspace mount names
         seen: set[str] = set()

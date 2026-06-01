@@ -15,6 +15,7 @@ class RunStatus(str, Enum):
     IDLE = "idle"
     PLANNING = "planning"
     AWAITING_APPROVAL = "awaiting_approval"
+    AWAITING_CLARIFICATION = "awaiting_clarification"
     RUNNING = "running"
     REACTING = "reacting"
     REFLECTING = "reflecting"
@@ -103,6 +104,7 @@ class Plan(BaseModel):
     direct_response: str | None = None
     goals: list[Goal] = Field(default_factory=list)        # empty when goals disabled
     replan_count: int = 0                                   # stays 0 when replanning disabled
+    clarifying_questions: list[str] = Field(default_factory=list)  # populated when task_type == clarification_needed
 
 
 class Observation(BaseModel):
@@ -152,3 +154,6 @@ class Run(BaseModel):
     # Sub-agent delegation fields
     parent_run_id: str | None = None  # links child runs to parent
     depth: int = 0                    # 0=top-level, 1=child, 2=grandchild
+    # Clarification fields
+    clarifying_questions: list[str] = Field(default_factory=list)
+    clarification_rounds: int = 0

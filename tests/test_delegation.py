@@ -56,6 +56,7 @@ def _make_settings(workspace: Path, db_path: Path, **overrides: Any) -> Settings
         react_self_reflect=False,
         delegate_enabled=True, delegate_max_depth=2,
         delegate_max_children=3, delegate_max_child_iterations=5,
+        clarification_enabled=False,
     )
     defaults.update(overrides)
     return Settings(**defaults)

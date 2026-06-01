@@ -24,6 +24,26 @@ class ApproveRequest(BaseModel):
     approved: bool
 
 
+class ClarifyRequest(BaseModel):
+    answer: str
+
+
+@router.post("/runs/{run_id}/clarify")
+async def clarify_run(run_id: str, body: ClarifyRequest, request: Request) -> dict:
+    """Submit a clarification answer for a run awaiting clarification."""
+    orchestrator = request.app.state.orchestrator
+    if not body.answer.strip():
+        raise HTTPException(status_code=400, detail="Answer cannot be empty")
+    try:
+        run = await orchestrator.provide_clarification(run_id, body.answer.strip())
+        return run.model_dump()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error("Clarification failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.get("/runs/{run_id}")
 async def get_run(run_id: str, request: Request) -> dict:
     orchestrator = request.app.state.orchestrator

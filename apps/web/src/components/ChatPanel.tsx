@@ -4,12 +4,12 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Loader2, Square, Trash2, RefreshCw } from "lucide-react";
+import { Send, Loader2, Square, Trash2, RefreshCw, HelpCircle } from "lucide-react";
 import MessageBubble from "./MessageBubble";
 import PlanPreview from "./PlanPreview";
 import ApprovalCard from "./ApprovalCard";
 import ToolTrace from "./ToolTrace";
-import { submitChat, approveStep, rejectStep, cancelRun, retryRun } from "../api/client";
+import { submitChat, approveStep, rejectStep, cancelRun, retryRun, clarifyRun } from "../api/client";
 import { useRunSSE } from "../hooks/useRunSSE";
 import type { ChatMessage, Run, RunStatus } from "../api/types";
 
@@ -235,10 +235,12 @@ export default function ChatPanel({
   );
 
   const isActive = !!activeRunId;
+  const isClarifying = isActive && run?.status === "awaiting_clarification";
 
   // Derive the user-friendly status line from the latest observation
   const getStatusText = (): string => {
     if (!run) return "";
+    if (run.status === "awaiting_clarification") return "Waiting for your answer...";
     if (run.status === "planning") return "Planning...";
     if (run.observations && run.observations.length > 0) {
       const latest = run.observations[run.observations.length - 1];
@@ -249,6 +251,30 @@ export default function ChatPanel({
     if (decidedSteps.size > 0) return "Executing approved step...";
     return `Working on it... (step ${run.iterations ?? 0})`;
   };
+
+  const handleClarify = useCallback(
+    async (answer: string) => {
+      if (!activeRunId || !answer.trim()) return;
+      const userMsg: ChatMessage = {
+        id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        role: "user",
+        content: answer,
+        timestamp: new Date().toISOString(),
+        run_id: activeRunId,
+      };
+      onMessagesChange([...messages, userMsg]);
+      try {
+        await clarifyRun(activeRunId, answer.trim());
+        refresh();
+      } catch (err) {
+        addMessage(
+          "system",
+          `Clarification failed: ${err instanceof Error ? err.message : "unknown"}`
+        );
+      }
+    },
+    [activeRunId, refresh, messages, onMessagesChange]
+  );
 
   return (
     <div className="flex flex-col h-full">
@@ -326,6 +352,34 @@ export default function ChatPanel({
                 </div>
               ))}
 
+            {/* Clarification questions */}
+            {isClarifying && run.clarifying_questions && run.clarifying_questions.length > 0 && (
+              <div className="ml-9 animate-slide-up rounded-lg border-2 border-blue-500/30 bg-blue-500/5 overflow-hidden">
+                <div className="flex items-center gap-2 px-3.5 py-2 bg-blue-500/10 border-b border-blue-500/20">
+                  <HelpCircle size={15} className="text-blue-500" />
+                  <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                    Clarification Needed
+                  </span>
+                  {run.clarification_rounds !== undefined && run.clarification_rounds > 0 && (
+                    <span className="ml-auto text-xs t-faint">
+                      Round {run.clarification_rounds + 1}
+                    </span>
+                  )}
+                </div>
+                <div className="px-3.5 py-3 space-y-1.5">
+                  {run.clarifying_questions.map((q, i) => (
+                    <p key={i} className="text-sm t-secondary leading-relaxed">
+                      {run.clarifying_questions.length > 1 && (
+                        <span className="t-faint font-mono mr-1.5">{i + 1}.</span>
+                      )}
+                      {q}
+                    </p>
+                  ))}
+                  <p className="text-xs t-faint mt-2">Type your answer below to continue.</p>
+                </div>
+              </div>
+            )}
+
             {/* Completed tool traces */}
             {run.plan?.steps
               .filter((s) => s.status === "completed" && s.result)
@@ -337,7 +391,7 @@ export default function ChatPanel({
 
             {/* Active status indicator — shows user_announcement from latest observation */}
             {(["planning", "running", "reacting"].includes(run.status) || decidedSteps.size > 0) &&
-              !["completed", "failed", "cancelled"].includes(run.status) && (
+              !["completed", "failed", "cancelled", "awaiting_clarification"].includes(run.status) && (
               <div className="ml-9 flex items-center gap-2 text-xs t-muted">
                 <Loader2 size={14} className="animate-spin text-blue-400" />
                 <span>{getStatusText()}</span>
@@ -371,18 +425,41 @@ export default function ChatPanel({
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSubmit()}
-            placeholder={isActive ? "Waiting for run to complete..." : "Type a message..."}
-            disabled={isActive || submitting}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                if (isClarifying) {
+                  handleClarify(input);
+                  setInput("");
+                } else {
+                  handleSubmit();
+                }
+              }
+            }}
+            placeholder={
+              isClarifying
+                ? "Type your answer..."
+                : isActive
+                ? "Waiting for run to complete..."
+                : "Type a message..."
+            }
+            disabled={(isActive && !isClarifying) || submitting}
             className="input-field"
           />
-          {isActive ? (
+          {isActive && !isClarifying ? (
             <button
               onClick={handleCancel}
               className="btn btn-danger flex-shrink-0"
               title="Cancel run"
             >
               <Square size={14} />
+            </button>
+          ) : isClarifying ? (
+            <button
+              onClick={() => { handleClarify(input); setInput(""); }}
+              disabled={!input.trim()}
+              className="btn btn-primary flex-shrink-0"
+            >
+              <Send size={14} />
             </button>
           ) : (
             <button
