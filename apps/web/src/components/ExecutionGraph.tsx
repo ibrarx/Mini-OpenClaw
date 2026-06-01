@@ -23,6 +23,7 @@ import {
   Brain,
   ScanEye,
   MessageSquare,
+  HelpCircle,
   Clock,
   Pin,
   PinOff,
@@ -35,7 +36,7 @@ import type { Run, Observation } from "../api/types";
 // ── Types ────────────────────────────────────────────
 
 type NodeStatus = "success" | "error" | "denied" | "rejected" | "running" | "pending";
-type NodeKind = "start" | "tool" | "delegate" | "active" | "done" | "reflect";
+type NodeKind = "start" | "tool" | "delegate" | "active" | "done" | "reflect" | "clarify";
 
 interface GraphNode {
   id: string;
@@ -122,12 +123,13 @@ function buildGraphData(run: Run): { nodes: GraphNode[]; edges: GraphEdge[] } {
   // Active node if still running
   const isActive = run.status === "reacting" || run.status === "planning";
   const isReflecting = run.status === "reflecting";
-  if (isActive || isReflecting) {
+  const isClarifying = run.status === "awaiting_clarification";
+  if (isActive || isReflecting || isClarifying) {
     nodes.push({
       id: "active",
-      kind: isReflecting ? "reflect" : "active",
-      label: isReflecting ? "Reviewing…" : "Thinking…",
-      sublabel: isReflecting ? "self-reflection" : "planning",
+      kind: isClarifying ? "clarify" : isReflecting ? "reflect" : "active",
+      label: isClarifying ? "Waiting for answer…" : isReflecting ? "Reviewing…" : "Thinking…",
+      sublabel: isClarifying ? "clarification" : isReflecting ? "self-reflection" : "planning",
       status: "running",
     });
     edges.push({ id: "e_active", type: "normal" });
@@ -204,6 +206,7 @@ function NodeCard({
       : node.kind === "done" ? "complete"
       : node.kind === "active" ? "planning next step…"
       : node.kind === "reflect" ? "checking quality…"
+      : node.kind === "clarify" ? "asking user…"
       : node.kind === "delegate" ? "sub-agent"
       : null;
 
@@ -581,6 +584,7 @@ function StatusIcon({ kind, status }: { kind: NodeKind; status: NodeStatus }) {
   if (kind === "done") return <CheckCircle2 size={s} className="text-emerald-500 flex-shrink-0" />;
   if (kind === "active") return <Loader2 size={s} className="text-blue-400 animate-spin flex-shrink-0" />;
   if (kind === "reflect") return <ScanEye size={s} className="text-violet-400 animate-spin flex-shrink-0" />;
+  if (kind === "clarify") return <HelpCircle size={s} className="text-blue-400 animate-pulse flex-shrink-0" />;
   if (kind === "delegate") return <Users size={s} className="text-purple-400 flex-shrink-0" />;
   switch (status) {
     case "success": return <CheckCircle2 size={s} className="text-emerald-500 flex-shrink-0" />;
@@ -598,6 +602,7 @@ function getBorderClass(kind: NodeKind, status: NodeStatus): string {
     case "done": return "border border-emerald-500/30 hover:border-emerald-500/50";
     case "active": return "border border-blue-500/40 animate-pulse";
     case "reflect": return "border border-violet-500/40 animate-pulse";
+    case "clarify": return "border border-blue-500/40 animate-pulse";
     case "delegate": return "border-2 border-purple-500/40 hover:border-purple-500/60";
     case "tool":
       switch (status) {
@@ -618,6 +623,7 @@ function getBgColor(kind: NodeKind, status: NodeStatus): string {
     case "done": return "rgba(16, 185, 129, 0.1)";
     case "active": return "rgba(37, 99, 235, 0.06)";
     case "reflect": return "rgba(139, 92, 246, 0.06)";
+    case "clarify": return "rgba(37, 99, 235, 0.06)";
     case "delegate": return "rgba(139, 92, 246, 0.06)";
     case "tool":
       if (status === "error" || status === "rejected") return "rgba(239, 68, 68, 0.06)";

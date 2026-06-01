@@ -91,6 +91,38 @@ export async function cancelRun(runId: string): Promise<void> {
   await apiFetch(`/runs/${runId}/cancel`, { method: "POST" });
 }
 
+/** Submit a clarification answer for a run awaiting clarification. */
+export async function clarifyRun(
+  runId: string,
+  answer: string
+): Promise<Run> {
+  return apiFetch(`/runs/${runId}/clarify`, {
+    method: "POST",
+    body: JSON.stringify({ answer }),
+  });
+}
+
+// ── Clarification Settings ───────────────────────────
+
+export interface ClarificationSettings {
+  enabled: boolean;
+  threshold: number;
+  max_rounds: number;
+}
+
+export async function getClarificationSettings(): Promise<ClarificationSettings> {
+  return apiFetch("/settings/clarification");
+}
+
+export async function updateClarificationSettings(
+  updates: Partial<ClarificationSettings>
+): Promise<ClarificationSettings> {
+  return apiFetch("/settings/clarification", {
+    method: "PATCH",
+    body: JSON.stringify(updates),
+  });
+}
+
 export type ExplainDetailLevel = "summary" | "detailed" | "debug";
 
 export interface ExplainResult {

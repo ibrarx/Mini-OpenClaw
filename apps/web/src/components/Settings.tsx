@@ -17,8 +17,10 @@ import {
   ShieldCheck,
   FolderOpen,
   Lock,
+  HelpCircle,
 } from "lucide-react";
-import { getTools, healthCheck, getMemory } from "../api/client";
+import { getTools, healthCheck, getMemory, getClarificationSettings, updateClarificationSettings } from "../api/client";
+import type { ClarificationSettings } from "../api/client";
 import { RiskBadge } from "./PlanPreview";
 import { useTheme } from "../App";
 import type { ThemeMode } from "../App";
@@ -43,15 +45,17 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
     { name: string; path: string; read_only: boolean; exists: boolean }[]
   >([]);
   const [loading, setLoading] = useState(true);
+  const [clarification, setClarification] = useState<ClarificationSettings | null>(null);
   const { theme, setTheme } = useTheme();
 
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [h, t, m] = await Promise.allSettled([
+      const [h, t, m, c] = await Promise.allSettled([
         healthCheck(),
         getTools(),
         getMemory(),
+        getClarificationSettings(),
       ]);
       if (h.status === "fulfilled") {
         const data = h.value as Record<string, unknown>;
@@ -77,6 +81,10 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
           counts[item.memory_type] = (counts[item.memory_type] ?? 0) + 1;
         }
         setMemoryCounts(counts);
+      }
+
+      if (c.status === "fulfilled") {
+        setClarification(c.value);
       }
     } finally {
       setLoading(false);
@@ -153,6 +161,94 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
           </button>
         </div>
       </Section>
+
+      {/* Clarification gate */}
+      {clarification && (
+        <Section title="Clarification Gate">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <HelpCircle size={13} className="text-blue-400" />
+                <span className="text-xs t-secondary">Ask before acting on vague requests</span>
+              </div>
+              <button
+                onClick={async () => {
+                  const updated = await updateClarificationSettings({
+                    enabled: !clarification.enabled,
+                  });
+                  setClarification(updated);
+                }}
+                className={`relative w-9 h-5 rounded-full transition-colors ${
+                  clarification.enabled ? "bg-blue-500" : "bg-gray-500/40"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
+                    clarification.enabled ? "translate-x-4" : ""
+                  }`}
+                />
+              </button>
+            </div>
+
+            {clarification.enabled && (
+              <>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] t-faint">Confidence threshold</span>
+                    <span className="text-[10px] font-mono t-muted">
+                      {clarification.threshold.toFixed(2)}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={clarification.threshold}
+                    onChange={async (e) => {
+                      const val = parseFloat(e.target.value);
+                      setClarification({ ...clarification, threshold: val });
+                      await updateClarificationSettings({ threshold: val });
+                    }}
+                    className="w-full h-1.5 rounded-full appearance-none bg-gray-500/30 accent-blue-500"
+                  />
+                  <div className="flex justify-between text-[9px] t-faint mt-0.5">
+                    <span>Confident (rarely asks)</span>
+                    <span>Cautious (asks often)</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] t-faint">Max rounds</span>
+                  <div className="flex items-center gap-1.5">
+                    {[1, 2, 3].map((n) => (
+                      <button
+                        key={n}
+                        onClick={async () => {
+                          const updated = await updateClarificationSettings({ max_rounds: n });
+                          setClarification(updated);
+                        }}
+                        className={`w-6 h-6 rounded text-[10px] font-mono transition-all ${
+                          clarification.max_rounds === n
+                            ? "bg-blue-500/20 text-blue-400 border border-blue-500/40"
+                            : "bg-app-secondary t-muted border border-app hover:t-secondary"
+                        }`}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            <p className="text-[10px] t-faint leading-relaxed">
+              When enabled, the agent asks clarifying questions if its confidence
+              is below the threshold. Changes apply immediately but reset on restart.
+            </p>
+          </div>
+        </Section>
+      )}
 
       {/* Directories */}
       <Section title="Directories">
@@ -233,13 +329,13 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
 
       {/* Memory stats */}
       <Section title="Memory">
-        <div className="grid grid-cols-3 gap-2 text-center">
-          {(["fact", "episode", "summary"] as const).map((type) => (
+        <div className="grid grid-cols-5 gap-2 text-center">
+          {(["fact", "episode", "summary", "strategy", "preference"] as const).map((type) => (
             <div key={type} className="card px-2 py-2">
               <div className="text-lg font-semibold t-primary">
                 {memoryCounts[type] ?? 0}
               </div>
-              <div className="text-[10px] t-muted capitalize">{type}s</div>
+              <div className="text-[10px] t-muted capitalize">{type === "strategy" ? "strategies" : `${type}s`}</div>
             </div>
           ))}
         </div>

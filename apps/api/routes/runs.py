@@ -24,6 +24,75 @@ class ApproveRequest(BaseModel):
     approved: bool
 
 
+class ClarifyRequest(BaseModel):
+    answer: str
+
+
+class ClarificationSettingsResponse(BaseModel):
+    enabled: bool
+    threshold: float
+    max_rounds: int
+
+
+class ClarificationSettingsUpdate(BaseModel):
+    enabled: bool | None = None
+    threshold: float | None = None
+    max_rounds: int | None = None
+
+
+@router.get("/settings/clarification", response_model=ClarificationSettingsResponse)
+async def get_clarification_settings(request: Request) -> ClarificationSettingsResponse:
+    """Return current clarification gate settings."""
+    settings = request.app.state.orchestrator._settings
+    return ClarificationSettingsResponse(
+        enabled=settings.clarification_enabled,
+        threshold=settings.clarification_threshold,
+        max_rounds=settings.clarification_max_rounds,
+    )
+
+
+@router.patch("/settings/clarification", response_model=ClarificationSettingsResponse)
+async def update_clarification_settings(
+    body: ClarificationSettingsUpdate, request: Request,
+) -> ClarificationSettingsResponse:
+    """Update clarification gate settings at runtime (in-memory, not persisted to .env)."""
+    settings = request.app.state.orchestrator._settings
+    if body.enabled is not None:
+        object.__setattr__(settings, "clarification_enabled", body.enabled)
+    if body.threshold is not None:
+        clamped = max(0.0, min(1.0, body.threshold))
+        object.__setattr__(settings, "clarification_threshold", clamped)
+    if body.max_rounds is not None:
+        clamped = max(0, min(5, body.max_rounds))
+        object.__setattr__(settings, "clarification_max_rounds", clamped)
+    logger.info(
+        "Clarification settings updated: enabled=%s threshold=%.2f max_rounds=%d",
+        settings.clarification_enabled, settings.clarification_threshold,
+        settings.clarification_max_rounds,
+    )
+    return ClarificationSettingsResponse(
+        enabled=settings.clarification_enabled,
+        threshold=settings.clarification_threshold,
+        max_rounds=settings.clarification_max_rounds,
+    )
+
+
+@router.post("/runs/{run_id}/clarify")
+async def clarify_run(run_id: str, body: ClarifyRequest, request: Request) -> dict:
+    """Submit a clarification answer for a run awaiting clarification."""
+    orchestrator = request.app.state.orchestrator
+    if not body.answer.strip():
+        raise HTTPException(status_code=400, detail="Answer cannot be empty")
+    try:
+        run = await orchestrator.provide_clarification(run_id, body.answer.strip())
+        return run.model_dump()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error("Clarification failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.get("/runs/{run_id}")
 async def get_run(run_id: str, request: Request) -> dict:
     orchestrator = request.app.state.orchestrator

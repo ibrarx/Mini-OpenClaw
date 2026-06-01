@@ -7,6 +7,7 @@ export type RunStatus =
   | "idle"
   | "planning"
   | "awaiting_approval"
+  | "awaiting_clarification"
   | "running"
   | "reacting"
   | "reflecting"
@@ -56,6 +57,8 @@ export interface Run {
   reflection?: ReflectionResult | null;
   parent_run_id?: string | null;
   depth?: number;
+  clarifying_questions?: string[];
+  clarification_rounds?: number;
 }
 
 export interface Observation {
@@ -87,6 +90,8 @@ export interface Plan {
   direct_response: string | null;
   goals: Goal[];
   replan_count: number;
+  clarifying_questions?: string[];
+  clarification_answers?: string[];
 }
 
 export interface PlanStep {

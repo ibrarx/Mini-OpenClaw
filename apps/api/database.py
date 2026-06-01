@@ -48,7 +48,9 @@ CREATE TABLE IF NOT EXISTS runs (
     model_name      TEXT NOT NULL DEFAULT '',
     reflection      TEXT,
     parent_run_id   TEXT,
-    depth           INTEGER NOT NULL DEFAULT 0
+    depth           INTEGER NOT NULL DEFAULT 0,
+    clarifying_questions TEXT NOT NULL DEFAULT '[]',
+    clarification_rounds INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS run_steps (
@@ -151,6 +153,9 @@ MIGRATIONS = [
     # Scheduled tasks — added in feat/scheduled-tasks
     "ALTER TABLE scheduled_tasks ADD COLUMN pre_approved_tools TEXT DEFAULT '[]'",
     "ALTER TABLE scheduled_tasks ADD COLUMN approve_all_runs INTEGER DEFAULT 0",
+    # Clarification — added in feat/clarify-before-react
+    "ALTER TABLE runs ADD COLUMN clarifying_questions TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE runs ADD COLUMN clarification_rounds INTEGER NOT NULL DEFAULT 0",
 ]
 
 # ---------------------------------------------------------------------------
