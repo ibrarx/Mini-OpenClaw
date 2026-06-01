@@ -86,6 +86,7 @@ export function useRunSSE(runId: string | null) {
         "planning_started",
         "plan_ready",
         "approval_requested",
+        "awaiting_clarification",
         "step_announced",
         "step_completed",
         "reflection_started",
