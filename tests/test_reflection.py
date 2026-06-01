@@ -242,7 +242,7 @@ class TestPlannerImproveAnswer:
     @pytest.mark.asyncio
     async def test_improve_returns_better_answer(self, planner: Planner, fake_provider: FakeProvider) -> None:
         fake_provider.queue("Here are all 10 files with their sizes: a.txt (1KB), b.txt (2KB)...")
-        result = await planner.improve_answer(
+        result, usage = await planner.improve_answer(
             user_message="List all files with sizes",
             original_answer="Here are some files.",
             critique={"issues": ["Missing files"], "suggestion": "Include all files"},
@@ -253,7 +253,7 @@ class TestPlannerImproveAnswer:
     @pytest.mark.asyncio
     async def test_improve_failure_returns_original(self, planner: Planner, fake_provider: FakeProvider) -> None:
         fake_provider.queue(LLMProviderError("API timeout"))
-        result = await planner.improve_answer(
+        result, usage = await planner.improve_answer(
             user_message="Test",
             original_answer="Original answer",
             critique={"issues": ["problem"], "suggestion": "fix it"},
@@ -264,7 +264,7 @@ class TestPlannerImproveAnswer:
     @pytest.mark.asyncio
     async def test_improve_no_provider(self, registry: SkillRegistry) -> None:
         planner = Planner(provider=None, registry=registry)
-        result = await planner.improve_answer(
+        result, usage = await planner.improve_answer(
             user_message="Test",
             original_answer="Original",
             critique={},

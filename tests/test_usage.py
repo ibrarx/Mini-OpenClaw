@@ -12,11 +12,10 @@ import json
 import pytest
 
 from apps.api.providers.base import LLMResponse, TokenUsage
+from apps.api.core import token_utils
 from apps.api.core.token_utils import (
     compute_cost,
     get_pricing,
-    MODEL_PRICING,
-    PRICING_LAST_VERIFIED,
 )
 from apps.api.models.run import Observation, Run, RunStatus, RunUsage
 
@@ -126,8 +125,9 @@ class TestOllamaUsageMapping:
 
 class TestPricing:
     def test_pricing_last_verified_format(self):
-        # Sanity check: YYYY-MM-DD
-        parts = PRICING_LAST_VERIFIED.split("-")
+        # Sanity check: YYYY-MM-DD — trigger lazy load via get_pricing
+        get_pricing("anything")
+        parts = token_utils.PRICING_LAST_VERIFIED.split("-")
         assert len(parts) == 3
         assert len(parts[0]) == 4
 
@@ -295,3 +295,111 @@ class TestBackwardCompatibility:
         obs = Observation.model_validate(obs_dict)
         assert obs.usage is None
         assert obs.cost_usd == 0.0
+
+
+# ---------------------------------------------------------------------------
+# pricing.json loading
+# ---------------------------------------------------------------------------
+
+class TestPricingJsonLoading:
+    def test_fallback_when_missing(self, tmp_path):
+        """When pricing.json is absent, built-in fallback is used."""
+        from apps.api.core import token_utils as tu
+        # Force reload
+        tu._loaded = False
+        original_fn = tu._find_pricing_json
+        tu._find_pricing_json = lambda: None  # pretend file missing
+        try:
+            tu._ensure_loaded()
+            assert len(tu.MODEL_PRICING) > 0
+            assert tu.PRICING_LAST_VERIFIED == "2025-06-01"
+        finally:
+            tu._find_pricing_json = original_fn
+            tu._loaded = False
+            tu._ensure_loaded()  # restore real state
+
+    def test_loads_from_file(self, tmp_path):
+        """pricing.json is loaded and parsed correctly."""
+        pricing_file = tmp_path / "pricing.json"
+        pricing_file.write_text(json.dumps({
+            "last_verified": "2099-12-31",
+            "models": {
+                "test-model": {"input": 99.0, "output": 199.0}
+            }
+        }))
+        from apps.api.core import token_utils as tu
+        tu._loaded = False
+        original_fn = tu._find_pricing_json
+        tu._find_pricing_json = lambda: pricing_file
+        try:
+            tu._ensure_loaded()
+            assert tu.PRICING_LAST_VERIFIED == "2099-12-31"
+            assert tu.MODEL_PRICING["test-model"]["input"] == 99.0
+        finally:
+            tu._find_pricing_json = original_fn
+            tu._loaded = False
+            tu._ensure_loaded()
+
+    def test_malformed_json_falls_back(self, tmp_path):
+        """Broken pricing.json → fallback, no crash."""
+        pricing_file = tmp_path / "pricing.json"
+        pricing_file.write_text("NOT VALID JSON {{{")
+        from apps.api.core import token_utils as tu
+        tu._loaded = False
+        original_fn = tu._find_pricing_json
+        tu._find_pricing_json = lambda: pricing_file
+        try:
+            tu._ensure_loaded()
+            # Should have fallen back to built-in pricing
+            assert len(tu.MODEL_PRICING) > 0
+            assert "claude-sonnet-4-20250514" in tu.MODEL_PRICING
+        finally:
+            tu._find_pricing_json = original_fn
+            tu._loaded = False
+            tu._ensure_loaded()
+
+    def test_reload_pricing(self, tmp_path):
+        """reload_pricing() forces a re-read."""
+        from apps.api.core import token_utils as tu
+        # Just verify it doesn't crash and resets _loaded
+        tu.reload_pricing()
+        assert tu._loaded is True
+
+
+# ---------------------------------------------------------------------------
+# Planner tuple returns (fix #2B)
+# ---------------------------------------------------------------------------
+
+class TestPlannerTupleReturns:
+    def test_generate_goals_no_provider(self):
+        """generate_goals with no provider returns ([], zeroed_usage)."""
+        import asyncio
+        from apps.api.core.planner import Planner
+        p = Planner(provider=None, registry=None)
+        goals, usage = asyncio.get_event_loop().run_until_complete(
+            p.generate_goals("test")
+        )
+        assert goals == []
+        assert usage.total_tokens == 0
+
+    def test_improve_answer_no_provider(self):
+        """improve_answer with no provider returns (original, zeroed_usage)."""
+        import asyncio
+        from apps.api.core.planner import Planner
+        p = Planner(provider=None, registry=None)
+        text, usage = asyncio.get_event_loop().run_until_complete(
+            p.improve_answer("q", "original", {}, "")
+        )
+        assert text == "original"
+        assert usage.total_tokens == 0
+
+    def test_generate_summary_no_provider(self):
+        """generate_summary with no provider returns ('Task completed.', zeroed_usage)."""
+        import asyncio
+        from apps.api.core.planner import Planner
+        p = Planner(provider=None, registry=None)
+        text, usage = asyncio.get_event_loop().run_until_complete(
+            p.generate_summary("q", [])
+        )
+        assert text == "Task completed."
+        assert usage.total_tokens == 0

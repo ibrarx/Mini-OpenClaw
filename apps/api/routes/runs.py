@@ -162,10 +162,12 @@ async def usage_summary(request: Request, session_id: str | None = None) -> dict
     """Return aggregated token usage and cost across runs.
 
     If ``session_id`` is given, scope to that session. Otherwise, all runs.
-    Returns per-model split, total tokens, total cost, and the pricing
-    verification date.
+    Returns per-model split, total tokens, total cost, dream usage, and the
+    pricing verification date.
     """
     from apps.api.core.token_utils import PRICING_LAST_VERIFIED
+    from apps.api.database import get_connection
+    from apps.api.config import get_settings
 
     orchestrator = request.app.state.orchestrator
     runs = await orchestrator.list_runs(session_id=session_id, limit=500)
@@ -208,12 +210,43 @@ async def usage_summary(request: Request, session_id: str | None = None) -> dict
         for phase, tokens in u.by_phase.items():
             by_phase[phase] = by_phase.get(phase, 0) + tokens
 
+    # Dream usage — aggregated from dream_usage table
+    dream_totals = {
+        "input_tokens": 0, "output_tokens": 0,
+        "cost_usd": 0.0, "dream_cycles": 0,
+    }
+    try:
+        settings = get_settings()
+        conn = await get_connection(settings.resolved_database)
+        try:
+            rows = await conn.execute_fetchall(
+                "SELECT input_tokens, output_tokens, cost_usd FROM dream_usage"
+            )
+            for row in rows:
+                dream_totals["input_tokens"] += row["input_tokens"]
+                dream_totals["output_tokens"] += row["output_tokens"]
+                dream_totals["cost_usd"] += row["cost_usd"]
+                dream_totals["dream_cycles"] += 1
+        finally:
+            await conn.close()
+    except Exception:
+        pass  # Table might not exist on old DBs
+
+    # Add dream tokens into totals
+    totals["input_tokens"] += dream_totals["input_tokens"]
+    totals["output_tokens"] += dream_totals["output_tokens"]
+    totals["cost_usd"] += dream_totals["cost_usd"]
+    totals["llm_calls"] += dream_totals["dream_cycles"]
+    if dream_totals["dream_cycles"] > 0:
+        by_phase["dream"] = dream_totals["input_tokens"] + dream_totals["output_tokens"]
+
     return {
         "session_id": session_id,
         "run_count": run_count,
         "totals": totals,
         "by_model": by_model,
         "by_phase": by_phase,
+        "dream": dream_totals,
         "has_estimates": has_estimates,
         "pricing_last_verified": PRICING_LAST_VERIFIED,
     }

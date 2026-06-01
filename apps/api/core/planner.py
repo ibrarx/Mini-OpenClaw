@@ -17,7 +17,7 @@ import json
 import logging
 from typing import Any
 
-from apps.api.providers.base import LLMMessage, LLMProvider
+from apps.api.providers.base import LLMMessage, LLMProvider, TokenUsage
 from apps.api.providers.errors import LLMProviderError
 from apps.api.skills.registry import SkillRegistry
 from apps.api.core.token_utils import (
@@ -307,10 +307,6 @@ class Planner:
         self._observation_max_chars = observation_max_chars
         self._read_file_obs_single = read_file_obs_single
         self._read_file_obs_batch = read_file_obs_batch
-        # Usage tracking: set after every generate/generate_json call.
-        # Methods returning dicts inject _usage into the dict; methods
-        # returning strings/lists expose it here instead.
-        self._last_usage: dict[str, Any] | None = None
 
     # ------------------------------------------------------------------
     # Public API — unchanged shape so the orchestrator does not care which
@@ -568,14 +564,15 @@ class Planner:
         memory_context: str = "No relevant memories.",
         workspace_info: str = "",
         max_iterations: int = 10,
-    ) -> list[dict[str, str]]:
+    ) -> tuple[list[dict[str, str]], TokenUsage]:
         """Generate a goal checklist from a user message.
 
-        Returns a list of {"goal_id": ..., "description": ...} dicts,
-        or an empty list on any failure.
+        Returns ``(goals, usage)`` where *goals* is a list of
+        ``{"goal_id": ..., "description": ...}`` dicts (empty on failure).
         """
+        empty: tuple[list[dict[str, str]], TokenUsage] = ([], TokenUsage())
         if self._provider is None:
-            return []
+            return empty
 
         tools_json = json.dumps(
             self._registry.get_planner_descriptions() if self._registry else [],
@@ -593,7 +590,7 @@ class Planner:
                 max_tokens=1024,
                 timeout=30.0,
             )
-            self._last_usage = response.usage.model_dump()
+            usage = response.usage
             text = (response.text or "").strip()
             # Strip markdown fences if present
             if text.startswith("```"):
@@ -605,11 +602,11 @@ class Planner:
             parsed = json.loads(text)
             if not isinstance(parsed, list):
                 logger.warning("Goal generation returned non-list: %s", type(parsed).__name__)
-                return []
-            return parsed
+                return [], usage
+            return parsed, usage
         except Exception as exc:
             logger.warning("Goal generation failed: %s", exc)
-            return []
+            return empty
 
     # ------------------------------------------------------------------
     # Replanning — Phase 3 of hybrid Plan-ReAct
@@ -623,14 +620,15 @@ class Planner:
         memory_context: str = "No relevant memories.",
         workspace_info: str = "",
         remaining_budget: int = 5,
-    ) -> list[dict[str, str]]:
+    ) -> tuple[list[dict[str, str]], TokenUsage]:
         """Regenerate the goal checklist, preserving completed goals.
 
-        Returns a list of NEW {"goal_id": ..., "description": ...} dicts,
-        or an empty list on failure.
+        Returns ``(new_goals, usage)`` where *new_goals* is a list of
+        ``{"goal_id": ..., "description": ...}`` dicts (empty on failure).
         """
+        empty: tuple[list[dict[str, str]], TokenUsage] = ([], TokenUsage())
         if self._provider is None:
-            return []
+            return empty
 
         tools_json = json.dumps(
             self._registry.get_planner_descriptions() if self._registry else [],
@@ -657,7 +655,7 @@ class Planner:
                 max_tokens=1024,
                 timeout=30.0,
             )
-            self._last_usage = response.usage.model_dump()
+            usage = response.usage
             text = (response.text or "").strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1] if "\n" in text else text[3:]
@@ -668,11 +666,11 @@ class Planner:
             parsed = json.loads(text)
             if not isinstance(parsed, list):
                 logger.warning("Replan returned non-list: %s", type(parsed).__name__)
-                return []
-            return parsed
+                return [], usage
+            return parsed, usage
         except Exception as exc:
             logger.warning("Replan failed: %s", exc)
-            return []
+            return empty
 
     def _build_observation_context(
         self,
@@ -876,10 +874,13 @@ class Planner:
         original_answer: str,
         critique: dict[str, Any],
         observations_summary: str,
-    ) -> str:
-        """Rewrite the answer based on the critique."""
+    ) -> tuple[str, TokenUsage]:
+        """Rewrite the answer based on the critique.
+
+        Returns ``(improved_text, usage)``.
+        """
         if self._provider is None:
-            return original_answer
+            return original_answer, TokenUsage()
 
         issues_text = "\n".join(f"- {issue}" for issue in critique.get("issues", []))
         suggestion = critique.get("suggestion", "")
@@ -904,11 +905,10 @@ class Planner:
                 max_tokens=2048,
                 timeout=30.0,
             )
-            self._last_usage = response.usage.model_dump()
-            return (response.text or original_answer).strip()
+            return (response.text or original_answer).strip(), response.usage
         except Exception as exc:
             logger.warning("Answer improvement failed: %s", exc)
-            return original_answer
+            return original_answer, TokenUsage()
 
     # ------------------------------------------------------------------
     # Summary generation
@@ -916,10 +916,13 @@ class Planner:
 
     async def generate_summary(
         self, user_message: str, tool_results: list[dict[str, Any]]
-    ) -> str:
-        """Summarize tool execution results into a user-facing message."""
+    ) -> tuple[str, TokenUsage]:
+        """Summarize tool execution results into a user-facing message.
+
+        Returns ``(summary_text, usage)``.
+        """
         if self._provider is None:
-            return "Task completed."
+            return "Task completed.", TokenUsage()
         results_text = json.dumps(tool_results, indent=2, default=str)
         try:
             response = await self._provider.generate(
@@ -940,14 +943,14 @@ class Planner:
                 max_tokens=1024,
                 timeout=30.0,
             )
-            self._last_usage = response.usage.model_dump()
-            return (response.text or "Task completed.").strip() or "Task completed."
+            text = (response.text or "Task completed.").strip() or "Task completed."
+            return text, response.usage
         except LLMProviderError as exc:
             logger.warning("Summary failed: %s", exc)
-            return "Task completed. Check tool traces for details."
+            return "Task completed. Check tool traces for details.", TokenUsage()
         except Exception as exc:  # noqa: BLE001 — degrade gracefully
             logger.warning("Summary failed: %s", exc)
-            return "Task completed. Check tool traces for details."
+            return "Task completed. Check tool traces for details.", TokenUsage()
 
 
 REFLECT_SYSTEM_PROMPT = """You are a quality reviewer for an AI agent's response.

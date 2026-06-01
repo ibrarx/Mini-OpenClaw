@@ -111,6 +111,18 @@ CREATE TABLE IF NOT EXISTS tool_manifests (
     registered_at     TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS dream_usage (
+    id              TEXT PRIMARY KEY,
+    workspace_id    TEXT NOT NULL DEFAULT 'default',
+    input_tokens    INTEGER NOT NULL DEFAULT 0,
+    output_tokens   INTEGER NOT NULL DEFAULT 0,
+    cost_usd        REAL NOT NULL DEFAULT 0.0,
+    model           TEXT NOT NULL DEFAULT '',
+    provider        TEXT NOT NULL DEFAULT '',
+    is_estimated    INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS scheduled_tasks (
     id                TEXT PRIMARY KEY,
     workspace_id      TEXT DEFAULT 'default',

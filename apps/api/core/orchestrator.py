@@ -307,8 +307,9 @@ class Orchestrator:
             Orchestrator phase label: "planning", "react", "reflection",
             "goals", "replan", "synthesis", "summary", "improve".
         usage_dict : dict | None
-            A serialized ``TokenUsage`` dict (from ``_usage`` key or
-            ``planner._last_usage``). ``None`` means usage unavailable.
+            A serialized ``TokenUsage`` dict (from ``usage.model_dump()``
+            on the ``TokenUsage`` returned alongside every planner result).
+            ``None`` means usage unavailable.
         tool_name : str | None
             If the LLM call was a ReAct step that chose a tool, attribute
             tokens to that tool in ``by_tool``. This is "tokens spent
@@ -453,13 +454,13 @@ class Orchestrator:
         # FLAG-GATED: Phase 1 — Generate goal checklist
         if goals_enabled:
             try:
-                raw_goals = await self._planner.generate_goals(
+                raw_goals, goals_usage = await self._planner.generate_goals(
                     user_message=run.user_message,
                     memory_context=memory_context,
                     workspace_info=workspace_info,
                     max_iterations=run.max_iterations,
                 )
-                self._record_usage(run, "goals", self._planner._last_usage)
+                self._record_usage(run, "goals", goals_usage.model_dump())
                 goals = [
                     Goal(goal_id=g["goal_id"], description=g["description"])
                     for g in raw_goals
@@ -720,7 +721,7 @@ class Orchestrator:
                                 "Run %s: reflection failed (score=%.2f), no budget for re-entry — text rewrite",
                                 run.run_id, reflection.overall_score,
                             )
-                            improved_answer = await self._planner.improve_answer(
+                            improved_answer, improve_usage = await self._planner.improve_answer(
                                 user_message=run.user_message,
                                 original_answer=run.final_response,
                                 critique={
@@ -729,7 +730,7 @@ class Orchestrator:
                                 },
                                 observations_summary=self._build_obs_summary(run),
                             )
-                            self._record_usage(run, "improve", self._planner._last_usage)
+                            self._record_usage(run, "improve", improve_usage.model_dump())
                             if improved_answer != run.final_response:
                                 run.final_response = improved_answer
                                 reflection.improved = True
@@ -1246,7 +1247,7 @@ class Orchestrator:
         remaining_budget = run.max_iterations - run.iterations
 
         try:
-            new_raw_goals = await self._planner.replan_goals(
+            new_raw_goals, replan_usage = await self._planner.replan_goals(
                 user_message=run.user_message,
                 completed_goals=completed_goals,
                 observations_summary=observations_summary,
@@ -1254,7 +1255,7 @@ class Orchestrator:
                 workspace_info=workspace_info,
                 remaining_budget=remaining_budget,
             )
-            self._record_usage(run, "replan", self._planner._last_usage)
+            self._record_usage(run, "replan", replan_usage.model_dump())
 
             if not new_raw_goals and not completed_goals:
                 # Replan produced nothing and nothing is completed — keep existing goals
@@ -1303,10 +1304,12 @@ class Orchestrator:
                 })
         if self._planner and tool_results:
             try:
-                return await asyncio.wait_for(
+                summary, usage = await asyncio.wait_for(
                     self._planner.generate_summary(run.user_message, tool_results),
                     timeout=30.0,
                 )
+                self._record_usage(run, "summary", usage.model_dump())
+                return summary
             except Exception as exc:
                 logger.warning("Partial summary failed: %s", exc)
         return "Task partially completed. Check tool traces for details."
@@ -1511,11 +1514,55 @@ class Orchestrator:
             if ep_count < interval or ep_count % interval != 0:
                 return
             # Fire-and-forget: don't block the run response
-            task = asyncio.create_task(self._dreamer.dream(workspace_id))
+            task = asyncio.create_task(
+                self._dream_and_record_usage(workspace_id)
+            )
             task.add_done_callback(self._task_done)
             self._pending_tasks.append(task)
         except Exception as exc:
             logger.warning("Dream trigger check failed: %s", exc)
+
+    async def _dream_and_record_usage(self, workspace_id: str) -> None:
+        """Run a dream cycle and persist its token usage."""
+        result = await self._dreamer.dream(workspace_id)
+        usage_dict = result.get("usage")
+        if not usage_dict:
+            return
+        # Persist to dream_usage table
+        try:
+            from apps.api.providers.base import TokenUsage as _TU
+
+            usage = _TU.model_validate(usage_dict)
+            cost = compute_cost(
+                self._settings.active_provider_model, usage,
+            )
+            import uuid
+            from datetime import datetime, timezone
+
+            conn = await get_connection(self._db_path)
+            try:
+                await conn.execute(
+                    "INSERT INTO dream_usage "
+                    "(id, workspace_id, input_tokens, output_tokens, cost_usd, "
+                    " model, provider, is_estimated, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        str(uuid.uuid4()),
+                        workspace_id,
+                        usage.input_tokens,
+                        usage.output_tokens,
+                        cost,
+                        self._settings.active_provider_model,
+                        self._settings.llm_provider,
+                        int(usage.is_estimated),
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+                await conn.commit()
+            finally:
+                await conn.close()
+        except Exception as exc:
+            logger.warning("Failed to persist dream usage: %s", exc)
 
     async def _compensate_completed_steps(self, run: Run) -> list[ToolResult]:
         """Run saga compensation on all successfully completed mutating steps.
@@ -1647,10 +1694,12 @@ class Orchestrator:
         try:
             if self._planner and tool_results:
                 logger.info("Run %s: generating summary...", run.run_id)
-                run.final_response = await asyncio.wait_for(
+                summary, summary_usage = await asyncio.wait_for(
                     self._planner.generate_summary(run.user_message, tool_results),
                     timeout=30.0,
                 )
+                run.final_response = summary
+                self._record_usage(run, "summary", summary_usage.model_dump())
                 logger.info("Run %s: summary generated", run.run_id)
             else:
                 run.final_response = "Task completed."
@@ -1768,10 +1817,12 @@ class Orchestrator:
                                       "output": result.output, "error": result.error})
             try:
                 if self._planner and tool_results:
-                    run.final_response = await asyncio.wait_for(
+                    summary, summary_usage = await asyncio.wait_for(
                         self._planner.generate_summary(run.user_message, tool_results),
                         timeout=30.0,
                     )
+                    run.final_response = summary
+                    self._record_usage(run, "summary", summary_usage.model_dump())
                 else:
                     run.final_response = "Task completed."
             except asyncio.TimeoutError:
