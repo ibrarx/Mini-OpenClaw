@@ -329,13 +329,13 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
 
       {/* Memory stats */}
       <Section title="Memory">
-        <div className="grid grid-cols-3 gap-2 text-center">
-          {(["fact", "episode", "summary"] as const).map((type) => (
+        <div className="grid grid-cols-5 gap-2 text-center">
+          {(["fact", "episode", "summary", "strategy", "preference"] as const).map((type) => (
             <div key={type} className="card px-2 py-2">
               <div className="text-lg font-semibold t-primary">
                 {memoryCounts[type] ?? 0}
               </div>
-              <div className="text-[10px] t-muted capitalize">{type}s</div>
+              <div className="text-[10px] t-muted capitalize">{type === "strategy" ? "strategies" : `${type}s`}</div>
             </div>
           ))}
         </div>
