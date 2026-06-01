@@ -39,6 +39,26 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 
+class TokenUsage(BaseModel):
+    """Real token usage returned by a provider's SDK.
+
+    Every ``LLMResponse`` carries one of these.  ``is_estimated`` is ``True``
+    only when the provider response lacked usage data and we fell back to the
+    ``char / 4`` heuristic.
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    # Anthropic prompt-cache fields; 0 for providers that don't report them
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    is_estimated: bool = False
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+
 MessageRole = Literal["system", "user", "assistant"]
 
 
@@ -103,6 +123,7 @@ class LLMResponse(BaseModel):
     tool_calls: list[LLMToolCall] = Field(default_factory=list)
     finish_reason: str | None = None
     raw: dict[str, Any] | None = None
+    usage: TokenUsage = Field(default_factory=TokenUsage)
 
 
 # ---------------------------------------------------------------------------
@@ -165,13 +186,18 @@ class LLMProvider(ABC):
         system: str | None = None,
         max_tokens: int = 2048,
         timeout: float = 60.0,
-    ) -> dict[str, Any]:
-        """Run a completion and return a parsed JSON object.
+    ) -> tuple[dict[str, Any], TokenUsage]:
+        """Run a completion and return ``(parsed_json, usage)``.
 
         Default implementation: call ``generate``, strip any markdown fences,
         and ``json.loads`` the result. If the model prefixed the JSON with
         reasoning text (common with ReAct prompts), we extract the first
         ``{…}`` block.
+
+        Returns
+        -------
+        tuple[dict, TokenUsage]
+            The parsed JSON object and real/estimated token usage.
 
         Raises
         ------
@@ -186,6 +212,7 @@ class LLMProvider(ABC):
             max_tokens=max_tokens,
             timeout=timeout,
         )
+        usage = response.usage
         text = (response.text or "").strip()
         # Strip ```json ... ``` fences if the model wrapped its output.
         if text.startswith("```"):
@@ -197,7 +224,7 @@ class LLMProvider(ABC):
 
         # Try parsing directly first (fast path).
         try:
-            return json.loads(text)
+            return json.loads(text), usage
         except json.JSONDecodeError:
             pass
 
@@ -228,7 +255,7 @@ class LLMProvider(ABC):
                     if depth == 0:
                         candidate = text[start : i + 1]
                         try:
-                            return json.loads(candidate)
+                            return json.loads(candidate), usage
                         except json.JSONDecodeError:
                             break
 

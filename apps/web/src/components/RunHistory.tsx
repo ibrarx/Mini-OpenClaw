@@ -17,6 +17,7 @@ import { getRuns } from "../api/client";
 import PlanPreview from "./PlanPreview";
 import ToolTrace from "./ToolTrace";
 import ExplainPanel from "./ExplainPanel";
+import { RunUsageStrip, RunUsageDetail } from "./UsageDashboard";
 import type { Run, RunStatus } from "../api/types";
 
 interface RunHistoryProps {
@@ -120,6 +121,12 @@ function RunRow({ run, expanded, onToggle }: { run: Run; expanded: boolean; onTo
                 <span>{stepCount} step{stepCount !== 1 ? "s" : ""}</span>
               </>
             )}
+            {run.usage && run.usage.cost_usd > 0 && (
+              <>
+                <span>•</span>
+                <span title="Estimated cost">{fmtCostInline(run.usage.cost_usd)}</span>
+              </>
+            )}
           </div>
         </div>
         <StatusBadge status={run.status} />
@@ -153,6 +160,13 @@ function RunRow({ run, expanded, onToggle }: { run: Run; expanded: boolean; onTo
           {/* Explain button for completed/failed/cancelled runs */}
           {["completed", "failed", "cancelled"].includes(run.status) && (
             <ExplainPanel runId={run.run_id} />
+          )}
+
+          {/* Usage breakdown */}
+          {run.usage && run.usage.llm_calls > 0 && (
+            <div className="pt-1 border-t border-app">
+              <RunUsageDetail run={run} />
+            </div>
           )}
         </div>
       )}
@@ -208,4 +222,11 @@ function formatTimestamp(iso: string): string {
   } catch {
     return "";
   }
+}
+
+function fmtCostInline(usd: number): string {
+  if (usd === 0) return "$0.00";
+  if (usd < 0.001) return "<$0.001";
+  if (usd < 0.01) return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(3)}`;
 }

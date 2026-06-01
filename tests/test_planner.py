@@ -240,7 +240,7 @@ class TestGenerateSummary:
     @pytest.mark.asyncio
     async def test_summary_returns_text(self, planner: Planner, provider: FakeProvider) -> None:
         provider.queue("Here is the summary.")
-        result = await planner.generate_summary(
+        result, usage = await planner.generate_summary(
             "List files", [{"tool": "list_files", "status": "success"}]
         )
         assert result == "Here is the summary."
@@ -250,11 +250,11 @@ class TestGenerateSummary:
         self, planner: Planner, provider: FakeProvider
     ) -> None:
         provider.queue(LLMProviderError("API down"))
-        result = await planner.generate_summary("test", [])
+        result, usage = await planner.generate_summary("test", [])
         assert "completed" in result.lower() or "traces" in result.lower()
 
     @pytest.mark.asyncio
     async def test_summary_without_provider(self, registry: SkillRegistry) -> None:
         p = Planner(provider=None, registry=registry)
-        result = await p.generate_summary("test", [])
+        result, usage = await p.generate_summary("test", [])
         assert result == "Task completed."

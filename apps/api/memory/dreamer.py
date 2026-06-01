@@ -141,7 +141,7 @@ class Dreamer:
         # 6. Call LLM
         from apps.api.providers.base import LLMMessage
         try:
-            result = await self._provider.generate_json(
+            result, usage = await self._provider.generate_json(
                 messages=[LLMMessage(role="user", content=content)],
                 system=DREAM_SYSTEM_PROMPT,
                 max_tokens=1024,
@@ -178,4 +178,8 @@ class Dreamer:
             "Dream cycle: %d strategies, %d preferences proposed for review",
             strategy_count, pref_count,
         )
-        return {"strategies": strategy_count, "preferences": pref_count}
+        return {
+            "strategies": strategy_count,
+            "preferences": pref_count,
+            "usage": usage.model_dump(),
+        }

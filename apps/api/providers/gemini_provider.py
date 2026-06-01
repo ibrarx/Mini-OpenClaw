@@ -28,6 +28,7 @@ from apps.api.providers.base import (
     LLMResponse,
     LLMToolCall,
     LLMToolSchema,
+    TokenUsage,
 )
 from apps.api.providers.errors import (
     LLMProviderError,
@@ -196,11 +197,13 @@ class GeminiProvider(LLMProvider):
         system: str | None = None,
         max_tokens: int = 2048,
         timeout: float = 60.0,
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], TokenUsage]:
         """Override using Gemini's native JSON mode for higher reliability.
 
         Sets ``response_mime_type='application/json'`` so Gemini constrains
         its output to syntactically valid JSON.
+
+        Returns ``(parsed_json, usage)`` tuple.
         """
         response = await self._generate_internal(
             messages=messages,
@@ -211,6 +214,7 @@ class GeminiProvider(LLMProvider):
             timeout=timeout,
             json_mode=True,
         )
+        usage = response.usage
         text = (response.text or "").strip()
         # Defence-in-depth: even with native JSON mode, strip fences if any.
         if text.startswith("```"):
@@ -218,31 +222,31 @@ class GeminiProvider(LLMProvider):
         if text.endswith("```"):
             text = text[:-3]
         try:
-            return json.loads(text.strip())
+            return json.loads(text.strip()), usage
         except json.JSONDecodeError:
             pass
         # Repair: Gemini often fails to escape newlines inside JSON strings.
         # Replace literal control characters with spaces and retry.
         repaired = text.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
         try:
-            return json.loads(repaired.strip())
+            return json.loads(repaired.strip()), usage
         except json.JSONDecodeError:
             pass
         # Repair: truncated output — Gemini hit max_tokens mid-string.
         # Try closing unclosed strings and braces.
         for suffix in ['"]}', '"}', '"]', '"}}', '}']:
             try:
-                return json.loads(repaired.strip() + suffix)
+                return json.loads(repaired.strip() + suffix), usage
             except json.JSONDecodeError:
                 continue
         # Fallback: extract first balanced { … } block.
         parsed = self._extract_json_object(text.strip())
         if parsed is not None:
-            return parsed
+            return parsed, usage
         # Last resort: try balanced extraction on repaired text too.
         parsed = self._extract_json_object(repaired.strip())
         if parsed is not None:
-            return parsed
+            return parsed, usage
         raise LLMProviderError(
             f"Gemini returned invalid JSON. First 200 chars: {text[:200]!r}"
         )
@@ -360,9 +364,18 @@ class GeminiProvider(LLMProvider):
             fr = getattr(candidates[0], "finish_reason", None)
             finish_reason = str(fr) if fr is not None else None
 
+        # Extract real token usage from Gemini's usage_metadata
+        usage_meta = getattr(response, "usage_metadata", None)
+        usage = TokenUsage(
+            input_tokens=getattr(usage_meta, "prompt_token_count", 0) or 0 if usage_meta else 0,
+            output_tokens=getattr(usage_meta, "candidates_token_count", 0) or 0 if usage_meta else 0,
+            is_estimated=usage_meta is None,
+        )
+
         return LLMResponse(
             text=text,
             tool_calls=tool_calls,
             finish_reason=finish_reason,
             raw=None,
+            usage=usage,
         )

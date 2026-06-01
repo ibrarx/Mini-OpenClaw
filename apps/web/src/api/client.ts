@@ -216,6 +216,43 @@ export async function healthCheck(): Promise<{ status: string }> {
   return apiFetch("/health");
 }
 
+// ── Usage ─────────────────────────────────────────────
+
+export interface UsageSummary {
+  session_id: string | null;
+  run_count: number;
+  totals: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cache_write_tokens: number;
+    cost_usd: number;
+    llm_calls: number;
+  };
+  by_model: Record<
+    string,
+    {
+      input_tokens: number;
+      output_tokens: number;
+      cost_usd: number;
+      llm_calls: number;
+      provider: string;
+    }
+  >;
+  by_phase: Record<string, number>;
+  has_estimates: boolean;
+  pricing_last_verified: string;
+}
+
+export async function getUsageSummary(
+  sessionId?: string
+): Promise<UsageSummary> {
+  const params = new URLSearchParams();
+  if (sessionId) params.set("session_id", sessionId);
+  const qs = params.toString();
+  return apiFetch(`/usage/summary${qs ? `?${qs}` : ""}`);
+}
+
 // ── Scheduler ────────────────────────────────────────
 
 export async function getScheduledTasks(

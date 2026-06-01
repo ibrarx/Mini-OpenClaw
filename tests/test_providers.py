@@ -265,7 +265,7 @@ class TestAnthropicProvider:
         wrapped = f"```json\n{json.dumps(payload)}\n```"
         p._client.messages.create = AsyncMock(return_value=_ant_response(wrapped))
 
-        out = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
+        out, _usage = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
         assert out == payload
 
     @pytest.mark.asyncio
@@ -362,7 +362,7 @@ class TestGeminiProvider:
             return_value=_gem_response(json.dumps(payload))
         )
 
-        out = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
+        out, _usage = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
         assert out == payload
         # Verify response_mime_type was set.
         config = p._client.aio.models.generate_content.call_args.kwargs["config"]
@@ -378,7 +378,7 @@ class TestGeminiProvider:
         p._client.aio.models.generate_content = AsyncMock(
             return_value=_gem_response(wrapped)
         )
-        out = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
+        out, _usage = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
         assert out == payload
 
     @pytest.mark.asyncio
@@ -566,7 +566,7 @@ class TestOllamaProvider:
         mock_resp.json.return_value = _ollama_response(json.dumps(payload))
 
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp) as mock_post:
-            out = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
+            out, _usage = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
             assert out == payload
             # Verify the request body included format: json.
             call_kwargs = mock_post.call_args
@@ -632,19 +632,19 @@ class TestBaseProvider:
     @pytest.mark.asyncio
     async def test_generate_json_default_parses_plain_json(self) -> None:
         p = _StubProvider(text=json.dumps({"a": 1}))
-        out = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
+        out, _usage = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
         assert out == {"a": 1}
 
     @pytest.mark.asyncio
     async def test_generate_json_default_strips_fences(self) -> None:
         p = _StubProvider(text='```json\n{"a": 2}\n```')
-        out = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
+        out, _usage = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
         assert out == {"a": 2}
 
     @pytest.mark.asyncio
     async def test_generate_json_default_strips_bare_fences(self) -> None:
         p = _StubProvider(text='```\n{"a": 3}\n```')
-        out = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
+        out, _usage = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
         assert out == {"a": 3}
 
     @pytest.mark.asyncio
@@ -661,7 +661,7 @@ class TestBaseProvider:
             '{"action": "tool", "tool": "list_files", "args": {"path": "."}}'
         )
         p = _StubProvider(text=raw)
-        out = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
+        out, _usage = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
         assert out == {"action": "tool", "tool": "list_files", "args": {"path": "."}}
 
     @pytest.mark.asyncio
@@ -672,7 +672,7 @@ class TestBaseProvider:
             '{"action": "tool", "args": {"nested": {"deep": true}}}'
         )
         p = _StubProvider(text=raw)
-        out = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
+        out, _usage = await p.generate_json(messages=[LLMMessage(role="user", content="x")])
         assert out["args"]["nested"]["deep"] is True
 
     def test_model_property_default(self) -> None:
