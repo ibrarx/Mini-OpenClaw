@@ -109,7 +109,37 @@ When calling a tool, always include a "user_announcement" field with a short, co
 - write_file → "I'll create [filename] for you..."
 - run_shell_safe → "Let me run a quick command to check that..."
 - delegate_task → "Let me hand this sub-task off to a focused agent..."
+- fetch_url → "Let me fetch that from the web for you..."
 Never use technical jargon. Never mention tool names. Keep it natural and brief.
+
+WEB FETCH GUIDANCE:
+If the user asks about LIVE or CURRENT information that requires data from the internet
+(weather, API data, public web pages, documentation, repository info), use the fetch_url tool.
+Do NOT try to find the answer by reading workspace files or running shell commands — those only
+have local data. fetch_url can retrieve JSON APIs and web pages directly.
+IMPORTANT: The fetch_url tool description lists which domains are allowed. ONLY use URLs
+from those domains — requests to any other domain will be blocked by policy. Build your
+URLs using the allowed domains.
+
+URL templates for common allowed domains (use these patterns):
+- Weather → https://api.open-meteo.com/v1/forecast?latitude=LAT&longitude=LON&current_weather=true
+  (look up the latitude/longitude for the city the user mentions)
+- GitHub repo info → https://api.github.com/repos/OWNER/REPO
+- GitHub user info → https://api.github.com/users/USERNAME
+- GitHub latest release → https://api.github.com/repos/OWNER/REPO/releases/latest
+- Wikipedia (ALWAYS use the extract API, never the raw wiki page) → https://en.wikipedia.org/w/api.php?action=query&prop=extracts&titles=PAGE_TITLE&format=json&explaintext=true
+  (replace spaces with underscores in the page title; returns the full article as plain text in JSON)
+
+Examples of when to use fetch_url:
+- "What's the weather in Vienna?" → fetch_url with https://api.open-meteo.com/v1/forecast?latitude=48.21&longitude=16.37&current_weather=true
+- "How many stars does the FastAPI repo have?" → fetch_url with https://api.github.com/repos/tiangolo/fastapi
+- "Tell me about TU Wien from Wikipedia" → fetch_url with https://en.wikipedia.org/w/api.php?action=query&prop=extracts&titles=TU_Wien&format=json&explaintext=true
+- "Fetch this URL: ..." → fetch_url directly
+
+RESPONSE DETAIL for fetched content:
+- If the user asks for a "page", "article", or "full content", include ALL the fetched content in your response — do NOT summarize or condense it. Relay the text fully, organized with sections and headings where appropriate.
+- If the user asks a specific question (e.g. "what's the weather", "how many stars"), extract and present the relevant data concisely.
+- When in doubt, include MORE detail rather than less — the user asked you to fetch the content for a reason.
 
 Respond with ONLY valid JSON (no markdown, no backticks):
 
@@ -442,7 +472,7 @@ class Planner:
             result = await self._provider.generate_json(
                 messages=[LLMMessage(role="user", content=content)],
                 system=system,
-                max_tokens=2048,
+                max_tokens=8192,
                 timeout=60.0,
             )
         except LLMProviderError as exc:

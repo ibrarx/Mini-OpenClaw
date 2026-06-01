@@ -13,6 +13,7 @@ from apps.api.skills.remember_fact import RememberFactTool
 from apps.api.skills.search_memory import SearchMemoryTool
 from apps.api.skills.delegate_task import DelegateTaskTool
 from apps.api.skills.schedule_task import ScheduleTaskTool
+from apps.api.skills.fetch_url import FetchUrlTool
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,20 @@ class SkillRegistry:
             logger.info("Registered tool: %s (risk=%s, approval=%s)",
                         st.name, st.manifest().risk_level.value,
                         st.manifest().approval_required)
+
+        # Register web fetch tool only for top-level runs when enabled
+        if not is_child_run and settings and getattr(settings, "web_fetch_enabled", False):
+            ft = FetchUrlTool(
+                allowed_domains=getattr(settings, "web_fetch_allowed_domains", []),
+                max_bytes=getattr(settings, "web_fetch_max_bytes", 1_048_576),
+                timeout_s=getattr(settings, "web_fetch_timeout_seconds", 10.0),
+                max_redirects=getattr(settings, "web_fetch_max_redirects", 3),
+                enabled=True,
+            )
+            self._tools[ft.name] = ft
+            logger.info("Registered tool: %s (risk=%s, domains=%s)",
+                        ft.name, ft.manifest().risk_level.value,
+                        getattr(settings, "web_fetch_allowed_domains", []))
 
         logger.info("Tool discovery complete: %d tools", len(self._tools))
 

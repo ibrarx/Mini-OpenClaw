@@ -186,6 +186,17 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = True
     scheduler_max_tasks: int = 20         # max active scheduled tasks
 
+    # ----- Web fetch -----
+    # Runtime URL fetching for live data (weather, APIs, docs).
+    # EMPTY allowlist = block everything (opt-in by design).
+    # Add domains to the allowlist to enable, e.g. ["api.open-meteo.com"].
+    # Subdomains of an allowed domain are permitted automatically.
+    web_fetch_enabled: bool = True
+    web_fetch_allowed_domains: list[str] = []
+    web_fetch_max_bytes: int = 1_048_576      # 1 MB response cap
+    web_fetch_timeout_seconds: float = 10.0
+    web_fetch_max_redirects: int = 3
+
     # ----- Derived -----
     @property
     def temp_dir(self) -> Path:
