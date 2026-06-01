@@ -127,13 +127,13 @@ URL templates for common allowed domains (use these patterns):
 - GitHub repo info → https://api.github.com/repos/OWNER/REPO
 - GitHub user info → https://api.github.com/users/USERNAME
 - GitHub latest release → https://api.github.com/repos/OWNER/REPO/releases/latest
-- Wikipedia (ALWAYS use the summary API, never the raw wiki page) → https://en.wikipedia.org/api/rest_v1/page/summary/PAGE_TITLE
-  (replace spaces with underscores in the page title)
+- Wikipedia (ALWAYS use the extract API for full content, never the raw wiki page) → https://en.wikipedia.org/w/api.php?action=query&prop=extracts&titles=PAGE_TITLE&format=json&explaintext=true
+  (replace spaces with underscores in the page title; this returns the full article as plain text in JSON)
 
 Examples of when to use fetch_url:
 - "What's the weather in Vienna?" → fetch_url with https://api.open-meteo.com/v1/forecast?latitude=48.21&longitude=16.37&current_weather=true
 - "How many stars does the FastAPI repo have?" → fetch_url with https://api.github.com/repos/tiangolo/fastapi
-- "Tell me about TU Wien from Wikipedia" → fetch_url with https://en.wikipedia.org/api/rest_v1/page/summary/TU_Wien
+- "Tell me about TU Wien from Wikipedia" → fetch_url with https://en.wikipedia.org/w/api.php?action=query&prop=extracts&titles=TU_Wien&format=json&explaintext=true
 - "Fetch this URL: ..." → fetch_url directly
 
 Respond with ONLY valid JSON (no markdown, no backticks):
