@@ -105,6 +105,7 @@ class Plan(BaseModel):
     goals: list[Goal] = Field(default_factory=list)        # empty when goals disabled
     replan_count: int = 0                                   # stays 0 when replanning disabled
     clarifying_questions: list[str] = Field(default_factory=list)  # populated when task_type == clarification_needed
+    clarification_answers: list[str] = Field(default_factory=list)  # user answers from each round
 
 
 class Observation(BaseModel):

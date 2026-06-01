@@ -91,6 +91,7 @@ export interface Plan {
   goals: Goal[];
   replan_count: number;
   clarifying_questions?: string[];
+  clarification_answers?: string[];
 }
 
 export interface PlanStep {

@@ -102,6 +102,27 @@ export async function clarifyRun(
   });
 }
 
+// ── Clarification Settings ───────────────────────────
+
+export interface ClarificationSettings {
+  enabled: boolean;
+  threshold: number;
+  max_rounds: number;
+}
+
+export async function getClarificationSettings(): Promise<ClarificationSettings> {
+  return apiFetch("/settings/clarification");
+}
+
+export async function updateClarificationSettings(
+  updates: Partial<ClarificationSettings>
+): Promise<ClarificationSettings> {
+  return apiFetch("/settings/clarification", {
+    method: "PATCH",
+    body: JSON.stringify(updates),
+  });
+}
+
 export type ExplainDetailLevel = "summary" | "detailed" | "debug";
 
 export interface ExplainResult {

@@ -1727,20 +1727,17 @@ class Orchestrator:
         # Store the user's clarification as a message
         await self._store_message(run.session_id, "user", answer, run.run_id)
 
+        # Persist the answer in the Plan so it survives a restart
+        if run.plan:
+            run.plan.clarification_answers.append(answer)
+
         # Increment round counter
         run.clarification_rounds += 1
         run.clarifying_questions = []  # clear — will be refilled if still ambiguous
 
-        # Build augmented message with the Q&A context
-        q_and_a = "\n".join(
-            f"Q: {q}" for q in (run.plan.clarifying_questions if run.plan else [])
-        )
-        augmented_message = (
-            f"{run.user_message}\n\n"
-            f"[Clarification context]\n{q_and_a}\n"
-            f"User's answer: {answer}"
-        )
-        run.user_message = augmented_message
+        # Build augmented message from Plan's Q&A history so a crash-resume
+        # can reconstruct the same context from DB data alone.
+        run.user_message = self._build_augmented_message(run)
 
         # Resume planning
         run.status = RunStatus.PLANNING
@@ -1757,6 +1754,27 @@ class Orchestrator:
         self._pending_tasks.append(task)
         self._pending_tasks = [t for t in self._pending_tasks if not t.done()]
         return run
+
+    @staticmethod
+    def _build_augmented_message(run: Run) -> str:
+        """Reconstruct the effective user message from the original message
+        plus all clarification Q&A stored in the Plan."""
+        base = run.user_message
+        # Strip any previously-appended clarification context
+        if "\n\n[Clarification context]" in base:
+            base = base.split("\n\n[Clarification context]")[0]
+
+        if not run.plan or not run.plan.clarification_answers:
+            return base
+
+        qa_parts: list[str] = []
+        questions = run.plan.clarifying_questions
+        answers = run.plan.clarification_answers
+        for i, ans in enumerate(answers):
+            q = questions[i] if i < len(questions) else f"(round {i+1})"
+            qa_parts.append(f"Q: {q}\nA: {ans}")
+
+        return f"{base}\n\n[Clarification context]\n" + "\n".join(qa_parts)
 
     @staticmethod
     def _format_questions(questions: list[str]) -> str:
