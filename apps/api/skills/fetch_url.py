@@ -73,13 +73,23 @@ class FetchUrlTool(BaseTool):
         self._enabled = enabled
 
     def manifest(self) -> ToolManifest:
-        return ToolManifest(
-            name="fetch_url",
-            description=(
+        if self._allowed_domains:
+            domain_list = ", ".join(self._allowed_domains)
+            desc = (
                 "Fetch content from a URL on the public web. "
                 "Returns parsed JSON for API responses, or cleaned text for web pages. "
-                "Use for live information like weather, public data, or documentation."
-            ),
+                "Use for live information like weather, public data, or documentation. "
+                f"ONLY these domains are allowed: {domain_list}. "
+                "Build URLs using these domains. Requests to other domains will be blocked."
+            )
+        else:
+            desc = (
+                "Fetch content from a URL on the public web. "
+                "Currently no domains are in the allowlist — all requests will be blocked."
+            )
+        return ToolManifest(
+            name="fetch_url",
+            description=desc,
             risk_level=RiskLevel.HIGH,
             approval_required=True,
             input_schema={

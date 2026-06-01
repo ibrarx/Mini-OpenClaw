@@ -117,9 +117,12 @@ If the user asks about LIVE or CURRENT information that requires data from the i
 (weather, API data, public web pages, documentation, repository info), use the fetch_url tool.
 Do NOT try to find the answer by reading workspace files or running shell commands — those only
 have local data. fetch_url can retrieve JSON APIs and web pages directly.
+IMPORTANT: The fetch_url tool description lists which domains are allowed. ONLY use URLs
+from those domains — requests to any other domain will be blocked by policy. Build your
+URLs using the allowed domains. For weather data, use api.open-meteo.com (free, no API key needed).
 Examples of when to use fetch_url:
-- "What's the weather in Vienna?" → fetch_url with a weather API URL
-- "How many stars does repo X have on GitHub?" → fetch_url with the GitHub API
+- "What's the weather in Vienna?" → fetch_url with https://api.open-meteo.com/v1/forecast?latitude=48.21&longitude=16.37&current_weather=true
+- "How many stars does repo X have on GitHub?" → fetch_url with the GitHub API (if api.github.com is allowed)
 - "Fetch this URL: ..." → fetch_url directly
 
 Respond with ONLY valid JSON (no markdown, no backticks):
