@@ -888,6 +888,7 @@ class Orchestrator:
                 mounts=self._tool_mounts(),
                 delegate_fn=self._make_delegate_fn() if not is_child else None,
                 schedule_fn=self._make_schedule_fn() if not (is_child or is_scheduled) else None,
+                validate_url_fn=self._policy.validate_url,
             )
             result = await self._executor.execute_tool(tool_name, tool_args, context)
 
@@ -1496,7 +1497,8 @@ class Orchestrator:
             await self._save_run(run)
             context = ToolContext(workspace_root=str(self._workspace), run_id=run.run_id,
                                    step_id=step.step_id, db_path=str(self._db_path),
-                                   mounts=self._tool_mounts())
+                                   mounts=self._tool_mounts(),
+                                   validate_url_fn=self._policy.validate_url)
             result = await self._executor.execute_tool(step.tool, step.args, context)
             logger.info("Run %s step %s: tool=%s status=%s", run.run_id, step.step_id, step.tool, result.status)
             step.result = result
@@ -1616,7 +1618,8 @@ class Orchestrator:
                 await self._save_run(run)
                 context = ToolContext(workspace_root=str(self._workspace), run_id=run.run_id,
                                        step_id=step.step_id, db_path=str(self._db_path),
-                                       mounts=self._tool_mounts())
+                                       mounts=self._tool_mounts(),
+                                       validate_url_fn=self._policy.validate_url)
                 result = await self._executor.execute_tool(step.tool, step.args, context)
                 logger.info("Resume run %s step %s: tool=%s status=%s",
                              run.run_id, step.step_id, step.tool, result.status)

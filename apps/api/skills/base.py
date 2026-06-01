@@ -17,6 +17,10 @@ DelegateFn = Callable[..., Coroutine[Any, Any, Any]]
 # Signature: (session_id, message, workspace_id, delay_minutes, interval_minutes, max_runs) -> ScheduledTask
 ScheduleFn = Callable[..., Coroutine[Any, Any, Any]]
 
+# Type alias for the URL validation callback.
+# Signature: (url: str, allowed_domains: list[str]) -> PolicyDecision
+ValidateUrlFn = Callable[..., Any]
+
 
 class ToolContext(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
@@ -28,6 +32,7 @@ class ToolContext(BaseModel):
     execution_id: str = ""
     delegate_fn: DelegateFn | None = None  # set by orchestrator for delegation
     schedule_fn: ScheduleFn | None = None  # set by orchestrator for scheduling
+    validate_url_fn: ValidateUrlFn | None = None  # set by orchestrator for URL validation
 
 
 class BaseTool(abc.ABC):

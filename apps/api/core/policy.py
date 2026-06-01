@@ -1,9 +1,12 @@
 """core/policy — Policy engine: the hard security boundary."""
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
+import socket
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
@@ -128,3 +131,78 @@ class PolicyEngine:
                                   reason=f"Tool {tool_name} requires approval")
         return PolicyDecision(allowed=True, classification="safe",
                               reason=f"Tool {tool_name} is safe")
+
+    # ── URL / network policy ─────────────────────────────────
+
+    def validate_url(self, url: str, allowed_domains: list[str]) -> PolicyDecision:
+        """Validate a URL for fetch_url.  Returns a PolicyDecision.
+
+        Checks (fail-closed on any):
+        1. Valid URL with http/https scheme
+        2. Host present
+        3. Host (or parent domain) in allowed_domains; empty list = forbidden
+        4. Resolved IPs are not private/loopback/link-local/reserved/multicast
+        """
+        # Parse
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            return PolicyDecision(allowed=False, classification="forbidden",
+                                  reason="URL failed to parse")
+
+        # Scheme
+        if parsed.scheme not in ("http", "https"):
+            return PolicyDecision(allowed=False, classification="forbidden",
+                                  reason=f"Scheme '{parsed.scheme}' not allowed (http/https only)")
+
+        # Host present
+        host = parsed.hostname
+        if not host:
+            return PolicyDecision(allowed=False, classification="forbidden",
+                                  reason="No host in URL")
+
+        # Domain allowlist
+        if not allowed_domains:
+            return PolicyDecision(allowed=False, classification="forbidden",
+                                  reason="No domains in allowlist — web fetch is opt-in")
+
+        if not self._domain_allowed(host, allowed_domains):
+            return PolicyDecision(allowed=False, classification="forbidden",
+                                  reason=f"Host '{host}' not in allowed domains")
+
+        # SSRF defense: resolve hostname and reject private IPs
+        try:
+            resolved = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        except socket.gaierror:
+            return PolicyDecision(allowed=False, classification="forbidden",
+                                  reason=f"DNS resolution failed for '{host}'")
+
+        for family, _type, _proto, _canonname, sockaddr in resolved:
+            ip_str = sockaddr[0]
+            try:
+                ip = ipaddress.ip_address(ip_str)
+            except ValueError:
+                return PolicyDecision(allowed=False, classification="forbidden",
+                                      reason=f"Invalid resolved IP: {ip_str}")
+
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+                return PolicyDecision(allowed=False, classification="forbidden",
+                                      reason=f"Host '{host}' resolves to non-public IP {ip_str}")
+
+            # Explicit cloud metadata IP block
+            if ip_str == "169.254.169.254":
+                return PolicyDecision(allowed=False, classification="forbidden",
+                                      reason=f"Host '{host}' resolves to cloud metadata IP")
+
+        return PolicyDecision(allowed=True, classification="approval_required",
+                              reason=f"URL allowed (host '{host}' in allowlist)")
+
+    @staticmethod
+    def _domain_allowed(host: str, allowed_domains: list[str]) -> bool:
+        """Check if host matches or is a subdomain of any allowed domain."""
+        host = host.lower().rstrip(".")
+        for domain in allowed_domains:
+            domain = domain.lower().rstrip(".")
+            if host == domain or host.endswith("." + domain):
+                return True
+        return False

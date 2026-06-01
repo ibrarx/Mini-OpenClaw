@@ -37,6 +37,7 @@ Key features:
 - **Manifest-driven tool extensibility** — add a tool without rewriting the core agent loop
 - **Multi-layer security** — policy engine, command allowlists, and approval gates for risky operations
 - **Named directory mounts** — configure multiple directories beyond the primary workspace, each with optional read-only enforcement. Tools address mounts with a `name:path` prefix (e.g., `read_file("notes:todo.md")`). The Settings page shows all mounts with access badges
+- **Runtime web fetch** — `fetch_url` tool retrieves live data from the public web (weather APIs, documentation, public datasets). Domain allowlist (opt-in), SSRF defense (private-IP blocking, scheme restriction, cloud-metadata block), response size cap, and mandatory user approval
 - **Full audit trail** — every decision logged in an append-only audit table
 
 ## Prerequisites
@@ -610,6 +611,7 @@ This context is injected into the LLM system prompt with explicit instructions t
 | `remember_fact` | Store a durable fact in memory | Safe | No |
 | `search_memory` | Query stored facts, episodes, and summaries | Safe | No |
 | `delegate_task` | Spawn a sub-agent to handle an independent sub-task — child runs with own iteration budget, restricted tool set (no delegation, no memory writes), and real-time SSE streaming | Medium | Yes |
+| `fetch_url` | Fetch content from a public URL — auto-detects JSON vs HTML/text, domain allowlist + SSRF defense (private-IP blocking), size cap, timeout | High | Yes |
 
 ## Security Model
 
@@ -721,6 +723,11 @@ All settings are read from the `.env` file (see `.env.example`):
 | `DELEGATE_MAX_CHILD_ITERATIONS` | Iteration cap per child run (hard max regardless of agent request) | `5` |
 | `SCHEDULER_ENABLED` | Enable/disable the scheduled task system and its `schedule_task` tool | `true` |
 | `SCHEDULER_MAX_TASKS` | Maximum number of active scheduled tasks allowed at once | `20` |
+| `WEB_FETCH_ENABLED` | Enable/disable the `fetch_url` tool | `true` |
+| `WEB_FETCH_ALLOWED_DOMAINS` | JSON array of allowed domains (empty = block everything, opt-in). Subdomains auto-included | `[]` |
+| `WEB_FETCH_MAX_BYTES` | Maximum response size in bytes | `1048576` (1 MB) |
+| `WEB_FETCH_TIMEOUT_SECONDS` | Request timeout | `10.0` |
+| `WEB_FETCH_MAX_REDIRECTS` | Maximum HTTP redirects to follow | `3` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
 | `BACKEND_PORT` | Backend server port | `8000` |
 
