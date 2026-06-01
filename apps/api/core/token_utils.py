@@ -32,17 +32,46 @@ def estimate_tokens(text: str) -> int:
 # ---------------------------------------------------------------------------
 
 MODEL_CONTEXT_WINDOWS: dict[str, int] = {
+    # Anthropic
+    "claude-opus-4-8": 200_000,
+    "claude-opus-4-7": 200_000,
+    "claude-opus-4-6": 200_000,
+    "claude-opus-4-5": 200_000,
     "claude-sonnet-4-6": 200_000,
     "claude-sonnet-4-20250514": 200_000,
+    "claude-sonnet-4-5": 200_000,
+    "claude-haiku-4-5": 200_000,
     "claude-haiku-3.5-20241022": 200_000,
-    "gemini-2.5-flash": 1_000_000,
+    # Gemini
+    "gemini-3.5-flash": 1_000_000,
+    "gemini-3.1-pro": 1_000_000,
+    "gemini-3.1-flash-lite": 1_000_000,
     "gemini-2.5-pro": 1_000_000,
-    "llama3.2": 8_192,
+    "gemini-2.5-flash": 1_000_000,
+    "gemini-2.5-flash-lite": 1_000_000,
+    "gemini-2.0-flash": 1_000_000,
+    # OpenAI
+    "gpt-5.5": 1_050_000,
+    "gpt-5.4": 1_050_000,
+    "gpt-4.1": 1_000_000,
+    "gpt-4o": 128_000,
+    "o3": 200_000,
+    # DeepSeek
+    "deepseek-v4": 1_000_000,
+    "deepseek-r1": 128_000,
+    "deepseek-v3": 128_000,
+    # Ollama / local
+    "llama3.2": 128_000,
     "llama3.1": 128_000,
-    "mistral": 8_192,
+    "llama3": 8_192,
+    "mistral": 32_768,
     "codellama": 16_384,
     "phi3": 4_096,
-    "qwen2.5": 32_768,
+    "phi4": 16_384,
+    "qwen2.5": 128_000,
+    "qwen3": 128_000,
+    "gemma3": 128_000,
+    "command-r": 128_000,
 }
 
 DEFAULT_CONTEXT_WINDOW: int = 8_192
@@ -69,20 +98,24 @@ CONTEXT_RESERVE_PCT: float = 0.30
 # ---------------------------------------------------------------------------
 
 # Hardcoded fallback — used only when pricing.json is absent or broken.
+# Covers the models Mini-OpenClaw actually supports as providers.
 _FALLBACK_PRICING: dict[str, dict[str, float]] = {
-    "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00, "cache_read": 0.30, "cache_write": 3.75},
+    "claude-opus-4-8": {"input": 5.00, "output": 25.00, "cache_read": 0.50, "cache_write": 6.25},
+    "claude-opus-4-7": {"input": 5.00, "output": 25.00, "cache_read": 0.50, "cache_write": 6.25},
+    "claude-opus-4-6": {"input": 5.00, "output": 25.00, "cache_read": 0.50, "cache_write": 6.25},
     "claude-sonnet-4-6": {"input": 3.00, "output": 15.00, "cache_read": 0.30, "cache_write": 3.75},
+    "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00, "cache_read": 0.30, "cache_write": 3.75},
+    "claude-haiku-4-5-20251001": {"input": 1.00, "output": 5.00, "cache_read": 0.10, "cache_write": 1.25},
     "claude-haiku-3.5-20241022": {"input": 0.80, "output": 4.00, "cache_read": 0.08, "cache_write": 1.00},
-    "gemini-2.5-flash": {"input": 0.15, "output": 0.60},
+    "gemini-3.5-flash": {"input": 1.50, "output": 9.00},
     "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
+    "gemini-2.5-flash": {"input": 0.15, "output": 0.60},
     "llama3.2": {"input": 0.0, "output": 0.0},
     "llama3.1": {"input": 0.0, "output": 0.0},
     "mistral": {"input": 0.0, "output": 0.0},
-    "codellama": {"input": 0.0, "output": 0.0},
-    "phi3": {"input": 0.0, "output": 0.0},
     "qwen2.5": {"input": 0.0, "output": 0.0},
 }
-_FALLBACK_LAST_VERIFIED: str = "2025-06-01"
+_FALLBACK_LAST_VERIFIED: str = "2026-06-01"
 
 DEFAULT_PRICING: dict[str, float] = {"input": 0.0, "output": 0.0}
 

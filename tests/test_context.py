@@ -57,7 +57,7 @@ class TestGetContextWindow:
         assert get_context_window("gemini-2.5-flash") == 1_000_000
 
     def test_exact_match_ollama(self) -> None:
-        assert get_context_window("llama3.2") == 8_192
+        assert get_context_window("llama3.2") == 128_000
 
     def test_prefix_match(self) -> None:
         # "claude-sonnet-4-XXXXX" should match via prefix
@@ -111,7 +111,7 @@ class TestBuildObservationContext:
         )
         assert result["compression_level"] == "none"
         assert "None yet" in result["obs_text"]
-        assert result["context_window"] == 8_192
+        assert result["context_window"] == 128_000
 
     def test_few_observations_no_compression(self) -> None:
         """With a large context window and few observations, no compression."""

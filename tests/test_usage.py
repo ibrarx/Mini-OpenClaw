@@ -312,7 +312,7 @@ class TestPricingJsonLoading:
         try:
             tu._ensure_loaded()
             assert len(tu.MODEL_PRICING) > 0
-            assert tu.PRICING_LAST_VERIFIED == "2025-06-01"
+            assert tu.PRICING_LAST_VERIFIED == "2026-06-01"
         finally:
             tu._find_pricing_json = original_fn
             tu._loaded = False
