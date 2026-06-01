@@ -28,6 +28,7 @@ Key features:
 - **Agent Dreams** — post-run memory consolidation that mines episodes for workflow strategies and user preferences, proposed for user review before influencing future planning
 - **Saga compensation** — reject a step and all previous write operations are automatically rolled back
 - **Budget-aware planning** — the agent sees its iteration budget, prefers batch operations, and works more strategically when budget is low; a live progress bar in the UI shows budget consumption
+- **Token tracking & cost dashboard** — every LLM call captures real token usage from the provider SDK (not estimates). Per-step, per-run, per-phase, and session-level cost breakdowns in the UI. Centralized pricing config (`pricing.json`) covering 45 models across Anthropic, Gemini, OpenAI, DeepSeek, and local Ollama. Dreamer background cycles tracked separately. "Estimated" badge when usage data is unavailable. Pricing verification date shown alongside all dollar figures
 - **Graceful max-iterations degradation** — when the agent exhausts its iteration budget, it synthesizes a direct answer from collected evidence instead of just summarizing what actions were taken; the run completes successfully if evidence is sufficient
 - **Error classification** — transient errors are retried with backoff, permanent errors go straight to the LLM, side-effect errors are surfaced to the user
 - **Self-reflection quality gate** — optional critique step where the agent scores its own final answer (completeness, accuracy, clarity). When the score is below threshold and iteration budget remains, the agent re-enters the ReAct loop to take corrective action (re-read files, run additional searches, etc.). Falls back to a text-only rewrite if no budget remains. Live "Reviewing…" status and expandable score breakdown in the UI
@@ -809,6 +810,55 @@ Subdomains are included automatically: adding `example.com` also allows `sub.exa
 
 Delegated sub-agents do not have access to `fetch_url` — network access in child runs without parent-level approval is too risky.
 
+## Token Tracking & Cost Dashboard
+
+Every LLM call in Mini-OpenClaw captures **real token usage** from the provider's SDK response — not the `char/4` heuristic used for context budget management. The system tracks usage at multiple granularities and surfaces it in the UI.
+
+### How it works
+
+1. **Provider layer** — each provider (Anthropic, Gemini, Ollama) extracts `input_tokens`, `output_tokens`, and cache fields from the SDK response into a `TokenUsage` object on every `LLMResponse`
+2. **Planner layer** — every planner method returns `(result, TokenUsage)` tuples. No hidden mutable state
+3. **Orchestrator layer** — a `_record_usage()` helper accumulates tokens at every call site (planning, goals, react steps, reflection, improvement, replanning, synthesis, summarization) onto the run's `RunUsage`
+4. **Dream cycles** — background memory consolidation usage is stored in a separate `dream_usage` table (not attributed to individual runs)
+5. **Persistence** — `RunUsage` is serialized as JSON in the `usage` column of the `runs` table. Old runs without the column degrade gracefully to zeroed defaults
+
+### What the UI shows
+
+- **Per-run strip** — total tokens, estimated cost, LLM call count, and an "estimated" badge if any call fell back to the heuristic
+- **Per-step** — each observation in Run History shows its token count and cost
+- **Phase breakdown** — a color-coded bar showing where tokens went (planning vs react vs reflection vs goals vs replan vs synthesis)
+- **By-tool attribution** — tokens spent in the LLM call that *selected* each tool (not the tool's intrinsic cost — local tools cost zero tokens)
+- **Session dashboard** — cumulative cost, per-model split (Claude vs Gemini vs Ollama side by side; Ollama shows $0.00), and dream cycle totals. Visible in Settings → Usage
+
+### Pricing configuration
+
+Pricing is loaded from `pricing.json` at the repo root — edit the JSON to update prices, no Python changes needed. The file covers 45 models across 5 providers:
+
+| Provider | Models | Input price range (per MTok) |
+|----------|--------|------------------------------|
+| Anthropic | Opus 4.8–4.5, Sonnet 4.6/4.5, Haiku 4.5/3.5 | $0.80 – $5.00 |
+| Gemini | 3.5 Flash → 2.0 Flash | $0.10 – $2.00 |
+| OpenAI | GPT-5.5 → GPT-4.1 Nano, o3, o4-mini | $0.10 – $5.00 |
+| DeepSeek | V4 Flash/Pro, R1, V3 | $0.14 – $1.74 |
+| Local (Ollama) | llama3.x, mistral, phi, qwen, gemma, etc. | $0.00 |
+
+If the file is missing or malformed, a built-in fallback is used silently. A `last_verified` date is stored in the JSON and displayed in the UI alongside all dollar figures — the project never presents cost as authoritative billing.
+
+### API endpoint
+
+`GET /api/usage/summary?session_id=...` returns a session-level rollup:
+
+```json
+{
+  "run_count": 12,
+  "totals": { "input_tokens": 45000, "output_tokens": 12000, "cost_usd": 0.215, "llm_calls": 28 },
+  "by_model": { "claude-sonnet-4-6": { "input_tokens": 45000, "cost_usd": 0.215, "llm_calls": 28 } },
+  "by_phase": { "react": 38000, "planning": 8000, "reflection": 6000, "dream": 5000 },
+  "dream": { "input_tokens": 3000, "output_tokens": 2000, "cost_usd": 0.039, "dream_cycles": 2 },
+  "pricing_last_verified": "2026-06-01"
+}
+```
+
 ## Running Tests
 
 ```bash
@@ -838,6 +888,7 @@ The test suite covers:
 | `test_scheduler.py` | Task scheduler: CRUD, lifecycle (pause/resume/delete), heap-based execution, inflight tracking, one-time and interval tasks, max_runs, pre-approval (once/recurring/approve_all), persistence roundtrip | 26 |
 | `test_integration.py` | End-to-end legacy plan-and-execute path, provider switching, retry failed runs | 12 |
 | `test_clarification.py` | Clarification gate: low/high confidence, task_type trigger, max rounds cap, clarify endpoint, child run bypass, feature toggle, DB persistence | 13 |
+| `test_usage.py` | Token usage capture, pricing table loading (file/fallback/malformed), `compute_cost` math (Claude/Gemini/Ollama/cache/unknown), `RunUsage` accumulation, observation per-step usage, backward compatibility (old runs without usage column), planner tuple returns | 37 |
 
 ## Memory Export
 
@@ -902,15 +953,16 @@ python scripts/export_memory.py
 ```
 mini-openclaw/
 ├── apps/api/              # FastAPI backend
-│   ├── core/              #   Orchestrator, planner, policy, executor, audit, scheduler
+│   ├── core/              #   Orchestrator, planner, policy, executor, audit, scheduler, token_utils
 │   ├── providers/         #   LLM provider abstraction (Anthropic, Gemini, Ollama)
 │   ├── skills/            #   V1 tool implementations + registry + sub-agent delegation + scheduling
 │   ├── memory/            #   Memory manager, hybrid retrieval, embeddings, vector store, dreamer
-│   └── models/            #   Pydantic models (Run, ToolResult, ScheduledTask, ErrorKind, etc.)
+│   └── models/            #   Pydantic models (Run, RunUsage, ToolResult, ScheduledTask, ErrorKind, etc.)
 ├── apps/web/              # React + TypeScript frontend
-│   └── src/components/    #   ChatPanel, PlanPreview, ExecutionGraph, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser, SchedulerPage
-├── tests/                 # pytest test suite (459 tests)
+│   └── src/components/    #   ChatPanel, PlanPreview, ExecutionGraph, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser, SchedulerPage, UsageDashboard
+├── tests/                 # pytest test suite (497 tests)
 ├── scripts/               # seed_demo.py (workspace + memory setup), export_memory.py
+├── pricing.json           # Per-model token pricing config (edit without touching Python)
 ├── docs/                  # Architecture and design documentation
 └── requirements.txt       # Python dependencies
 ```
