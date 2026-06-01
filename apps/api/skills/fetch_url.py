@@ -203,6 +203,7 @@ class FetchUrlTool(BaseTool):
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(self._timeout_s),
                 follow_redirects=False,  # manual redirect handling
+                headers={"User-Agent": "Mini-OpenClaw/0.1 (local AI agent; +https://github.com/ibrarx/Mini-OpenClaw)"},
             ) as client:
                 # ── DNS rebinding defense ──
                 # Re-resolve the hostname and re-check IPs immediately before
