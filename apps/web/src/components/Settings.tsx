@@ -444,8 +444,10 @@ function ToolsSection({ tools }: { tools: ToolManifest[] }) {
 
 function McpServerBlock({ server }: { server: McpServerGroup }) {
   const [expanded, setExpanded] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const SHOW_LIMIT = 3;
   const allApproval = server.tools.every((t) => t.approval_required);
+  const visibleTools = showAll ? server.tools : server.tools.slice(0, SHOW_LIMIT);
 
   return (
     <div className="rounded-lg bg-app-secondary px-3 py-2.5">
@@ -475,7 +477,7 @@ function McpServerBlock({ server }: { server: McpServerGroup }) {
 
       {expanded && (
         <div className="mt-1.5 space-y-0.5">
-          {server.tools.slice(0, SHOW_LIMIT).map((tool) => {
+          {visibleTools.map((tool) => {
             const parsed = parseMcpName(tool.name);
             return (
               <div
@@ -493,9 +495,14 @@ function McpServerBlock({ server }: { server: McpServerGroup }) {
             );
           })}
           {server.tools.length > SHOW_LIMIT && (
-            <p className="text-[10px] t-faint px-2 pt-0.5">
-              + {server.tools.length - SHOW_LIMIT} more tools
-            </p>
+            <button
+              onClick={() => setShowAll(!showAll)}
+              className="text-[10px] text-blue-400 hover:text-blue-300 px-2 pt-1 transition-colors"
+            >
+              {showAll
+                ? "Show less"
+                : `+ ${server.tools.length - SHOW_LIMIT} more tools`}
+            </button>
           )}
         </div>
       )}
