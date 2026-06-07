@@ -18,6 +18,7 @@ import {
   FolderOpen,
   Lock,
   HelpCircle,
+  Plug,
 } from "lucide-react";
 import { getTools, healthCheck, getMemory, getClarificationSettings, updateClarificationSettings } from "../api/client";
 import type { ClarificationSettings } from "../api/client";
@@ -309,17 +310,7 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
       </Section>
 
       {/* Registered tools */}
-      <Section title={`Tools (${tools.length})`}>
-        {tools.length === 0 ? (
-          <p className="text-xs t-muted italic">No tools registered</p>
-        ) : (
-          <div className="space-y-1.5">
-            {tools.map((tool) => (
-              <ToolRow key={tool.name} tool={tool} />
-            ))}
-          </div>
-        )}
-      </Section>
+      <ToolsSection tools={tools} />
 
       {/* Memory stats */}
       <Section title="Memory">
@@ -339,6 +330,175 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
       <Section title="Usage">
         <SessionUsageDashboard sessionId={sessionId} />
       </Section>
+    </div>
+  );
+}
+
+// ── Tools Section (Native + MCP grouped) ─────────────
+
+/** Parse MCP tool name: mcp__{server}__{tool} → { server, tool } */
+function parseMcpName(name: string): { server: string; tool: string } | null {
+  const match = name.match(/^mcp__([A-Za-z0-9_]+)__(.+)$/);
+  return match ? { server: match[1], tool: match[2] } : null;
+}
+
+interface McpServerGroup {
+  name: string;
+  tools: ToolManifest[];
+}
+
+function ToolsSection({ tools }: { tools: ToolManifest[] }) {
+  const [nativeExpanded, setNativeExpanded] = useState(false);
+  const [mcpExpanded, setMcpExpanded] = useState(true);
+
+  const nativeTools = tools.filter((t) => !t.name.startsWith("mcp__"));
+  const mcpTools = tools.filter((t) => t.name.startsWith("mcp__"));
+
+  // Group MCP tools by server
+  const mcpServers: McpServerGroup[] = [];
+  const serverMap = new Map<string, ToolManifest[]>();
+  for (const tool of mcpTools) {
+    const parsed = parseMcpName(tool.name);
+    if (!parsed) continue;
+    const list = serverMap.get(parsed.server) ?? [];
+    list.push(tool);
+    serverMap.set(parsed.server, list);
+  }
+  for (const [name, serverTools] of serverMap) {
+    mcpServers.push({ name, tools: serverTools });
+  }
+
+  return (
+    <Section title={`Tools (${tools.length})`}>
+      <div className="space-y-2">
+        {/* Native tools accordion */}
+        <div className="card overflow-hidden">
+          <button
+            onClick={() => setNativeExpanded(!nativeExpanded)}
+            className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:opacity-80 transition-colors"
+          >
+            <Wrench size={14} className="t-muted flex-shrink-0" />
+            <span className="text-xs font-medium t-secondary flex-1">
+              Native tools
+            </span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-app-secondary t-muted font-medium">
+              {nativeTools.length}
+            </span>
+            {nativeExpanded ? (
+              <ChevronDown size={13} className="t-faint flex-shrink-0" />
+            ) : (
+              <ChevronRight size={13} className="t-faint flex-shrink-0" />
+            )}
+          </button>
+          {nativeExpanded && (
+            <div className="px-2 pb-2 space-y-1 border-t border-app pt-1.5">
+              {nativeTools.map((tool) => (
+                <ToolRow key={tool.name} tool={tool} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* MCP servers accordion */}
+        {mcpServers.length > 0 && (
+          <div className="card overflow-hidden">
+            <button
+              onClick={() => setMcpExpanded(!mcpExpanded)}
+              className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:opacity-80 transition-colors"
+            >
+              <Plug size={14} className="t-muted flex-shrink-0" />
+              <span className="text-xs font-medium t-secondary flex-1">
+                MCP servers
+              </span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-medium">
+                {mcpServers.length} connected
+              </span>
+              {mcpExpanded ? (
+                <ChevronDown size={13} className="t-faint flex-shrink-0" />
+              ) : (
+                <ChevronRight size={13} className="t-faint flex-shrink-0" />
+              )}
+            </button>
+            {mcpExpanded && (
+              <div className="px-2 pb-2 space-y-1.5 border-t border-app pt-1.5">
+                {mcpServers.map((server) => (
+                  <McpServerBlock key={server.name} server={server} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* No MCP hint when there are none */}
+        {mcpServers.length === 0 && (
+          <p className="text-[10px] t-faint italic px-1">
+            No MCP servers connected. Set MCP_CLIENT_ENABLED=true and MCP_SERVERS in .env to add external tool servers.
+          </p>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+// ── MCP Server Block ─────────────────────────────────
+
+function McpServerBlock({ server }: { server: McpServerGroup }) {
+  const [expanded, setExpanded] = useState(false);
+  const SHOW_LIMIT = 3;
+  const allApproval = server.tools.every((t) => t.approval_required);
+
+  return (
+    <div className="rounded-lg bg-app-secondary px-3 py-2.5">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-2 text-left"
+      >
+        <span className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />
+        <span className="text-xs font-medium t-secondary flex-1">
+          {server.name}
+        </span>
+        <span className="text-[10px] t-faint">
+          {server.tools.length} tools
+        </span>
+        {expanded ? (
+          <ChevronDown size={12} className="t-faint flex-shrink-0" />
+        ) : (
+          <ChevronRight size={12} className="t-faint flex-shrink-0" />
+        )}
+      </button>
+
+      {!expanded && (
+        <p className="text-[10px] t-faint mt-1 ml-4">
+          {allApproval ? "All require approval" : "Mixed approval"} · high risk
+        </p>
+      )}
+
+      {expanded && (
+        <div className="mt-1.5 space-y-0.5">
+          {server.tools.slice(0, SHOW_LIMIT).map((tool) => {
+            const parsed = parseMcpName(tool.name);
+            return (
+              <div
+                key={tool.name}
+                className="flex items-center gap-2 px-2 py-1.5 rounded bg-app border border-app"
+              >
+                <span className="font-mono text-[11px] t-secondary flex-1 truncate">
+                  {parsed?.tool ?? tool.name}
+                </span>
+                <RiskBadge level={tool.risk_level} />
+                {tool.approval_required && (
+                  <ShieldCheck size={11} className="text-amber-400 flex-shrink-0" />
+                )}
+              </div>
+            );
+          })}
+          {server.tools.length > SHOW_LIMIT && (
+            <p className="text-[10px] t-faint px-2 pt-0.5">
+              + {server.tools.length - SHOW_LIMIT} more tools
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
