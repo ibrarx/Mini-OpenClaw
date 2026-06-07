@@ -9,7 +9,8 @@ import MessageBubble from "./MessageBubble";
 import PlanPreview from "./PlanPreview";
 import ApprovalCard from "./ApprovalCard";
 import ToolTrace from "./ToolTrace";
-import { submitChat, approveStep, rejectStep, cancelRun, retryRun, clarifyRun, getRuns } from "../api/client";
+import { submitChat, approveStep, rejectStep, cancelRun, retryRun, clarifyRun, getRuns, healthCheck } from "../api/client";
+import type { MountInfo } from "../api/client";
 import { useRunSSE } from "../hooks/useRunSSE";
 import type { ChatMessage, Run, RunStatus } from "../api/types";
 
@@ -67,6 +68,7 @@ export default function ChatPanel({
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [decidedSteps, setDecidedSteps] = useState<Set<string>>(new Set());
+  const [availableMounts, setAvailableMounts] = useState<MountInfo[]>([]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -138,6 +140,22 @@ export default function ChatPanel({
     })();
     return () => { cancelled = true; };
   }, [sessionId]); // only on mount / session change
+
+  // Fetch configured mounts for mount-aware example commands
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const health = await healthCheck();
+        if (!cancelled && health.mounts) {
+          setAvailableMounts(health.mounts.filter((m) => m.exists));
+        }
+      } catch {
+        // ignore — base commands render without mounts
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const addMessage = (
     role: ChatMessage["role"],
@@ -310,24 +328,29 @@ export default function ChatPanel({
           <div className="flex flex-col items-center justify-center h-full t-muted gap-3">
             <div className="text-5xl mb-1 opacity-30">🦀</div>
             <p className="text-sm t-secondary">Send a message to get started</p>
+            <p className="text-[11px] t-faint">&ldquo;The workspace&rdquo; is the set of files the agent can read and work on.</p>
             <div className="flex flex-col gap-1.5 mt-1">
               {[
-                "List files in the workspace",
-                "Read the README and summarize it",
-                "Search for TODO in all files",
-                "Remember that I prefer dark mode",
-                "Create a file called notes.txt with hello world",
-              ].map((cmd) => (
+                { label: "What's in the workspace? Give me an overview", cmd: "What's in the workspace? Give me an overview" },
+                { label: "Summarize the project in the workspace", cmd: "Summarize the project in the workspace" },
+                { label: "Find all the TODOs and unfinished work in the workspace", cmd: "Find all the TODOs and unfinished work in the workspace" },
+                { label: "Read the main README in the workspace and explain what this project does", cmd: "Read the main README in the workspace and explain what this project does" },
+                { label: "Remember that I prefer short, bulleted answers", cmd: "Remember that I prefer short, bulleted answers" },
+                ...availableMounts.map((m) => ({
+                  label: `Summarize the ${m.name} mount`,
+                  cmd: `Read ${m.name}:README.md and summarize the ${m.name} project`,
+                })),
+              ].map(({ label, cmd }) => (
                 <button
-                  key={cmd}
+                  key={label}
                   onClick={() => {
                     setInput(cmd);
-                    inputRef.current?.focus();
+                    setTimeout(() => inputRef.current?.focus(), 50);
                   }}
                   className="text-xs t-faint hover:text-blue-400 hover:bg-blue-500/5 px-3 py-1.5 rounded-md border border-transparent hover:border-blue-500/20 transition-all text-left"
                 >
                   <span className="t-faint mr-1.5">Try:</span>
-                  &quot;{cmd}&quot;
+                  &quot;{label}&quot;
                 </button>
               ))}
             </div>
@@ -501,6 +524,9 @@ export default function ChatPanel({
             </button>
           )}
         </div>
+        <p className="t-faint text-[10px] text-center leading-snug mt-1.5">
+          Mini-OpenClaw is AI-powered and can make mistakes — review proposed steps before approving and verify outputs.
+        </p>
       </div>
     </div>
   );

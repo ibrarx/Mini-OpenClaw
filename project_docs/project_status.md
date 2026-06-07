@@ -172,3 +172,8 @@ Further details are available in `docs/threat-model.md`.
 ## 8. Frontend
 
 The React/TypeScript frontend provides a rich interactive experience. It visualizes the agent's progress, displays the execution graph, manages scheduled tasks, allows memory browsing, and handles user approvals for agent actions. It connects to the FastAPI backend using Server-Sent Events (SSE) for real-time updates.
+
+### UI content updates
+- **AI disclaimer**: A persistent, muted notice below the chat input reminds users that Mini-OpenClaw is AI-powered and that they should review proposed steps before approving.
+- **Mount-aware example commands**: The empty-state now shows five workspace-centric base commands plus one additional command per configured named mount (fetched from `/api/health`). Read-only mounts only generate read/summarize commands.
+- **Workspace helper line**: A short helper line below "Send a message to get started" explains that "the workspace" is the set of files the agent can read and work on.

@@ -36,7 +36,7 @@
 
 ## Demo 2: Safe Tool — Auto-execution (1 minute)
 
-**Type:** `List files in the workspace`
+**Type:** `What's in the workspace? Give me an overview`
 
 > "When tools are needed, the planner creates a step-by-step plan. Here it selected `list_files`, which is classified as safe — so it auto-executes without needing approval."
 

@@ -59,17 +59,10 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
         getClarificationSettings(),
       ]);
       if (h.status === "fulfilled") {
-        const data = h.value as Record<string, unknown>;
+        const data = h.value;
         setHealthy(data.status === "ok");
-        if (Array.isArray(data.mounts)) {
-          setMounts(
-            data.mounts as {
-              name: string;
-              path: string;
-              read_only: boolean;
-              exists: boolean;
-            }[],
-          );
+        if (data.mounts) {
+          setMounts(data.mounts);
         }
       } else {
         setHealthy(false);
