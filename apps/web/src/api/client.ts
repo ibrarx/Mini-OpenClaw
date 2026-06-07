@@ -219,9 +219,18 @@ export interface MountInfo {
   exists: boolean;
 }
 
+export interface McpServerInfo {
+  enabled: boolean;
+  path: string;
+  endpoint: string;
+  exposed_tools: string[];
+  require_approval: boolean;
+}
+
 export interface HealthResponse {
   status: string;
   mounts?: MountInfo[];
+  mcp_server?: McpServerInfo | null;
 }
 
 export async function healthCheck(): Promise<HealthResponse> {

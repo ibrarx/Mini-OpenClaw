@@ -1,7 +1,7 @@
 """Health check endpoint with full system diagnostics."""
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from apps.api.config import get_settings
 from apps.api.database import get_connection
@@ -12,7 +12,7 @@ router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
-async def health_check() -> dict:
+async def health_check(request: Request) -> dict:
     settings = get_settings()
     workspace = settings.resolved_workspace
 
@@ -54,14 +54,33 @@ async def health_check() -> dict:
         for name, (path, read_only) in settings.resolved_mounts.items()
     ]
 
+    # MCP server status
+    mcp_server_info = None
+    if settings.mcp_server_enabled:
+        bridge = getattr(request.app.state, "mcp_server_bridge", None)
+        exposed_tools: list[str] = []
+        if bridge:
+            exposed_tools = sorted(bridge.exposed_tool_names)
+        else:
+            from apps.api.mcp.server import _SAFE_DEFAULT_TOOLS
+            if settings.mcp_server_exposed_tools:
+                exposed_tools = sorted(settings.mcp_server_exposed_tools)
+            else:
+                exposed_tools = sorted(_SAFE_DEFAULT_TOOLS)
+        mcp_server_info = {
+            "enabled": True,
+            "path": settings.mcp_server_path,
+            "endpoint": f"{settings.mcp_server_path}/sse",
+            "exposed_tools": exposed_tools,
+            "require_approval": settings.mcp_server_require_approval,
+        }
+
     return {
         "status": "ok",
         "llm_provider": provider_name,
         "llm_model": settings.active_provider_model,
         "api_key_configured": api_key_configured,
         "api_key_status": api_key_status,
-        # Kept for backward compatibility with older clients/tests that
-        # specifically checked the Anthropic key.
         "anthropic_api_key_configured": bool(settings.anthropic_api_key),
         "gemini_api_key_configured": bool(settings.gemini_api_key),
         "database": db_status,
@@ -71,4 +90,5 @@ async def health_check() -> dict:
         "workspace_exists": workspace.is_dir(),
         "memory_items_count": memory_count,
         "mounts": mounts_info,
+        "mcp_server": mcp_server_info,
     }

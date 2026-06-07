@@ -19,6 +19,7 @@ import {
   Lock,
   HelpCircle,
   Plug,
+  Radio,
 } from "lucide-react";
 import { getTools, healthCheck, getMemory, getClarificationSettings, updateClarificationSettings } from "../api/client";
 import type { ClarificationSettings } from "../api/client";
@@ -46,6 +47,13 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
   const [mounts, setMounts] = useState<
     { name: string; path: string; read_only: boolean; exists: boolean }[]
   >([]);
+  const [mcpServer, setMcpServer] = useState<{
+    enabled: boolean;
+    path: string;
+    endpoint: string;
+    exposed_tools: string[];
+    require_approval: boolean;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [clarification, setClarification] = useState<ClarificationSettings | null>(null);
   const { theme, setTheme } = useTheme();
@@ -65,6 +73,7 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
         if (data.mounts) {
           setMounts(data.mounts);
         }
+        setMcpServer(data.mcp_server ?? null);
       } else {
         setHealthy(false);
       }
@@ -311,6 +320,61 @@ export default function Settings({ sessionId, onResetSession }: SettingsProps) {
 
       {/* Registered tools */}
       <ToolsSection tools={tools} />
+
+      {/* MCP Server */}
+      {mcpServer ? (
+        <Section title="MCP Server">
+          <div className="card px-3 py-2.5 space-y-2.5">
+            <div className="flex items-center gap-2">
+              <Radio size={14} className="text-emerald-400 flex-shrink-0" />
+              <span className="text-xs font-medium t-secondary flex-1">
+                Serving tools to external clients
+              </span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-medium">
+                active
+              </span>
+            </div>
+            <div className="ml-[22px] space-y-1.5">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="t-faint">Endpoint:</span>
+                <code className="font-mono text-[11px] t-muted bg-app-secondary px-1.5 py-0.5 rounded">
+                  http://localhost:8000{mcpServer.endpoint}
+                </code>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="t-faint">Approval gate:</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                  mcpServer.require_approval
+                    ? "bg-emerald-500/15 text-emerald-400"
+                    : "bg-amber-500/15 text-amber-400"
+                }`}>
+                  {mcpServer.require_approval ? "enforced" : "disabled"}
+                </span>
+              </div>
+              <div className="text-xs t-faint">
+                Exposed tools ({mcpServer.exposed_tools.length}):
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {mcpServer.exposed_tools.map((name) => (
+                  <span
+                    key={name}
+                    className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-app-secondary t-muted"
+                  >
+                    {name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Section>
+      ) : (
+        <Section title="MCP Server">
+          <p className="text-xs t-faint italic px-1">
+            Disabled. Set MCP_SERVER_ENABLED=true in .env to expose tools to
+            external MCP clients.
+          </p>
+        </Section>
+      )}
 
       {/* Memory stats */}
       <Section title="Memory">
