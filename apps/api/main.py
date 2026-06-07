@@ -192,14 +192,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS - allow the Vite dev server
+# CORS - allow the Vite dev server (and all localhost when MCP server is on,
+# so browser-based MCP clients like the MCP Inspector can connect)
+_cors_origins = [
+    f"http://localhost:{settings.frontend_port}",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+_cors_origin_regex = (
+    r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+    if settings.mcp_server_enabled
+    else None
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        f"http://localhost:{settings.frontend_port}",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=_cors_origins,
+    allow_origin_regex=_cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
