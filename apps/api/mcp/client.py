@@ -10,8 +10,8 @@ Responsible for:
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
+import sys
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -108,7 +108,7 @@ class McpClientManager:
                     args=cfg.args,
                 )
                 # stdio_client is an async context manager yielding (read, write)
-                ctx = stdio_client(params, errlog=io.StringIO())
+                ctx = stdio_client(params, errlog=sys.stderr)
                 streams = await ctx.__aenter__()
                 conn._cleanup_stack.append(ctx)
                 read_stream, write_stream = streams
