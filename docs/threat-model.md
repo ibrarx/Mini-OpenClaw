@@ -22,7 +22,7 @@ When `MCP_SERVER_ENABLED=true`, Mini-OpenClaw accepts inbound tool calls from ex
 **Mitigations:**
 - `MCP_SERVER_ENABLED=false` by default — no inbound MCP unless explicitly opted in.
 - Default exposed set is safe, read-only tools only (`list_files`, `read_file`, `search_in_files`, `search_memory`). No mutating tools are exposed without explicit operator action.
-- Approval-gated tools (write, shell, network, delegate, schedule) are refused with an MCP error by default. The operator must set `MCP_SERVER_REQUIRE_APPROVAL=false` AND add the tool to `MCP_SERVER_EXPOSED_TOOLS` to allow them — a loud warning is logged.
+- Approval-gated tools (write, shell, network, delegate, schedule) are refused with an MCP error by default (`MCP_SERVER_REQUIRE_APPROVAL=true`). When set to `false`, these tools execute immediately without human review — the operator must also add them to `MCP_SERVER_EXPOSED_TOOLS`. A loud warning is logged at startup.
 - `delegate_task` and `schedule_task` are never exposed over MCP (hard-coded block list).
 - All MCP tool calls pass through the same `PolicyEngine` used internally: path sandbox, command allowlist, read-only mount enforcement all apply.
 - Every MCP tool invocation produces audit records (`mcp_tool_called` / `mcp_tool_completed` / `mcp_tool_failed`) with a synthetic `mcp-<uuid>` run ID.

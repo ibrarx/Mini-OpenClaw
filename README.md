@@ -783,7 +783,7 @@ All settings are read from the `.env` file (see `.env.example`):
 | `MCP_SERVER_ENABLED` | Enable MCP server to expose tools to external clients (see [MCP Server](#mcp-server)) | `false` |
 | `MCP_SERVER_PATH` | Route prefix for the MCP SSE transport | `/mcp` |
 | `MCP_SERVER_EXPOSED_TOOLS` | JSON array of tool names to expose (empty = safe defaults) | `[]` |
-| `MCP_SERVER_REQUIRE_APPROVAL` | Refuse approval-gated tools over MCP | `true` |
+| `MCP_SERVER_REQUIRE_APPROVAL` | `true` = refuse risky tools over MCP; `false` = allow without human approval | `true` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
 | `BACKEND_PORT` | Backend server port | `8000` |
 
@@ -866,7 +866,7 @@ The Settings tab groups tools into a **Native tools** accordion and an **MCP ser
 
 ## MCP Server
 
-Expose Mini-OpenClaw's own tools over the **Model Context Protocol** so that external MCP clients (e.g. Claude Desktop, another agent) can discover and call them. This is the reverse direction of the MCP client — the agent acts as a *server*.
+Expose Mini-OpenClaw's own tools over the **Model Context Protocol** so that external MCP clients (e.g. Claude Desktop, MCP Inspector, another agent) can discover and call them. This is the reverse direction of the MCP client — the agent acts as a *server*.
 
 ### How it works
 
@@ -876,17 +876,31 @@ When `MCP_SERVER_ENABLED=true`, an SSE-based MCP transport mounts on the existin
 
 By default, only **read-only, non-mutating tools** are exposed: `list_files`, `read_file`, `search_in_files`, `search_memory`. These need no human approval and cannot modify the workspace.
 
-### Human-in-the-loop limitation
+### Approval gate (human-in-the-loop)
 
-Mini-OpenClaw's safety model relies on **approval gates** — risky tools require a human to approve each step in the UI. An MCP client calling a tool directly **has no such UI and no human in the loop.** Therefore:
+In the normal UI flow, risky tools (`write_file`, `run_shell_safe`, `fetch_url`) pause and show an **approval card** — the user reviews the tool arguments and clicks Approve before execution proceeds. An MCP client calling a tool directly **has no such UI and no human in the loop.**
 
-- Tools that are `approval_required` (e.g. `write_file`, `run_shell_safe`, `fetch_url`) are **refused** over MCP by default with an error explaining the limitation.
-- To allow mutating tools over MCP, the operator must **explicitly** add them to `MCP_SERVER_EXPOSED_TOOLS` **and** set `MCP_SERVER_REQUIRE_APPROVAL=false`. A loud warning is logged at startup.
-- `delegate_task` and `schedule_task` are **never** exposed over MCP (they spawn internal runs with no sane remote semantics).
+`MCP_SERVER_REQUIRE_APPROVAL` controls what happens when a remote MCP client requests a risky tool:
+
+| Setting | Behavior | UI shows |
+|---------|----------|----------|
+| `true` (default) | Risky tools are **refused** with an MCP error — they simply won't execute | "Approval gate: **enforced**" |
+| `false` | Risky tools **execute immediately** without human review — the safety gate is off for remote callers | "Approval gate: **disabled**" (amber warning) |
+
+To allow all tools over MCP (including mutating ones), set both:
+```
+MCP_SERVER_EXPOSED_TOOLS=["list_files","read_file","write_file","search_in_files","run_shell_safe","remember_fact","search_memory","fetch_url"]
+MCP_SERVER_REQUIRE_APPROVAL=false
+```
+A warning is logged at startup listing which mutating tools are now executable by remote clients.
+
+Tools that are **never** exposed over MCP regardless of settings: `delegate_task`, `schedule_task` (they spawn internal runs with no sane remote semantics).
 
 ### Security guarantees
 
-- **Policy engine still enforced:** all MCP tool calls route through the same `PolicyEngine` and `Executor` used internally. Path sandboxing, command allowlists, and read-only mount enforcement apply.
+Even with approval gating disabled, the following still apply:
+
+- **Policy engine enforced:** all MCP tool calls route through the same `PolicyEngine` and `Executor` used internally. Path sandboxing, command allowlists, and read-only mount enforcement apply.
 - **Audit trail:** every MCP tool invocation produces audit records (`mcp_tool_called` / `mcp_tool_completed` / `mcp_tool_failed`) with a synthetic `mcp-<uuid>` run ID.
 - **Timeouts:** each MCP tool call has a 60-second timeout.
 - **Isolation:** a malformed MCP request returns an MCP error, never a 500 that destabilizes the app.
@@ -898,7 +912,21 @@ Mini-OpenClaw's safety model relies on **approval gates** — risky tools requir
 | `MCP_SERVER_ENABLED` | `false` | Enable the MCP server transport |
 | `MCP_SERVER_PATH` | `/mcp` | Route prefix for the SSE transport |
 | `MCP_SERVER_EXPOSED_TOOLS` | `[]` | Tool allowlist (empty = safe defaults only) |
-| `MCP_SERVER_REQUIRE_APPROVAL` | `true` | Refuse approval-gated tools over MCP |
+| `MCP_SERVER_REQUIRE_APPROVAL` | `true` | `true` = refuse risky tools over MCP; `false` = allow without human approval |
+
+### Settings page
+
+The Settings tab shows the MCP server status: whether it's active, the SSE endpoint URL, the approval gate state (enforced/disabled), and the list of exposed tools. When the server is disabled, a hint explains how to enable it.
+
+### Testing with the MCP Inspector
+
+The easiest way to test the MCP server without installing Claude Desktop:
+
+```bash
+npx @modelcontextprotocol/inspector
+```
+
+This opens a browser UI. Set transport to **SSE**, URL to `http://localhost:8000/mcp/sse`, and click Connect. You'll see the exposed tools listed and can call them interactively.
 
 ### Example: connecting Claude Desktop
 

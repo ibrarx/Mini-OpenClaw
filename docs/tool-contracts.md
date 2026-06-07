@@ -23,6 +23,6 @@ When `MCP_SERVER_ENABLED=true`, Mini-OpenClaw's own tools are surfaced over the 
 
 **Default exposed set:** `list_files`, `read_file`, `search_in_files`, `search_memory` — all `RiskLevel.SAFE` and non-mutating.
 
-**Approval semantics:** Tools with `approval_required=True` are listed for discovery but calls are refused with an MCP error unless the operator disables the approval gate. `delegate_task` and `schedule_task` are hard-blocked from MCP exposure.
+**Approval semantics:** Tools with `approval_required=True` are listed for discovery but calls are refused with an MCP error when `MCP_SERVER_REQUIRE_APPROVAL=true` (default). When set to `false`, these tools execute immediately without human review — useful for trusted local testing but disables the safety gate for remote callers. `delegate_task` and `schedule_task` are hard-blocked from MCP exposure regardless of settings.
 
 **Execution path:** MCP `call_tool` calls route through the same `Executor` and `PolicyEngine` used internally — path sandbox, command allowlist, and read-only mount enforcement all apply. A `ToolContext` is built via `Orchestrator.build_tool_context()` with a synthetic `mcp-<uuid>` run ID.

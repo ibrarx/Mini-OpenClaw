@@ -165,7 +165,7 @@ When `MCP_CLIENT_ENABLED=true`, the agent can also consume tools from external M
 
 ### MCP Server (Expose Tools to External Clients)
 
-When `MCP_SERVER_ENABLED=true`, Mini-OpenClaw exposes its own tools over MCP via an SSE transport mounted at `MCP_SERVER_PATH` (default `/mcp`). External MCP clients (e.g. Claude Desktop, other agents) can discover and call these tools. The default exposed set is safe, read-only tools only (`list_files`, `read_file`, `search_in_files`, `search_memory`). Approval-gated tools are refused by default (no human in the MCP loop); the operator must explicitly opt in via `MCP_SERVER_EXPOSED_TOOLS` and `MCP_SERVER_REQUIRE_APPROVAL=false`. All MCP tool calls route through the same PolicyEngine, Executor, and audit trail. Off by default.
+When `MCP_SERVER_ENABLED=true`, Mini-OpenClaw exposes its own tools over MCP via an SSE transport mounted at `MCP_SERVER_PATH` (default `/mcp`). External MCP clients (e.g. Claude Desktop, MCP Inspector, other agents) can discover and call these tools. The default exposed set is safe, read-only tools only (`list_files`, `read_file`, `search_in_files`, `search_memory`). Approval-gated tools are refused by default (`MCP_SERVER_REQUIRE_APPROVAL=true`) because there is no human in the MCP loop to review and approve each action; when set to `false`, risky tools execute immediately without human review. The operator must explicitly opt in via `MCP_SERVER_EXPOSED_TOOLS` to expose mutating tools. All MCP tool calls route through the same PolicyEngine, Executor, and audit trail. The Settings tab shows the MCP server status, endpoint URL, approval gate state, and exposed tool list. Off by default.
 
 ## 7. Security Model
 
