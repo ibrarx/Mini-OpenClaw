@@ -40,6 +40,7 @@ Key features:
 - **Multi-layer security** — policy engine, command allowlists, and approval gates for risky operations
 - **Named directory mounts** — configure multiple directories beyond the primary workspace, each with optional read-only enforcement. Tools address mounts with a `name:path` prefix (e.g., `read_file("notes:todo.md")`). The Settings page shows all mounts with access badges
 - **Runtime web fetch** — `fetch_url` tool retrieves live data from the public web (weather APIs, documentation, public datasets). Domain allowlist (opt-in), SSRF defense (private-IP blocking, scheme restriction, cloud-metadata block), response size cap, and mandatory user approval
+- **MCP client** — connect to external MCP (Model Context Protocol) servers and expose their tools to the agent as native tools. Auto-discovered at startup, namespaced as `mcp__{server}__{tool}`, default `RiskLevel.HIGH` with approval gates. Off by default (`MCP_CLIENT_ENABLED=false`); a failing server is skipped gracefully
 - **Full audit trail** — every decision logged in an append-only audit table
 
 ## Prerequisites
@@ -776,6 +777,8 @@ All settings are read from the `.env` file (see `.env.example`):
 | `WEB_FETCH_MAX_BYTES` | Maximum response size in bytes | `1048576` (1 MB) |
 | `WEB_FETCH_TIMEOUT_SECONDS` | Request timeout | `10.0` |
 | `WEB_FETCH_MAX_REDIRECTS` | Maximum HTTP redirects to follow | `3` |
+| `MCP_CLIENT_ENABLED` | Enable MCP client to consume external MCP tool servers (see [MCP Client](#mcp-client)) | `false` |
+| `MCP_SERVERS` | JSON array of MCP server configs (name, transport, command/url, etc.) | `[]` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
 | `BACKEND_PORT` | Backend server port | `8000` |
 
@@ -812,6 +815,49 @@ Subdomains are included automatically: adding `example.com` also allows `sub.exa
 ### Excluded from child runs
 
 Delegated sub-agents do not have access to `fetch_url` — network access in child runs without parent-level approval is too risky.
+
+## MCP Client
+
+Mini-OpenClaw can connect to external **Model Context Protocol (MCP)** servers and expose their tools to the agent as if they were native tools. This lets the agent use third-party MCP servers (filesystem, web, database, SaaS connectors, etc.) without writing a bespoke skill for each.
+
+### How it works
+
+At startup (when `MCP_CLIENT_ENABLED=true`), the agent connects to each configured MCP server, performs the MCP handshake, discovers the server's tools, and registers them in the skill registry. From the planner's perspective, MCP tools look identical to native tools — they flow through the same policy engine, approval gates, and audit trail.
+
+### Tool namespacing
+
+Remote tools are namespaced as `mcp__{server_name}__{tool_name}` (double underscore separator) to guarantee no collision with native tools. For example, a tool named `read_file` from a server named `fs` becomes `mcp__fs__read_file`.
+
+### Security posture
+
+All MCP tools default to `RiskLevel.HIGH` with `approval_required=True`. They go through the same approval flow and audit logging as native high-risk tools like `fetch_url`. Per-server `approval_required` can be overridden in the config, but risk level stays HIGH. MCP tools are **not** exposed to child/delegated runs (blast radius control).
+
+### Graceful degradation
+
+A failing or unreachable MCP server is skipped at startup with a warning — it never crashes the agent. The agent retains all its native tools regardless of MCP server availability. When `MCP_CLIENT_ENABLED=false` (the default), behavior is identical to before this feature was added.
+
+### Configuration
+
+Enable MCP client and configure servers in `.env`:
+
+```dotenv
+MCP_CLIENT_ENABLED=true
+
+# stdio transport (launches a subprocess)
+MCP_SERVERS='[{"name":"fs","transport":"stdio","command":"npx","args":["-y","@anthropic/mcp-filesystem","/tmp/safe"]}]'
+
+# SSE transport (connects to a running server)
+MCP_SERVERS='[{"name":"weather","transport":"sse","url":"http://localhost:3001/sse"}]'
+
+# With an allowed_tools filter and approval override
+MCP_SERVERS='[{"name":"db","transport":"streamable_http","url":"http://localhost:3002/mcp","allowed_tools":["query","list_tables"],"approval_required":true}]'
+```
+
+Each server config supports: `name`, `transport` (`stdio`/`sse`/`streamable_http`), `command`/`args` (stdio) or `url` (sse/streamable_http), `enabled`, `approval_required`, and `allowed_tools` (empty = all tools).
+
+### Settings page
+
+The Settings tab groups tools into a **Native tools** accordion and an **MCP servers** accordion. Each connected server shows a green status dot, tool count, and an expandable list of its tools with risk badges. When no MCP servers are configured, a hint explains how to enable them.
 
 ## Token Tracking & Cost Dashboard
 
@@ -892,6 +938,9 @@ The test suite covers:
 | `test_integration.py` | End-to-end legacy plan-and-execute path, provider switching, retry failed runs | 12 |
 | `test_clarification.py` | Clarification gate: low/high confidence, task_type trigger, max rounds cap, clarify endpoint, child run bypass, feature toggle, DB persistence | 13 |
 | `test_usage.py` | Token usage capture, pricing table loading (file/fallback/malformed), `compute_cost` math (Claude/Gemini/Ollama/cache/unknown), `RunUsage` accumulation, observation per-step usage, backward compatibility (old runs without usage column), planner tuple returns | 37 |
+| `test_fetch.py` | `fetch_url` tool: JSON/HTML responses, domain allowlist, scheme/IP blocking, SSRF/DNS-rebinding defense, streaming size limits, timeouts, disabled state | 20 |
+| `test_explain.py` | Run explanations: completed/direct/delegated/failed/cancelled runs, detail levels (summary/detailed/debug), reflection and goals in explanations, audit events | 16 |
+| `test_mcp.py` | MCP client: config validation (transport/duplicates/reserved names/required fields), registry integration (disabled baseline, proxy registration, child-run exclusion, allowed_tools filter, planner descriptions), proxy tool execution (success/error/timeout/connection), manager lifecycle | 28 |
 
 ## Memory Export
 
@@ -916,6 +965,8 @@ python scripts/export_memory.py
 | `Model 'X' not found` (Ollama) | Pull the model first: `ollama pull X` |
 | Ollama response is slow | First call loads the model into memory — subsequent calls are faster. Try a smaller model like `phi3` |
 | `CORS error in browser` | Ensure the backend is running on port 8000 |
+| `MCP server 'X' failed to connect` | Run the MCP server command manually (e.g. `npx -y @modelcontextprotocol/server-filesystem /path`) to verify it works. Check that the path in `MCP_SERVERS` uses forward slashes on Windows |
+| No MCP tools in `/api/tools` | Verify `MCP_CLIENT_ENABLED=true` in `.env` and `MCP_SERVERS` is valid JSON on one line. Restart the backend after editing `.env` |
 | `python-dotenv could not parse statement` | Check `WORKSPACE_MOUNTS` in `.env`: use forward slashes in paths, no spaces in mount names, no trailing characters after the JSON array |
 | Mount shows `missing` badge in Settings | The path in `WORKSPACE_MOUNTS` doesn't exist on disk. Create the directory or fix the path |
 | Agent doesn't use mount prefix | The planner may not recognize the mount name from natural language. Be explicit: *"read notes:todo.md"* or *"list files in the notes directory"* |

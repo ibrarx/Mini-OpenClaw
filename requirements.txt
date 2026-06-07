@@ -16,6 +16,9 @@ httpx>=0.27.0,<1.0.0
 beautifulsoup4>=4.12.0,<5.0.0
 jsonschema>=4.23.0,<5.0.0
 
+# MCP client — consume external MCP tool servers
+mcp>=1.0.0,<2.0.0
+
 # Testing
 pytest>=8.3.0,<9.0.0
 pytest-asyncio>=0.24.0,<1.0.0

@@ -61,6 +61,7 @@ Mini-OpenClaw includes a comprehensive set of features designed for robust and t
 *   **Multi-layer Security:** Policy engine, command allowlists, and approval gates.
 *   **Named Directory Mounts:** Allows the agent to access additional directories beyond the primary workspace with configurable permissions.
 *   **Runtime Web Fetch:** `fetch_url` tool retrieves live data from the public web with security guardrails.
+*   **MCP Client:** Connect to external MCP tool servers and expose their tools to the agent as native tools — auto-discovered, namespaced, default-HIGH-risk with approval gates. Off by default (`MCP_CLIENT_ENABLED=false`).
 *   **Full Audit Trail:** Every decision is logged in an append-only audit table.
 
 ## 4. How it Works (Execution Flow)
@@ -157,6 +158,10 @@ Currently available tools include:
 *   `explain_run`: Provides explanations for past runs.
 
 Each tool has a defined risk level, and risky operations require explicit user approval.
+
+### MCP Client (External Tool Servers)
+
+When `MCP_CLIENT_ENABLED=true`, the agent can also consume tools from external MCP (Model Context Protocol) servers. Remote tools are auto-discovered at startup, namespaced as `mcp__{server}__{tool}`, and registered in the skill registry alongside native tools. They default to `RiskLevel.HIGH` with approval required and flow through the same policy engine and audit trail. A failing MCP server is skipped gracefully. The MCP server direction (exposing Mini-OpenClaw's own tools over MCP) is tracked separately.
 
 ## 7. Security Model
 

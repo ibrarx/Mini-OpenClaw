@@ -33,7 +33,8 @@ class SkillRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, BaseTool] = {}
 
-    def discover(self, settings=None, *, is_child_run: bool = False) -> None:
+    def discover(self, settings=None, *, is_child_run: bool = False,
+                 mcp_manager: Any | None = None) -> None:
         for cls in _TOOL_CLASSES:
             # Skip memory-writing tools in child runs
             if is_child_run and cls in (RememberFactTool,):
@@ -79,6 +80,34 @@ class SkillRegistry:
             logger.info("Registered tool: %s (risk=%s, domains=%s)",
                         ft.name, ft.manifest().risk_level.value,
                         getattr(settings, "web_fetch_allowed_domains", []))
+
+        # Register MCP proxy tools only for top-level runs when enabled
+        if not is_child_run and mcp_manager is not None:
+            from apps.api.skills.mcp_tool import McpProxyTool
+            from apps.api.models.run import RiskLevel
+
+            for remote in mcp_manager.discovered_tools:
+                # Look up per-server config for risk/approval overrides
+                srv_cfg = None
+                if settings:
+                    for s in getattr(settings, "mcp_servers", []):
+                        if s.name == remote.server_name:
+                            srv_cfg = s
+                            break
+
+                proxy = McpProxyTool(
+                    namespaced_name=remote.namespaced_name,
+                    description=remote.description,
+                    input_schema=remote.input_schema,
+                    manager=mcp_manager,
+                    server_name=remote.server_name,
+                    risk_level=RiskLevel.HIGH,
+                    approval_required=srv_cfg.approval_required if srv_cfg else True,
+                )
+                self._tools[proxy.name] = proxy
+                logger.info("Registered MCP tool: %s (server=%s, risk=high, approval=%s)",
+                            proxy.name, remote.server_name,
+                            proxy.manifest().approval_required)
 
         logger.info("Tool discovery complete: %d tools", len(self._tools))
 
