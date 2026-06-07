@@ -200,6 +200,11 @@ class Settings(BaseSettings):
                         f"MCP server {name!r}: 'url' is required for {transport} transport"
                     )
 
+        # Validate MCP server path prefix
+        mcp_path = self.mcp_server_path
+        if not mcp_path.startswith("/"):
+            object.__setattr__(self, "mcp_server_path", "/" + mcp_path)
+
         return self
 
     # ----- Tool limits -----
@@ -271,6 +276,19 @@ class Settings(BaseSettings):
     # JSON-encoded list of McpServerConfig objects.
     # Example: MCP_SERVERS='[{"name":"fs","transport":"stdio","command":"npx","args":["-y","@anthropic/mcp-filesystem"]}]'
     mcp_servers: list[McpServerConfig] = []
+
+    # ----- MCP server (expose tools TO external clients) -----
+    # OFF by default — enable to let external MCP clients (e.g. Claude Desktop)
+    # discover and call Mini-OpenClaw tools over MCP.
+    mcp_server_enabled: bool = False
+    # Route prefix where the MCP SSE transport is mounted on the FastAPI app.
+    mcp_server_path: str = "/mcp"
+    # Allowlist of tool names to expose. Empty = safe default set only
+    # (list_files, read_file, search_in_files, search_memory).
+    mcp_server_exposed_tools: list[str] = []
+    # Whether approval-gated tools can be executed by remote MCP callers.
+    # True (default) = refuse with error; False = allow (requires explicit allowlist).
+    mcp_server_require_approval: bool = True
 
     # ----- Derived -----
     @property

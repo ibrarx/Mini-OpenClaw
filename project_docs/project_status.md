@@ -161,7 +161,11 @@ Each tool has a defined risk level, and risky operations require explicit user a
 
 ### MCP Client (External Tool Servers)
 
-When `MCP_CLIENT_ENABLED=true`, the agent can also consume tools from external MCP (Model Context Protocol) servers. Remote tools are auto-discovered at startup, namespaced as `mcp__{server}__{tool}`, and registered in the skill registry alongside native tools. They default to `RiskLevel.HIGH` with approval required and flow through the same policy engine and audit trail. A failing MCP server is skipped gracefully. The MCP server direction (exposing Mini-OpenClaw's own tools over MCP) is tracked separately.
+When `MCP_CLIENT_ENABLED=true`, the agent can also consume tools from external MCP (Model Context Protocol) servers. Remote tools are auto-discovered at startup, namespaced as `mcp__{server}__{tool}`, and registered in the skill registry alongside native tools. They default to `RiskLevel.HIGH` with approval required and flow through the same policy engine and audit trail. A failing MCP server is skipped gracefully.
+
+### MCP Server (Expose Tools to External Clients)
+
+When `MCP_SERVER_ENABLED=true`, Mini-OpenClaw exposes its own tools over MCP via an SSE transport mounted at `MCP_SERVER_PATH` (default `/mcp`). External MCP clients (e.g. Claude Desktop, other agents) can discover and call these tools. The default exposed set is safe, read-only tools only (`list_files`, `read_file`, `search_in_files`, `search_memory`). Approval-gated tools are refused by default (no human in the MCP loop); the operator must explicitly opt in via `MCP_SERVER_EXPOSED_TOOLS` and `MCP_SERVER_REQUIRE_APPROVAL=false`. All MCP tool calls route through the same PolicyEngine, Executor, and audit trail. Off by default.
 
 ## 7. Security Model
 

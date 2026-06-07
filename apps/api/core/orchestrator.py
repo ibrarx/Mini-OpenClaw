@@ -100,6 +100,38 @@ class Orchestrator:
             for alias, (path, read_only) in self._settings.resolved_mounts.items()
         }
 
+    # ── Public accessors for subsystems (used by MCP server bridge) ──
+
+    @property
+    def audit(self) -> AuditLogger:
+        """The audit logger instance."""
+        return self._audit
+
+    @property
+    def executor(self) -> Executor:
+        """The tool executor instance."""
+        return self._executor
+
+    def build_tool_context(
+        self,
+        run_id: str = "",
+        step_id: str = "",
+    ) -> "ToolContext":
+        """Build a ToolContext for external callers (e.g. MCP server).
+
+        Uses the same workspace root, mounts, and database path as the
+        internal agent but omits delegation/scheduling/URL-validation
+        callbacks which are only meaningful inside an agent run.
+        """
+        from apps.api.skills.base import ToolContext
+        return ToolContext(
+            workspace_root=str(self._workspace),
+            run_id=run_id,
+            step_id=step_id,
+            db_path=str(self._db_path),
+            mounts=self._tool_mounts(),
+        )
+
     def _build_workspace_info(self) -> str:
         """Build workspace info string for the planner, including mounts."""
         info = f"Workspace root: {self._workspace}"
