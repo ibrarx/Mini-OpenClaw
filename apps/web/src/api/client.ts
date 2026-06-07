@@ -212,7 +212,19 @@ export async function getTools(): Promise<ToolManifest[]> {
 
 // ── Health ────────────────────────────────────────────
 
-export async function healthCheck(): Promise<{ status: string }> {
+export interface MountInfo {
+  name: string;
+  path: string;
+  read_only: boolean;
+  exists: boolean;
+}
+
+export interface HealthResponse {
+  status: string;
+  mounts?: MountInfo[];
+}
+
+export async function healthCheck(): Promise<HealthResponse> {
   return apiFetch("/health");
 }
 

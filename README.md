@@ -161,11 +161,13 @@ The seeded workspace contains TODO/FIXME/BUG markers scattered across 10 files, 
 Once the app is running, type these into the chat:
 
 ### Basic tools
-1. **"List files in the workspace"** — safe tool, auto-executes
-2. **"Read the README file"** — reads and displays file content
-3. **"Create a file called notes.txt with a summary of the project"** — triggers approval flow
-4. **"Search for TODO in all files"** — grep-like search across workspace
-5. **"Remember that I prefer dark mode"** — stores a fact in memory, visible in Memory Browser
+1. **"What's in the workspace? Give me an overview"** — safe tool, auto-executes `list_files`
+2. **"Summarize the project in the workspace"** — reads and summarizes workspace content
+3. **"Find all the TODOs and unfinished work in the workspace"** — grep-like search across workspace
+4. **"Read the main README in the workspace and explain what this project does"** — reads and explains file content
+5. **"Remember that I prefer short, bulleted answers"** — stores a fact in memory, visible in Memory Browser
+
+If you have named mounts configured via `WORKSPACE_MOUNTS` in `.env`, the empty-state also shows mount-specific commands (e.g., *"Summarize the codebase mount"*) that use the `name:path` prefix syntax.
 
 ### Memory — semantic recall
 6. **"Remember that I prefer VS Code as my editor"** — stores a fact, auto-indexed for semantic search
