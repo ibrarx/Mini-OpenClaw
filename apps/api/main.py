@@ -137,6 +137,42 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Task scheduler disabled")
 
+    # 9. Mount MCP server (if enabled)
+    if settings.mcp_server_enabled:
+        try:
+            from .mcp.server import McpServerBridge
+            from starlette.routing import Mount, Route
+            from starlette.requests import Request
+            from starlette.responses import Response
+
+            bridge = McpServerBridge(settings, skill_registry, orchestrator)
+            app.state.mcp_server_bridge = bridge
+
+            mcp_path = settings.mcp_server_path.rstrip("/")
+
+            async def handle_sse(request: Request) -> Response:
+                async with bridge.sse_transport.connect_sse(
+                    request.scope, request.receive, request._send,
+                ) as streams:
+                    await bridge.mcp_server.run(
+                        streams[0],
+                        streams[1],
+                        bridge.mcp_server.create_initialization_options(),
+                    )
+                return Response()
+
+            # Mount SSE endpoint and POST message handler on the FastAPI app
+            app.routes.append(Route(f"{mcp_path}/sse", endpoint=handle_sse, methods=["GET"]))
+            app.routes.append(Mount(f"{mcp_path}/messages", app=bridge.sse_transport.handle_post_message))
+
+            logger.info(
+                "MCP server mounted at %s/sse (%d tool(s): %s)",
+                mcp_path,
+                len(bridge.exposed_tool_names),
+                ", ".join(sorted(bridge.exposed_tool_names)) or "(none)",
+            )
+        except Exception as exc:
+            logger.error("Failed to start MCP server (non-fatal): %s", exc, exc_info=True)
     yield
 
     # Shutdown
@@ -156,14 +192,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS - allow the Vite dev server
+# CORS - allow the Vite dev server (and all localhost when MCP server is on,
+# so browser-based MCP clients like the MCP Inspector can connect)
+_cors_origins = [
+    f"http://localhost:{settings.frontend_port}",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+_cors_origin_regex = (
+    r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+    if settings.mcp_server_enabled
+    else None
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        f"http://localhost:{settings.frontend_port}",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=_cors_origins,
+    allow_origin_regex=_cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

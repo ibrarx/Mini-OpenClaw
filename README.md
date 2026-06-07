@@ -41,6 +41,7 @@ Key features:
 - **Named directory mounts** — configure multiple directories beyond the primary workspace, each with optional read-only enforcement. Tools address mounts with a `name:path` prefix (e.g., `read_file("notes:todo.md")`). The Settings page shows all mounts with access badges
 - **Runtime web fetch** — `fetch_url` tool retrieves live data from the public web (weather APIs, documentation, public datasets). Domain allowlist (opt-in), SSRF defense (private-IP blocking, scheme restriction, cloud-metadata block), response size cap, and mandatory user approval
 - **MCP client** — connect to external MCP (Model Context Protocol) servers and expose their tools to the agent as native tools. Auto-discovered at startup, namespaced as `mcp__{server}__{tool}`, default `RiskLevel.HIGH` with approval gates. Off by default (`MCP_CLIENT_ENABLED=false`); a failing server is skipped gracefully
+- **MCP server** — expose Mini-OpenClaw's own tools over MCP so external clients (e.g. Claude Desktop) can discover and call them. Default safe-only tool set (read-only); approval-gated tools refused unless explicitly opted in. Off by default (`MCP_SERVER_ENABLED=false`)
 - **Full audit trail** — every decision logged in an append-only audit table
 
 ## Prerequisites
@@ -779,6 +780,10 @@ All settings are read from the `.env` file (see `.env.example`):
 | `WEB_FETCH_MAX_REDIRECTS` | Maximum HTTP redirects to follow | `3` |
 | `MCP_CLIENT_ENABLED` | Enable MCP client to consume external MCP tool servers (see [MCP Client](#mcp-client)) | `false` |
 | `MCP_SERVERS` | JSON array of MCP server configs (name, transport, command/url, etc.) | `[]` |
+| `MCP_SERVER_ENABLED` | Enable MCP server to expose tools to external clients (see [MCP Server](#mcp-server)) | `false` |
+| `MCP_SERVER_PATH` | Route prefix for the MCP SSE transport | `/mcp` |
+| `MCP_SERVER_EXPOSED_TOOLS` | JSON array of tool names to expose (empty = safe defaults) | `[]` |
+| `MCP_SERVER_REQUIRE_APPROVAL` | `true` = refuse risky tools over MCP; `false` = allow without human approval | `true` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
 | `BACKEND_PORT` | Backend server port | `8000` |
 
@@ -858,6 +863,93 @@ Each server config supports: `name`, `transport` (`stdio`/`sse`/`streamable_http
 ### Settings page
 
 The Settings tab groups tools into a **Native tools** accordion and an **MCP servers** accordion. Each connected server shows a green status dot, tool count, and an expandable list of its tools with risk badges. When no MCP servers are configured, a hint explains how to enable them.
+
+## MCP Server
+
+Expose Mini-OpenClaw's own tools over the **Model Context Protocol** so that external MCP clients (e.g. Claude Desktop, MCP Inspector, another agent) can discover and call them. This is the reverse direction of the MCP client — the agent acts as a *server*.
+
+### How it works
+
+When `MCP_SERVER_ENABLED=true`, an SSE-based MCP transport mounts on the existing FastAPI app at `MCP_SERVER_PATH` (default `/mcp`). External clients connect to `GET /mcp/sse` and send messages to `POST /mcp/messages/`. The MCP `list_tools` and `call_tool` handlers translate between MCP protocol and Mini-OpenClaw's skill registry, executor, and audit logger.
+
+### Default safe-only tool set
+
+By default, only **read-only, non-mutating tools** are exposed: `list_files`, `read_file`, `search_in_files`, `search_memory`. These need no human approval and cannot modify the workspace.
+
+### Approval gate (human-in-the-loop)
+
+In the normal UI flow, risky tools (`write_file`, `run_shell_safe`, `fetch_url`) pause and show an **approval card** — the user reviews the tool arguments and clicks Approve before execution proceeds. An MCP client calling a tool directly **has no such UI and no human in the loop.**
+
+`MCP_SERVER_REQUIRE_APPROVAL` controls what happens when a remote MCP client requests a risky tool:
+
+| Setting | Behavior | UI shows |
+|---------|----------|----------|
+| `true` (default) | Risky tools are **refused** with an MCP error — they simply won't execute | "Approval gate: **enforced**" |
+| `false` | Risky tools **execute immediately** without human review — the safety gate is off for remote callers | "Approval gate: **disabled**" (amber warning) |
+
+To allow all tools over MCP (including mutating ones), set both:
+```
+MCP_SERVER_EXPOSED_TOOLS=["list_files","read_file","write_file","search_in_files","run_shell_safe","remember_fact","search_memory","fetch_url"]
+MCP_SERVER_REQUIRE_APPROVAL=false
+```
+A warning is logged at startup listing which mutating tools are now executable by remote clients.
+
+Tools that are **never** exposed over MCP regardless of settings: `delegate_task`, `schedule_task` (they spawn internal runs with no sane remote semantics).
+
+### Security guarantees
+
+Even with approval gating disabled, the following still apply:
+
+- **Policy engine enforced:** all MCP tool calls route through the same `PolicyEngine` and `Executor` used internally. Path sandboxing, command allowlists, and read-only mount enforcement apply.
+- **Audit trail:** every MCP tool invocation produces audit records (`mcp_tool_called` / `mcp_tool_completed` / `mcp_tool_failed`) with a synthetic `mcp-<uuid>` run ID.
+- **Timeouts:** each MCP tool call has a 60-second timeout.
+- **Isolation:** a malformed MCP request returns an MCP error, never a 500 that destabilizes the app.
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_SERVER_ENABLED` | `false` | Enable the MCP server transport |
+| `MCP_SERVER_PATH` | `/mcp` | Route prefix for the SSE transport |
+| `MCP_SERVER_EXPOSED_TOOLS` | `[]` | Tool allowlist (empty = safe defaults only) |
+| `MCP_SERVER_REQUIRE_APPROVAL` | `true` | `true` = refuse risky tools over MCP; `false` = allow without human approval |
+
+### Settings page
+
+The Settings tab shows the MCP server status: whether it's active, the SSE endpoint URL, the approval gate state (enforced/disabled), and the list of exposed tools. When the server is disabled, a hint explains how to enable it.
+
+### Testing with the MCP Inspector
+
+The easiest way to test the MCP server without installing Claude Desktop:
+
+```bash
+npx @modelcontextprotocol/inspector
+```
+
+This opens a browser UI. Set transport to **SSE**, URL to `http://localhost:8000/mcp/sse`, and click Connect. You'll see the exposed tools listed and can call them interactively.
+
+### Example: connecting Claude Desktop
+
+1. Enable the MCP server in `.env`:
+   ```
+   MCP_SERVER_ENABLED=true
+   ```
+
+2. Start Mini-OpenClaw as usual (`python -m uvicorn apps.api.main:app --reload-dir apps`).
+
+3. In Claude Desktop's MCP config, add:
+   ```json
+   {
+     "mcpServers": {
+       "mini-openclaw": {
+         "transport": "sse",
+         "url": "http://localhost:8000/mcp/sse"
+       }
+     }
+   }
+   ```
+
+4. Claude Desktop will discover and can call `list_files`, `read_file`, `search_in_files`, `search_memory`.
 
 ## Token Tracking & Cost Dashboard
 
@@ -941,6 +1033,7 @@ The test suite covers:
 | `test_fetch.py` | `fetch_url` tool: JSON/HTML responses, domain allowlist, scheme/IP blocking, SSRF/DNS-rebinding defense, streaming size limits, timeouts, disabled state | 20 |
 | `test_explain.py` | Run explanations: completed/direct/delegated/failed/cancelled runs, detail levels (summary/detailed/debug), reflection and goals in explanations, audit events | 16 |
 | `test_mcp.py` | MCP client: config validation (transport/duplicates/reserved names/required fields), registry integration (disabled baseline, proxy registration, child-run exclusion, allowed_tools filter, planner descriptions), proxy tool execution (success/error/timeout/connection), manager lifecycle | 28 |
+| `test_mcp_server.py` | MCP server: default safe-only exposure, explicit allowlist, unknown/never-expose tool blocking, approval-gated tool refusal, opt-in execution, audit logging, executor error/timeout mapping, config defaults | 20 |
 
 ## Memory Export
 
@@ -966,6 +1059,8 @@ python scripts/export_memory.py
 | Ollama response is slow | First call loads the model into memory — subsequent calls are faster. Try a smaller model like `phi3` |
 | `CORS error in browser` | Ensure the backend is running on port 8000 |
 | `MCP server 'X' failed to connect` | Run the MCP server command manually (e.g. `npx -y @modelcontextprotocol/server-filesystem /path`) to verify it works. Check that the path in `MCP_SERVERS` uses forward slashes on Windows |
+| MCP server not responding at `/mcp/sse` | Verify `MCP_SERVER_ENABLED=true` in `.env`. Check startup logs for `MCP server mounted at /mcp/sse`. Ensure the MCP client connects to the correct URL (`http://localhost:8000/mcp/sse`) |
+| MCP tool call returns "APPROVAL_REQUIRED" | The tool requires human approval, which is unavailable over MCP. To allow it: add the tool to `MCP_SERVER_EXPOSED_TOOLS` and set `MCP_SERVER_REQUIRE_APPROVAL=false` |
 | No MCP tools in `/api/tools` | Verify `MCP_CLIENT_ENABLED=true` in `.env` and `MCP_SERVERS` is valid JSON on one line. Restart the backend after editing `.env` |
 | `python-dotenv could not parse statement` | Check `WORKSPACE_MOUNTS` in `.env`: use forward slashes in paths, no spaces in mount names, no trailing characters after the JSON array |
 | Mount shows `missing` badge in Settings | The path in `WORKSPACE_MOUNTS` doesn't exist on disk. Create the directory or fix the path |

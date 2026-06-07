@@ -22,6 +22,11 @@
 - **Why:** Extensibility — allows the agent to use third-party tool servers (filesystem, web, database, SaaS connectors) without writing a bespoke skill for each. Follows the manifest-driven tool extensibility philosophy.
 - **Files affected:** `apps/api/mcp/__init__.py`, `apps/api/mcp/client.py`, `apps/api/skills/mcp_tool.py`, `apps/api/config.py`, `apps/api/skills/registry.py`, `apps/api/main.py`, `requirements.txt`, `.env.example`, `tests/test_mcp.py`, `README.md`, `CHANGES.md`, `docs/tool-contracts.md`, `docs/threat-model.md`, `docs/architecture.md`, `project_docs/project_status.md`
 
+### Change 3: MCP server support — expose tools to external MCP clients
+- **What changed:** Added the ability to expose Mini-OpenClaw's tools over MCP so external clients (e.g. Claude Desktop, other agents) can discover and call them via SSE transport. New module: `apps/api/mcp/server.py` (McpServerBridge). Configuration via `MCP_SERVER_ENABLED`, `MCP_SERVER_PATH`, `MCP_SERVER_EXPOSED_TOOLS`, `MCP_SERVER_REQUIRE_APPROVAL`. Default safe-only tool set (list_files, read_file, search_in_files, search_memory). Approval-gated tools refused by default (no human in the MCP loop). All calls routed through PolicyEngine and Executor; every invocation audited. Off by default.
+- **Why:** Interoperability — allows Mini-OpenClaw to participate in the MCP ecosystem as a tool provider, not just a consumer. Useful for multi-agent workflows and Claude Desktop integration.
+- **Files affected:** `apps/api/mcp/__init__.py`, `apps/api/mcp/server.py`, `apps/api/config.py`, `apps/api/core/orchestrator.py`, `apps/api/main.py`, `.env.example`, `tests/test_mcp_server.py`, `README.md`, `CHANGES.md`, `docs/api-spec.md`, `docs/threat-model.md`, `docs/tool-contracts.md`, `docs/architecture.md`, `project_docs/project_status.md`
+
 ## Feedback Not Incorporated
 
 | # | Feedback | Reason |
