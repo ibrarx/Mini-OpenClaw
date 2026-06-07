@@ -66,9 +66,28 @@ async def lifespan(app: FastAPI):
         logger.error("Failed to initialise database: %s", exc)
         sys.exit(1)
 
-    # 4. Discover and register tools
-    skill_registry.discover(settings=settings)
+    # 4. Discover and register tools (with MCP client if enabled)
+    mcp_manager = None
+    if settings.mcp_client_enabled and settings.mcp_servers:
+        from .mcp.client import McpClientManager
+        mcp_manager = McpClientManager(settings.mcp_servers)
+        try:
+            await mcp_manager.connect_all()
+            logger.info(
+                "MCP client: %d server(s) connected, %d remote tools discovered",
+                mcp_manager.connected_server_count,
+                len(mcp_manager.discovered_tools),
+            )
+        except Exception as exc:
+            logger.warning("MCP client startup failed (non-fatal): %s", exc)
+            mcp_manager = None
+    elif settings.mcp_client_enabled:
+        logger.info("MCP client enabled but no servers configured")
+
+    skill_registry.discover(settings=settings, mcp_manager=mcp_manager)
     logger.info("Registered %d tools", skill_registry.tool_count)
+    if mcp_manager:
+        app.state.mcp_manager = mcp_manager
 
     # 5. Count existing memory items
     memory_count = 0
@@ -121,6 +140,9 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    if hasattr(app.state, "mcp_manager"):
+        await app.state.mcp_manager.aclose_all()
+
     if settings.scheduler_enabled and hasattr(app.state, "scheduler"):
         await app.state.scheduler.stop()
 

@@ -42,6 +42,25 @@ class MountConfig(BaseModel):
     read_only: bool = False
 
 
+# ── MCP server configuration ──────────────────────────────────
+
+_MCP_TRANSPORTS = frozenset({"stdio", "sse", "streamable_http"})
+
+
+class McpServerConfig(BaseModel):
+    """Configuration for one external MCP server the agent can connect to."""
+    name: str                       # short alias, used to namespace tools
+    transport: str                  # "stdio" | "sse" | "streamable_http"
+    # stdio transport fields
+    command: str = ""               # executable to launch (required for stdio)
+    args: list[str] = []            # arguments for the subprocess
+    # sse / streamable_http transport fields
+    url: str = ""                   # server URL (required for sse/streamable_http)
+    enabled: bool = True
+    approval_required: bool = True  # default-on; per-server override
+    allowed_tools: list[str] = []   # empty = all tools; non-empty = allowlist
+
+
 class Settings(BaseSettings):
     """Mini-OpenClaw configuration."""
 
@@ -148,6 +167,39 @@ class Settings(BaseSettings):
                 raise ValueError(f"Duplicate mount name: {name!r}")
             seen.add(name)
 
+        # Validate MCP server configs
+        mcp_seen: set[str] = set()
+        for srv in self.mcp_servers:
+            name = srv.name
+            if not name or not _MOUNT_NAME_RE.match(name):
+                raise ValueError(
+                    f"MCP server name must be non-empty, alphanumeric/underscore only: {name!r}"
+                )
+            if name.lower() in _RESERVED_NAMES:
+                raise ValueError(
+                    f"MCP server name {name!r} is reserved (cannot use: {', '.join(sorted(_RESERVED_NAMES))})"
+                )
+            if name in mcp_seen:
+                raise ValueError(f"Duplicate MCP server name: {name!r}")
+            mcp_seen.add(name)
+
+            transport = srv.transport.lower()
+            if transport not in _MCP_TRANSPORTS:
+                raise ValueError(
+                    f"MCP server {name!r}: transport must be one of "
+                    f"{', '.join(sorted(_MCP_TRANSPORTS))}, got {srv.transport!r}"
+                )
+            if transport == "stdio":
+                if not srv.command:
+                    raise ValueError(
+                        f"MCP server {name!r}: 'command' is required for stdio transport"
+                    )
+            elif transport in ("sse", "streamable_http"):
+                if not srv.url:
+                    raise ValueError(
+                        f"MCP server {name!r}: 'url' is required for {transport} transport"
+                    )
+
         return self
 
     # ----- Tool limits -----
@@ -211,6 +263,14 @@ class Settings(BaseSettings):
     web_fetch_max_bytes: int = 1_048_576      # 1 MB response cap
     web_fetch_timeout_seconds: float = 10.0
     web_fetch_max_redirects: int = 3
+
+    # ----- MCP client -----
+    # Connect to external MCP servers and expose their tools to the agent.
+    # OFF by default — enable to consume third-party tool servers.
+    mcp_client_enabled: bool = False
+    # JSON-encoded list of McpServerConfig objects.
+    # Example: MCP_SERVERS='[{"name":"fs","transport":"stdio","command":"npx","args":["-y","@anthropic/mcp-filesystem"]}]'
+    mcp_servers: list[McpServerConfig] = []
 
     # ----- Derived -----
     @property
