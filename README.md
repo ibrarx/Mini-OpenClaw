@@ -855,6 +855,10 @@ MCP_SERVERS='[{"name":"db","transport":"streamable_http","url":"http://localhost
 
 Each server config supports: `name`, `transport` (`stdio`/`sse`/`streamable_http`), `command`/`args` (stdio) or `url` (sse/streamable_http), `enabled`, `approval_required`, and `allowed_tools` (empty = all tools).
 
+### Settings page
+
+The Settings tab groups tools into a **Native tools** accordion and an **MCP servers** accordion. Each connected server shows a green status dot, tool count, and an expandable list of its tools with risk badges. When no MCP servers are configured, a hint explains how to enable them.
+
 ## Token Tracking & Cost Dashboard
 
 Every LLM call in Mini-OpenClaw captures **real token usage** from the provider's SDK response — not the `char/4` heuristic used for context budget management. The system tracks usage at multiple granularities and surfaces it in the UI.
@@ -934,6 +938,9 @@ The test suite covers:
 | `test_integration.py` | End-to-end legacy plan-and-execute path, provider switching, retry failed runs | 12 |
 | `test_clarification.py` | Clarification gate: low/high confidence, task_type trigger, max rounds cap, clarify endpoint, child run bypass, feature toggle, DB persistence | 13 |
 | `test_usage.py` | Token usage capture, pricing table loading (file/fallback/malformed), `compute_cost` math (Claude/Gemini/Ollama/cache/unknown), `RunUsage` accumulation, observation per-step usage, backward compatibility (old runs without usage column), planner tuple returns | 37 |
+| `test_fetch.py` | `fetch_url` tool: JSON/HTML responses, domain allowlist, scheme/IP blocking, SSRF/DNS-rebinding defense, streaming size limits, timeouts, disabled state | 20 |
+| `test_explain.py` | Run explanations: completed/direct/delegated/failed/cancelled runs, detail levels (summary/detailed/debug), reflection and goals in explanations, audit events | 16 |
+| `test_mcp.py` | MCP client: config validation (transport/duplicates/reserved names/required fields), registry integration (disabled baseline, proxy registration, child-run exclusion, allowed_tools filter, planner descriptions), proxy tool execution (success/error/timeout/connection), manager lifecycle | 28 |
 
 ## Memory Export
 
@@ -958,6 +965,8 @@ python scripts/export_memory.py
 | `Model 'X' not found` (Ollama) | Pull the model first: `ollama pull X` |
 | Ollama response is slow | First call loads the model into memory — subsequent calls are faster. Try a smaller model like `phi3` |
 | `CORS error in browser` | Ensure the backend is running on port 8000 |
+| `MCP server 'X' failed to connect` | Run the MCP server command manually (e.g. `npx -y @modelcontextprotocol/server-filesystem /path`) to verify it works. Check that the path in `MCP_SERVERS` uses forward slashes on Windows |
+| No MCP tools in `/api/tools` | Verify `MCP_CLIENT_ENABLED=true` in `.env` and `MCP_SERVERS` is valid JSON on one line. Restart the backend after editing `.env` |
 | `python-dotenv could not parse statement` | Check `WORKSPACE_MOUNTS` in `.env`: use forward slashes in paths, no spaces in mount names, no trailing characters after the JSON array |
 | Mount shows `missing` badge in Settings | The path in `WORKSPACE_MOUNTS` doesn't exist on disk. Create the directory or fix the path |
 | Agent doesn't use mount prefix | The planner may not recognize the mount name from natural language. Be explicit: *"read notes:todo.md"* or *"list files in the notes directory"* |
