@@ -30,7 +30,7 @@ class ListFilesTool(BaseTool):
             return self._error(args, f"Not a directory: {args['path']}", started)
 
         recursive = args.get("recursive", False)
-        max_depth = args.get("max_depth", 2)
+        max_depth = args.get("max_depth", 5)
         entries = []
         if recursive:
             entries = self._walk(target, root, max_depth, 0)

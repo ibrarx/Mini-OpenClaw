@@ -1,0 +1,4 @@
+config,n_trials,success_rate_pct,avg_tool_calls,avg_iterations,avg_cost_usd,avg_tokens,avg_latency_s,cost_estimated
+Baseline,87,43.7,1.08,0,7e-05,349,10.06,False
+Plan+ReAct,87,95.4,2.52,3.52,0.00266,16435,14.73,False
+Full,87,92.0,2.4,3.4,0.00337,20716,17.85,False
