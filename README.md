@@ -3,8 +3,8 @@
 A lightweight local-first AI agent that converts natural-language requests into safe, auditable tool executions on your local machine.
 
 **Course:** Applied Generative AI — TU Wien
-**Group:** _[Group number]_
-**Members:** _[Member names]_
+**Group:** _[09]_
+**Members:** _[Muhammad Ibrar, Ahmad Ibrahim, Johannes Held, Manal Bourbigua]_
 
 ---
 
