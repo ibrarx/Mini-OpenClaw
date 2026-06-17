@@ -647,21 +647,35 @@ This context is injected into the LLM system prompt with explicit instructions t
 
 ## Available Tools
 
-| Tool | Description | Risk Level | Approval Required |
-|------|-------------|------------|-------------------|
-| `list_files` | List files and directories in the workspace | Safe | No |
-| `read_file` | Read text files from the workspace — supports single (`path`) or batch (`paths`) mode with configurable character budgets | Safe | No |
-| `write_file` | Create, overwrite, or append to a file | Medium | Yes |
-| `search_in_files` | Search for patterns across text files | Safe | No |
-| `run_shell_safe` | Execute allowlisted commands (pwd, ls, find, cat, grep) | Medium–High | Yes |
-| `remember_fact` | Store a durable fact in memory | Safe | No |
-| `search_memory` | Query stored facts, episodes, and summaries | Safe | No |
-| `delegate_task` | Spawn a sub-agent to handle an independent sub-task — child runs with own iteration budget, restricted tool set (no delegation, no memory writes), and real-time SSE streaming | Medium | Yes |
-| `schedule_task` | Schedule a one-time or recurring task for future execution — configurable interval, max runs, and per-tool pre-approval | Medium | Yes |
-| `fetch_url` | Fetch content from a public URL — auto-detects JSON vs HTML/text, domain allowlist + SSRF defense (private-IP blocking), size cap, timeout | High | Yes |
-| `get_datetime` | Get the current date and time, optionally in a specific IANA timezone | Safe | No |
-| `calculator` | Evaluate a math expression safely via AST walking (no `eval`) — arithmetic, `**`, `%`, and common math functions | Safe | No |
-| `system_info` | Report CPU, memory, disk, platform details, and uptime (via `psutil`) | Safe | No |
+Thirteen tools are registered by default. Each row includes a sample prompt you
+can paste straight into the chat — safe tools run automatically, while
+approval-gated tools pause for your confirmation first. (For the richest results,
+seed the demo workspace first with `python scripts/seed_demo.py`.)
+
+| Tool | Description | Risk | Approval | Sample prompt |
+|------|-------------|------|----------|---------------|
+| `list_files` | List files and directories in the workspace | Safe | No | "What's in the workspace? Give me an overview" |
+| `read_file` | Read text files — single (`path`) or batch (`paths`) mode with configurable character budgets | Safe | No | "Read the README in the workspace and summarize it" |
+| `write_file` | Create, overwrite, or append to a file | Medium | Yes | "Create a file called notes.txt with a short project summary" |
+| `search_in_files` | grep-like pattern search across text files | Safe | No | "Find all the TODOs and FIXMEs in the workspace" |
+| `run_shell_safe` | Run allowlisted commands only (pwd, ls, find, cat, grep) | Medium–High | Yes | "Show me the current working directory" |
+| `remember_fact` | Store a durable fact in memory | Safe | No | "Remember that I prefer short, bulleted answers" |
+| `search_memory` | Query stored facts, episodes, and summaries | Safe | No | "What do you remember about my preferences?" |
+| `delegate_task` | Spawn a sub-agent for an independent sub-task (own iteration budget, restricted tool set, real-time SSE streaming) | Medium | Yes | "Delegate reading all the Python files to a sub-agent, then summarize its findings" |
+| `schedule_task` | Schedule a one-time or recurring task (configurable interval, max runs, per-tool pre-approval) | Medium | Yes | "Every morning, search the workspace for new TODOs and summarize them" |
+| `fetch_url` | Fetch a public URL (auto-detects JSON vs HTML/text), domain allowlist + SSRF defense, size cap, timeout | High | Yes | "Fetch tomorrow's Vienna forecast from open-meteo and tell me the high" ¹ |
+| `get_datetime` | Current date and time, optionally in a specific IANA timezone | Safe | No | "What time is it in Tokyo right now?" |
+| `calculator` | Evaluate a math expression safely via AST walking — no `eval` | Safe | No | "Calculate the compound interest on $10,000 at 5% for 10 years" |
+| `system_info` | Report CPU, memory, disk, platform, and uptime (via `psutil`) | Safe | No | "How much disk space and memory do I have?" |
+
+¹ `fetch_url` requires `WEB_FETCH_ENABLED=true` and the target domain listed in
+`WEB_FETCH_ALLOWED_DOMAINS` (e.g. `["api.open-meteo.com"]`) — empty allowlist
+blocks everything by design.
+
+Two more tools exist outside the planner's prompt-driven set: **`explain_run`**,
+invoked by the "Explain this run" button (or `GET /api/runs/{id}/explain`), and
+**`mcp_tool`**, the dynamic proxy registered for each external MCP tool
+(`mcp__{server}__{tool}`) when the MCP client is enabled.
 
 ## Security Model
 
