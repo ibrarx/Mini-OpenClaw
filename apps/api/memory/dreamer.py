@@ -144,7 +144,7 @@ class Dreamer:
             result, usage = await self._provider.generate_json(
                 messages=[LLMMessage(role="user", content=content)],
                 system=DREAM_SYSTEM_PROMPT,
-                max_tokens=1024,
+                max_tokens=2048,
                 timeout=30.0,
             )
         except Exception as exc:
