@@ -659,6 +659,9 @@ This context is injected into the LLM system prompt with explicit instructions t
 | `delegate_task` | Spawn a sub-agent to handle an independent sub-task — child runs with own iteration budget, restricted tool set (no delegation, no memory writes), and real-time SSE streaming | Medium | Yes |
 | `schedule_task` | Schedule a one-time or recurring task for future execution — configurable interval, max runs, and per-tool pre-approval | Medium | Yes |
 | `fetch_url` | Fetch content from a public URL — auto-detects JSON vs HTML/text, domain allowlist + SSRF defense (private-IP blocking), size cap, timeout | High | Yes |
+| `get_datetime` | Get the current date and time, optionally in a specific IANA timezone | Safe | No |
+| `calculator` | Evaluate a math expression safely via AST walking (no `eval`) — arithmetic, `**`, `%`, and common math functions | Safe | No |
+| `system_info` | Report CPU, memory, disk, platform details, and uptime (via `psutil`) | Safe | No |
 
 ## Security Model
 
@@ -1014,14 +1017,15 @@ The test suite covers:
 
 | Test file | What it tests | Count |
 |-----------|--------------|-------|
-| `test_context.py` | Token estimation, context window lookup, progressive summarization, compression levels | 22 |
+| `test_context.py` | Token estimation, context window lookup, progressive summarization, compression levels | 23 |
 | `test_delegation.py` | Sub-agent delegation: child run creation, workspace inheritance, depth limits, children limits, iteration caps, result flow-back, tool restrictions | 7 |
 | `test_memory_semantic.py` | Hybrid search, embedding, vector store, planner wiring, summaries | 44 |
 | `test_policy.py` | Path validation, shell blocking, injection detection, risk classification | 38 |
 | `test_providers.py` | Anthropic/Gemini/Ollama provider translation, factory, JSON extraction | 48 |
 | `test_tools.py` | Each V1 tool in isolation (including batch read_file) | 42 |
-| `test_mounts.py` | Named mounts: config validation, policy resolution, per-mount read-only, tool-level path handling, traversal blocking, backward compatibility | 33 |
-| `test_react.py` | ReAct loop, hybrid Plan-ReAct, goal tracking, replanning, saga compensation, error classification, loop detection, approval flow, batch reads, budget awareness, graceful max-iterations degradation | 63 |
+| `test_new_tools.py` | The three new utility tools: `get_datetime` (UTC default, explicit timezone, invalid-tz error), `calculator` (arithmetic, `sqrt`, compound, division-by-zero, code-injection & attribute-escape rejection, unknown name), `system_info` (all/single section, default, invalid section) | 14 |
+| `test_mounts.py` | Named mounts: config validation, policy resolution, per-mount read-only, tool-level path handling, traversal blocking, backward compatibility | 30 |
+| `test_react.py` | ReAct loop, hybrid Plan-ReAct, goal tracking, replanning, saga compensation, error classification, loop detection, approval flow, batch reads, budget awareness, graceful max-iterations degradation | 64 |
 | `test_reflection.py` | Self-reflection critique, loop re-entry on low score, text-rewrite fallback when no budget, quality scoring, flag gating, graceful failure, DB persistence | 18 |
 | `test_planner.py` | Plan parsing, provider error handling, summary generation | 13 |
 | `test_memory.py` | Memory CRUD, keyword search, retrieval, export | 13 |
@@ -1030,8 +1034,8 @@ The test suite covers:
 | `test_integration.py` | End-to-end legacy plan-and-execute path, provider switching, retry failed runs | 12 |
 | `test_clarification.py` | Clarification gate: low/high confidence, task_type trigger, max rounds cap, clarify endpoint, child run bypass, feature toggle, DB persistence | 13 |
 | `test_usage.py` | Token usage capture, pricing table loading (file/fallback/malformed), `compute_cost` math (Claude/Gemini/Ollama/cache/unknown), `RunUsage` accumulation, observation per-step usage, backward compatibility (old runs without usage column), planner tuple returns | 37 |
-| `test_fetch.py` | `fetch_url` tool: JSON/HTML responses, domain allowlist, scheme/IP blocking, SSRF/DNS-rebinding defense, streaming size limits, timeouts, disabled state | 20 |
-| `test_explain.py` | Run explanations: completed/direct/delegated/failed/cancelled runs, detail levels (summary/detailed/debug), reflection and goals in explanations, audit events | 16 |
+| `test_fetch.py` | `fetch_url` tool: JSON/HTML responses, domain allowlist, scheme/IP blocking, SSRF/DNS-rebinding defense, streaming size limits, timeouts, disabled state | 29 |
+| `test_explain.py` | Run explanations: completed/direct/delegated/failed/cancelled runs, detail levels (summary/detailed/debug), reflection and goals in explanations, audit events | 19 |
 | `test_mcp.py` | MCP client: config validation (transport/duplicates/reserved names/required fields), registry integration (disabled baseline, proxy registration, child-run exclusion, allowed_tools filter, planner descriptions), proxy tool execution (success/error/timeout/connection), manager lifecycle | 28 |
 | `test_mcp_server.py` | MCP server: default safe-only exposure, explicit allowlist, unknown/never-expose tool blocking, approval-gated tool refusal, opt-in execution, audit logging, executor error/timeout mapping, config defaults | 20 |
 
@@ -1109,7 +1113,7 @@ mini-openclaw/
 │   └── models/            #   Pydantic models (Run, RunUsage, ToolResult, ScheduledTask, ErrorKind, etc.)
 ├── apps/web/              # React + TypeScript frontend
 │   └── src/components/    #   ChatPanel, PlanPreview, ExecutionGraph, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser, SchedulerPage, UsageDashboard
-├── tests/                 # pytest test suite (497 tests)
+├── tests/                 # pytest test suite (559 tests)
 ├── scripts/               # seed_demo.py (workspace + memory setup), export_memory.py
 ├── pricing.json           # Per-model token pricing config (edit without touching Python)
 ├── docs/                  # Architecture and design documentation
