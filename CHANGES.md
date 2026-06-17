@@ -18,7 +18,7 @@
 ### Change 1: UI content updates — AI disclaimer, mount-aware examples, workspace helper
 - **What changed:** Added an always-visible AI disclaimer below the chat input bar. Replaced the five hardcoded empty-state example commands with five workspace-centric base commands plus dynamically generated commands for each configured named mount (fetched from `/api/health`). Added a one-line workspace helper explaining what "the workspace" means. Widened the `healthCheck()` return type in the API client to include mount metadata.
 - **Why:** Improve first-time user experience and clarify the agent's operating context. Mount-aware commands prevent "unknown mount alias" errors when mounts are not configured, and surface mount-specific commands when they are.
-- **Files affected:** `apps/web/src/components/ChatPanel.tsx`, `apps/web/src/api/client.ts`, `apps/web/src/components/Settings.tsx`, `README.md`, `docs/demo-script.md`, `CHANGES.md`
+- **Files affected:** `apps/web/src/components/ChatPanel.tsx`, `apps/web/src/api/client.ts`, `apps/web/src/components/Settings.tsx`, `README.md`, `CHANGES.md`
 
 ### Change 2: MCP client support — consume external MCP servers as tools
 - **What changed:** Added the ability for Mini-OpenClaw to connect to external MCP (Model Context Protocol) servers and expose their tools to the agent as native tools. New modules: `apps/api/mcp/client.py` (connection lifecycle manager), `apps/api/skills/mcp_tool.py` (BaseTool proxy adapter). Configuration via `MCP_CLIENT_ENABLED` and `MCP_SERVERS` env vars. Tools namespaced as `mcp__{server}__{tool}`, defaulting to `RiskLevel.HIGH` with approval required. Graceful degradation on server failure. Off by default.
