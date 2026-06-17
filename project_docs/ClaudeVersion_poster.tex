@@ -366,7 +366,7 @@ making each tool call explicit, permission-checked, and reversible.
   \node[anchor=north west, text=ink] at ($(NW)+(16mm,-14mm)$){\PanelTitle \faChartBar~~Results \& Reflection};
 
   % ---- Row 1: screenshot (left) + capability matrix (right) ----
-  \node[anchor=north west, card, minimum width=216mm, minimum height=100mm] (shot) at ($(NW)+(16mm,-38mm)$){};
+  \node[anchor=north west, card, minimum width=216mm, minimum height=100mm] (shot) at ($(NW)+(16mm,-32mm)$){};
   \fill[ink, rounded corners=2.6mm] ($(shot.north west)$) rectangle ($(shot.north east)+(0,-7mm)$);
   \fill[ink] ($(shot.north west)+(0,-3.5mm)$) rectangle ($(shot.north east)+(0,-7mm)$);
   \foreach \k in {0,1,2}{\fill[white] ($(shot.north west)+(4mm+\k*4mm,-3.5mm)$) circle (1mm);}
@@ -378,7 +378,7 @@ making each tool call explicit, permission-checked, and reversible.
                   {[\ UI screenshot\ ]\\[1mm]\textit{supply ui-screenshot.png}};}}};
 
   \node[anchor=north west, card, text width=160mm, minimum height=100mm, inner sep=5mm, align=left]
-       (cap) at ($(NW)+(244mm,-38mm)$){};
+       (cap) at ($(NW)+(244mm,-32mm)$){};
   \node[anchor=north west, text=ink] at ($(cap.north west)+(5mm,-5mm)$){\SecHead Capability success (\%)};
   \node[anchor=north] at ($(cap.north)+(0,-13mm)$){%
     \begin{tikzpicture}[x=1mm,y=1mm, font=\Mini]
@@ -404,8 +404,8 @@ making each tool call explicit, permission-checked, and reversible.
     \end{tikzpicture}};
 
   % ---- Row 2: three charts (full width) ----
-  \node[anchor=north west, text=ink] at ($(NW)+(16mm,-142mm)$){\SecHead Where the pipeline earns its cost};
-  \node[anchor=north west, text=inkt, text width=388mm, align=left] at ($(NW)+(16mm,-149mm)$){%
+  \node[anchor=north west, text=ink] at ($(NW)+(16mm,-136mm)$){\SecHead Where the pipeline earns its cost};
+  \node[anchor=north west, text=inkt, text width=388mm, align=left] at ($(NW)+(16mm,-143mm)$){%
     \BodyS \textbf{Method:} 14 deterministic tasks across 8 capability categories, run in a sandboxed fixture workspace and
     scored by deterministic verifiers (file contents, keyword presence, numeric answers) --- no LLM-as-judge. Across the suite
     (Baseline plan-and-execute vs.\ Plan+ReAct vs.\ the Full hybrid), the full loop spends more tool calls and money per run
@@ -413,7 +413,7 @@ making each tool call explicit, permission-checked, and reversible.
 
  
 % chart 1: success rate
-  \node[anchor=north west] at ($(NW)+(28mm,-162mm)$){%
+  \node[anchor=north west] at ($(NW)+(28mm,-156mm)$){%
     \begin{tikzpicture}[x=1mm,y=1mm, font=\Mini]
       \node[anchor=south west, text=ink, font=\Mini\bfseries] at (0,44){Success rate (\%)};
       \foreach \g in {25,50,75,100}{\draw[line,line width=0.2mm](0,\g*0.40)--(96,\g*0.40);
@@ -426,7 +426,7 @@ making each tool call explicit, permission-checked, and reversible.
         \node[anchor=north,text=slate] at (\x+9,-0.8){\nm};}
     \end{tikzpicture}};
   % chart 2: avg tool calls
-\node[anchor=north west] at ($(NW)+(160mm,-162mm)$){%
+\node[anchor=north west] at ($(NW)+(160mm,-156mm)$){%
     \begin{tikzpicture}[x=1mm,y=1mm, font=\Mini]
       \node[anchor=south west, text=ink, font=\Mini\bfseries] at (0,44){Avg tool calls / run};
       \foreach \g in {1,2,3}{\draw[line,line width=0.2mm](0,\g*13.0)--(96,\g*13.0);
@@ -439,7 +439,7 @@ making each tool call explicit, permission-checked, and reversible.
         \node[anchor=north,text=slate] at (\x+9,-0.8){\nm};}
     \end{tikzpicture}};
   % chart 3: cost vs success scatter
-  \node[anchor=north west] at ($(NW)+(292mm,-162mm)$){%
+  \node[anchor=north west] at ($(NW)+(292mm,-156mm)$){%
     \begin{tikzpicture}[x=1mm,y=1mm, font=\Mini]
       \node[anchor=south west, text=ink, font=\Mini\bfseries] at (0,44){Cost vs success}; %
       \foreach \g in {25,50,75,100}{\draw[line,line width=0.2mm](0,\g*0.40)--(100,\g*0.40);
