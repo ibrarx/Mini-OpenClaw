@@ -14,12 +14,17 @@ from apps.api.skills.search_memory import SearchMemoryTool
 from apps.api.skills.delegate_task import DelegateTaskTool
 from apps.api.skills.schedule_task import ScheduleTaskTool
 from apps.api.skills.fetch_url import FetchUrlTool
+from apps.api.skills.get_datetime import GetDatetimeTool
+from apps.api.skills.calculator import CalculatorTool
+from apps.api.skills.system_info import SystemInfoTool
 
 logger = logging.getLogger(__name__)
 
 _TOOL_CLASSES: list[type[BaseTool]] = [
     ListFilesTool, ReadFileTool, WriteFileTool, SearchInFilesTool,
     RunShellSafeTool, RememberFactTool, SearchMemoryTool,
+    # Feedback #6 — broaden tool coverage. Stateless, safe, always-on.
+    GetDatetimeTool, CalculatorTool, SystemInfoTool,
 ]
 
 # Delegation tool is registered separately — excluded in child runs
