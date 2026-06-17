@@ -192,41 +192,41 @@ making each tool call explicit, permission-checked, and reversible.
   }
 
   % Abstract card (left) -- taller, narrower, gutter
-  \node[anchor=north west, card, text width=168mm, minimum height=88mm, inner sep=5.5mm, align=left]
+  \node[anchor=north west, card, text width=168mm, minimum height=95mm, inner sep=5.5mm, align=left]
        (abs) at ($(NW)+(16mm,-92mm)$){};
   \node[anchor=north west, text=tublue] at ($(abs.north west)+(5.5mm,-5.5mm)$){\SecHead \faAlignLeft~~Abstract};
   \node[anchor=north west, text=inkt, text width=157mm, align=left] at ($(abs.north west)+(5.5mm,-15mm)$){\BodyL\abstractText};
 
   % Problem card (right) -- gutter between
-  \node[anchor=north west, card, text width=192mm, minimum height=88mm, inner sep=5.5mm, align=left]
+  \node[anchor=north west, card, text width=192mm, minimum height=95mm, inner sep=5.5mm, align=left]
        (prob) at ($(NW)+(196mm,-92mm)$){};
   \node[anchor=north west, text=coral] at ($(prob.north west)+(5.5mm,-5.5mm)$){\SecHead \faExclamationCircle~~The problem / initial situation};
   \node[anchor=north west, text=inkt, text width=181mm, align=left] at ($(prob.north west)+(5.5mm,-15mm)$){\BodyL\problemText};
 
   % What it delivers -- four pillars
-  \node[anchor=north west, text=ink] at ($(NW)+(16mm,-188mm)$){\SecHead What it delivers};
-  \fill[teal] ($(NW)+(16mm,-197mm)$) rectangle ($(NW)+(70mm,-198.2mm)$);
+  \node[anchor=north west, text=ink] at ($(NW)+(16mm,-193mm)$){\SecHead What it delivers};
+  \fill[teal] ($(NW)+(16mm,-202mm)$) rectangle ($(NW)+(70mm,-203.2mm)$);
   \foreach \i/\ic/\cl/\ti/\bd in {%
       0/{\faSitemap}/{tublue}/{Intent $\rightarrow$ tool routing}/{A planner turns plain language into a validated JSON plan. The LLM proposes; code decides.\\},
       1/{\faLayerGroup}/{teal}/{Auditable memory}/{Five memory layers (vector + keyword) and an append-only audit log --- every decision inspectable.\\},
       2/{\faPuzzlePiece}/{amber}/{Extensible skills}/{Manifest-driven registry: add a tool by adding a module --- no core-loop changes.\\},
       3/{\faLock}/{coral}/{Safe execution}/{A policy engine gates every action as safe, approval-required, or forbidden before it runs.\\}}{
     \node[anchor=north west, card, text width=81mm, minimum height=48mm, inner sep=5mm, align=left]
-         (pil\i) at ($(NW)+(16mm+\i*97mm,-202mm)$){};
+         (pil\i) at ($(NW)+(16mm+\i*97mm,-207mm)$){};
     \node[anchor=north west, text=\cl] at ($(pil\i.north west)+(5mm,-4.6mm)$){\fontsize{16}{16}\selectfont\ic};
     \node[anchor=north west, text=ink, text width=71mm, align=left] at ($(pil\i.north west)+(15mm,-4.4mm)$){\SecHead \ti};
     \node[anchor=north west, text=inkt, text width=71mm, align=left] at ($(pil\i.north west)+(5mm,-16mm)$){\BodyS \bd};
   }
 
   % by the numbers -- meaningful three (left) + tech stack (right)
-  \node[anchor=north west, tintcard, minimum width=388mm, minimum height=40mm]
-       (num) at ($(NW)+(16mm,-254mm)$){};
+  \node[anchor=north west, tintcard, minimum width=388mm, minimum height=35mm]
+       (num) at ($(NW)+(16mm,-259mm)$){};
   \foreach \i/\n/\l in {0/{13 + MCP}/{tools}, 1/{3}/{LLM providers tested}, 2/{5}/{memory layers}}{
-    \node[anchor=north, text=tublue] at ($(NW)+(58mm+\i*68mm,-259mm)$){\StatNum \n};
-    \node[anchor=north, text=slate] at ($(NW)+(58mm+\i*68mm,-276mm)$){\BodyS \l};
+    \node[anchor=north, text=tublue] at ($(NW)+(58mm+\i*68mm,-264mm)$){\StatNum \n};
+    \node[anchor=north, text=slate] at ($(NW)+(58mm+\i*68mm,-281mm)$){\BodyS \l};
   }
-  \draw[line,line width=0.3mm] ($(NW)+(248mm,-260mm)$)--($(NW)+(248mm,-288mm)$);
-  \node[anchor=north, text=inkt, text width=140mm, align=center] at ($(NW)+(330mm,-259mm)$){%
+  \draw[line,line width=0.3mm] ($(NW)+(248mm,-265mm)$)--($(NW)+(248mm,-288mm)$);
+  \node[anchor=north, text=inkt, text width=140mm, align=center] at ($(NW)+(330mm,-264mm)$){%
     {\Mini\bfseries\color{ink}TECH STACK}\\[2mm]
     {\BodyS Backend: FastAPI $\cdot$ SQLite}\\[1.2mm]
     {\BodyS Frontend: React + TypeScript (Vite) $\cdot$ SSE}};
