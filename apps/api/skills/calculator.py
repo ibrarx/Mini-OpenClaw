@@ -34,6 +34,8 @@ _FUNCS: dict[str, Callable[..., Any]] = {
     "cos": math.cos,
     "tan": math.tan,
     "log": math.log,
+    "ln": math.log,
+    "exp": math.exp,
     "log2": math.log2,
     "log10": math.log10,
     "ceil": math.ceil,
@@ -60,9 +62,9 @@ class CalculatorTool(BaseTool):
         return ToolManifest(
             name="calculator",
             description=(
-                "Evaluate a mathematical expression safely. Supports +, -, *, /, **, %, "
-                "parentheses, and common math functions (sqrt, sin, cos, tan, log, abs, "
-                "round, min, max, pi, e)."
+                "Evaluate a mathematical expression safely. Use ** for exponentiation (not ^). "
+                "Supports +, -, *, /, **, %, parentheses, and common math functions (sqrt, exp, "
+                "ln, log, log2, log10, sin, cos, tan, abs, round, min, max, ceil, floor, pow, pi, e)."
             ),
             risk_level=RiskLevel.SAFE,
             approval_required=False,
@@ -120,6 +122,11 @@ class CalculatorTool(BaseTool):
             return node.value
 
         if isinstance(node, ast.BinOp):
+            if isinstance(node.op, ast.BitXor):
+                # '^' parses as bitwise XOR in Python, with different precedence
+                # than powers — steer the caller to ** instead of silently
+                # computing the wrong thing.
+                raise _Disallowed("'^' is bitwise XOR, not a power — use ** for exponentiation")
             op = _BIN_OPS.get(type(node.op))
             if op is None:
                 raise _Disallowed(f"operator {type(node.op).__name__}")

@@ -1023,7 +1023,7 @@ The test suite covers:
 | `test_policy.py` | Path validation, shell blocking, injection detection, risk classification | 38 |
 | `test_providers.py` | Anthropic/Gemini/Ollama provider translation, factory, JSON extraction | 48 |
 | `test_tools.py` | Each V1 tool in isolation (including batch read_file) | 42 |
-| `test_new_tools.py` | The three new utility tools: `get_datetime` (UTC default, explicit timezone, invalid-tz error), `calculator` (arithmetic, `sqrt`, compound, division-by-zero, code-injection & attribute-escape rejection, unknown name), `system_info` (all/single section, default, invalid section) | 14 |
+| `test_new_tools.py` | The three new utility tools: `get_datetime` (UTC default, explicit timezone, invalid-tz error), `calculator` (arithmetic, `sqrt`, compound, `ln`/`exp`, full multi-function expression, division-by-zero, code-injection & attribute-escape & `^`-not-power rejection, unknown name), `system_info` (all/single section, default, invalid section) | 18 |
 | `test_mounts.py` | Named mounts: config validation, policy resolution, per-mount read-only, tool-level path handling, traversal blocking, backward compatibility | 30 |
 | `test_react.py` | ReAct loop, hybrid Plan-ReAct, goal tracking, replanning, saga compensation, error classification, loop detection, approval flow, batch reads, budget awareness, graceful max-iterations degradation | 64 |
 | `test_reflection.py` | Self-reflection critique, loop re-entry on low score, text-rewrite fallback when no budget, quality scoring, flag gating, graceful failure, DB persistence | 18 |
@@ -1113,7 +1113,7 @@ mini-openclaw/
 │   └── models/            #   Pydantic models (Run, RunUsage, ToolResult, ScheduledTask, ErrorKind, etc.)
 ├── apps/web/              # React + TypeScript frontend
 │   └── src/components/    #   ChatPanel, PlanPreview, ExecutionGraph, ApprovalCard, ToolTrace, RunHistory, MemoryBrowser, SchedulerPage, UsageDashboard
-├── tests/                 # pytest test suite (559 tests)
+├── tests/                 # pytest test suite (563 tests)
 ├── scripts/               # seed_demo.py (workspace + memory setup), export_memory.py
 ├── pricing.json           # Per-model token pricing config (edit without touching Python)
 ├── docs/                  # Architecture and design documentation

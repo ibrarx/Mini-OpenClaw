@@ -82,6 +82,32 @@ class TestCalculator:
         assert r.status == "error"
 
     @pytest.mark.asyncio
+    async def test_natural_log(self, tmp_path: Path) -> None:
+        r = await CalculatorTool().execute({"expression": "ln(e)"}, _ctx(tmp_path))
+        assert r.status == "success"
+        assert abs(r.output["result"] - 1.0) < 1e-9
+
+    @pytest.mark.asyncio
+    async def test_exp(self, tmp_path: Path) -> None:
+        r = await CalculatorTool().execute({"expression": "exp(0)"}, _ctx(tmp_path))
+        assert r.status == "success"
+        assert r.output["result"] == 1.0
+
+    @pytest.mark.asyncio
+    async def test_caret_is_not_power(self, tmp_path: Path) -> None:
+        # '^' is XOR in Python; the tool must reject it rather than miscompute.
+        r = await CalculatorTool().execute({"expression": "2^3"}, _ctx(tmp_path))
+        assert r.status == "error"
+
+    @pytest.mark.asyncio
+    async def test_full_expression_with_ln_and_exp(self, tmp_path: Path) -> None:
+        # x=17, y=12, z=5 — uses ** for powers (not ^), ln and exp.
+        expr = "((sqrt(17**3 - 12**2) + ln(12 * 5)) / (5**2 - sqrt(17 + 12))) + exp(5 - 12 + 7)"
+        r = await CalculatorTool().execute({"expression": expr}, _ctx(tmp_path))
+        assert r.status == "success"
+        assert abs(r.output["result"] - 4.7295) < 1e-2
+
+    @pytest.mark.asyncio
     async def test_unknown_name_rejected(self, tmp_path: Path) -> None:
         r = await CalculatorTool().execute({"expression": "foo + 1"}, _ctx(tmp_path))
         assert r.status == "error"
