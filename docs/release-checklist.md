@@ -3,7 +3,7 @@
 ## Backend
 - [x] Backend starts without errors
 - [x] Health endpoint returns all fields (status, api_key, db, tools, workspace, memory count)
-- [x] All 7 tools registered (list_files, read_file, write_file, search_in_files, run_shell_safe, remember_fact, search_memory)
+- [x] All 13 default tools registered (list_files, read_file, write_file, search_in_files, run_shell_safe, remember_fact, search_memory, get_datetime, calculator, system_info, fetch_url, delegate_task, schedule_task)
 - [x] POST /api/chat creates a run
 - [x] GET /api/runs/{id} returns run status
 - [x] POST /api/runs/{id}/approve works
@@ -42,12 +42,13 @@
 - [x] No API keys in source
 
 ## Tests
-- [x] test_policy.py passes (38 tests)
-- [x] test_tools.py passes (31 tests)
-- [x] test_planner.py passes (10 tests)
+- [x] test_policy.py passes (28 tests)
+- [x] test_tools.py passes (42 tests)
+- [x] test_planner.py passes (13 tests)
 - [x] test_memory.py passes (13 tests)
-- [x] test_integration.py passes (7 tests)
-- [x] Total: 99+ tests passing
+- [x] test_integration.py passes (12 tests)
+- [x] Plus capability, ReAct, providers, memory-semantic, dreams, scheduler, delegation, fetch, MCP (client + server), reflection, clarification, context, usage, explain, and new-tools suites
+- [x] Total: 563 tests passing (run `pytest -q`)
 
 ## Packaging
 - [x] .env.example is complete

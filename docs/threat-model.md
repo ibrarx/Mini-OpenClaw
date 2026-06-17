@@ -1,5 +1,40 @@
 # Threat Model
-See project knowledge document 02-threat-model.md for full details.
+
+Mini-OpenClaw executes local tasks while minimizing the risks created by shell
+access, local file access, stored credentials, and untrusted external content.
+The security model is visible in the architecture: the LLM *proposes*, code
+*decides*, and every action is policy-checked and audited.
+
+For the full design rationale see the root [`README.md`](../README.md). This file
+captures the core threat model plus the MCP trust boundaries in detail.
+
+## Trust boundaries
+
+1. **User input** — trusted as intent, never as validated executable instructions.
+2. **LLM output** — advisory and structured, never inherently trusted.
+3. **Tools** — can affect files/processes, so they require schema + policy validation.
+4. **Workspace** — the agent operates only inside the configured root (and any read-only named mounts).
+5. **External content** — files, web pages, MCP servers, and pasted text may carry prompt injection.
+
+## Primary threats and mitigations
+
+- **Prompt injection** — tool outputs and fetched content are treated as untrusted data, wrapped in delimited blocks, and can never redefine tools, policy, or approval state.
+- **Shell abuse** — no arbitrary shell; only an allowlist (`pwd`, `ls`, `find`, `cat`, `grep`, translated per-OS), arguments parsed structurally, metacharacters blocked on all platforms.
+- **Filesystem escape** — paths are canonicalized and confined to the workspace root; traversal (`../`) and tilde (`~`) expansion are denied; read/write scopes are separated.
+- **Secret exposure** — credentials live in `.env`; known secret patterns are redacted from logs/UI; raw secrets are never stored in memory.
+- **Over-trusting memory** — every memory item carries provenance, confidence, and visibility; items are inspectable and deletable; dream-inferred insights require explicit user review before they influence planning.
+- **Approval bypass** — approval is enforced server-side, tied to the exact step payload, and invalidated if the payload changes; all approvals are audited.
+
+## Risk classification
+
+- **Safe** — read-only operations inside the workspace, low-risk memory lookups (auto-execute).
+- **Approval-required** — file writes, shell commands, web fetch, delegation, scheduling.
+- **Forbidden** — unrestricted shell, network exfiltration, credential dumping, OS process control, anything outside the workspace.
+
+## Residual risk
+
+This is a course proof-of-concept: controlled local demo use with explicit safety
+boundaries, not an enterprise-hardened, fully autonomous system.
 
 ## MCP Client Trust Boundary
 

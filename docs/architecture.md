@@ -1,5 +1,61 @@
 # Architecture
-See project knowledge document 01-architecture.md for full details.
+
+Mini-OpenClaw is a local-first AI agent that turns natural-language requests into
+safe, auditable tool executions. It runs as a local web app: a **React + TypeScript
+(Vite)** frontend and a **Python FastAPI** backend, with **SQLite** for persistence
+and **Server-Sent Events (SSE)** for live run updates.
+
+For the complete narrative, screenshots, and evaluation data, see the root
+[`README.md`](../README.md) and the poster in
+[`project_docs/`](../project_docs/). This file documents the architecture at a
+glance and the MCP integration in detail.
+
+## Request lifecycle
+
+Every request runs as a single auditable loop driven by the **orchestrator**
+(`apps/api/core/orchestrator.py`):
+
+```
+User request
+   → Planner        (LLMProvider proposes the next step as JSON)
+   → Policy engine  (classifies: safe / approval-required / forbidden)
+   → Executor       (runs the tool through the skill registry)
+   → Observation    (result feeds back to the planner)
+   ↺ continue / adapt / replan  — the hybrid Plan → ReAct → Replan loop
+   → Final answer
+```
+
+Around the loop: the **memory manager** supplies context, the **audit logger**
+records every decision, and SSE streams progress to the UI. The LLM only
+*proposes*; code *decides* and *executes*.
+
+## Core components (`apps/api/`)
+
+- `core/orchestrator.py` — owns the run lifecycle (ReAct loop, replanning, approval waits)
+- `core/planner.py` — builds prompts and parses structured plans; provider-agnostic
+- `core/policy.py` — the security boundary (path sandbox, shell allowlist, injection checks)
+- `core/executor.py` — invokes validated tools, captures timing/output/errors
+- `core/audit.py` — append-only audit log
+- `core/scheduler.py` — recurring/scheduled task runner
+- `providers/` — pluggable `LLMProvider` interface with Anthropic, Gemini, and Ollama backends (see [provider-abstraction.md](provider-abstraction.md))
+- `skills/` — manifest-driven tool registry (13 tools by default; see [tool-contracts.md](tool-contracts.md))
+- `memory/` — five-layer memory with hybrid vector+keyword retrieval (see [memory-model.md](memory-model.md))
+- `routes/` — FastAPI endpoints (see [api-spec.md](api-spec.md))
+
+## Run state model
+
+```
+idle → planning → reacting → awaiting_approval → running → completed
+                                              ↘ awaiting_clarification
+                                              ↘ reflecting
+                                              ↘ failed / cancelled
+```
+
+## Frontend (`apps/web/`)
+
+React components for chat, plan preview, approval cards, live tool trace,
+execution graph, run history, memory browser, and the scheduler page. The client
+consumes the API contract only and subscribes to per-run SSE streams.
 
 ## MCP Client Support
 

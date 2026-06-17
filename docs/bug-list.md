@@ -30,11 +30,20 @@ Prioritized list of issues found and fixed during T08.
 | 12 | `export_memory.py` did not export audit log | **FIXED** — now exports `audit_log.json` too |
 | 13 | `conftest.py` had `test_db` fixture returning a connection (not needed by any working test) | **FIXED** — replaced with cleaner `make_tool_context` helper |
 
+## Resolved Since T08
+
+These were open at T08 and have since been addressed as the project evolved:
+
+| # | Description | Status |
+|---|-------------|--------|
+| A | Planner used the synchronous `anthropic.Anthropic` client, blocking the event loop | **RESOLVED** — replaced by the async `LLMProvider` abstraction (Anthropic/Gemini/Ollama), all calls awaited |
+| C | No WebSocket support (polling only) | **RESOLVED** — live updates now stream over Server-Sent Events (`GET /api/runs/{id}/stream`) |
+| D | No semantic/embedding memory retrieval (keyword only) | **RESOLVED** — hybrid retrieval blends local vector search (`all-MiniLM-L6-v2`) with keyword matching |
+
 ## Known Remaining Issues
 
 | # | Description | Severity |
 |---|-------------|----------|
-| A | Planner uses synchronous `anthropic.Anthropic` client (not async) — works but blocks event loop during API calls | P2 — functional but not ideal |
-| B | `_wait_for_approval` polls DB every 1 second with new connection each time — works but not efficient | P2 — acceptable for PoC |
-| C | No WebSocket support yet (polling only) — frontend polls run status | P2 — stretch goal per spec |
-| D | No semantic/embedding memory retrieval — keyword search only | P2 — stretch goal per spec |
+| B | `_wait_for_approval` polls the DB every ~1s with a fresh connection — works but not the most efficient pattern | P2 — acceptable for a PoC |
+| E | LLM output is non-deterministic; intermittent JSON/truncation issues are mitigated with repair + budgets but can still vary run to run | P2 — inherent to LLM agents |
+| F | The evaluation suite is small and illustrative (14 tasks), not a rigorous benchmark | P2 — by design for a course PoC |

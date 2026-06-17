@@ -10,16 +10,16 @@
 > "This is Mini-OpenClaw, a lightweight AI agent for local task execution. It takes natural-language instructions, creates a structured plan, validates each step against a security policy, and executes approved actions — all visible and auditable."
 
 - Show the web UI with the chat panel open
-- Briefly point out the sidebar navigation: Chat, History, Memory
+- Briefly point out the sidebar navigation: Chat, History, Memory, Scheduler
 
 ---
 
 ## Architecture Overview (45 seconds)
 
-> "Here's how it works. Natural language goes in, Claude generates a structured JSON plan using only registered tools, the policy engine classifies each step as safe, approval-required, or forbidden, and then tools execute within the workspace boundary. Every decision is logged."
+> "Here's how it works. Natural language goes in. The active LLM provider — Claude, Gemini, or a local Ollama model — proposes one step at a time as structured JSON, using only registered tools. The policy engine classifies each step as safe, approval-required, or forbidden; the executor runs it; and the observation feeds back so the agent can continue, adapt, or replan. That's the hybrid Plan → ReAct → Replan loop. Every decision is logged."
 
-- Show the architecture diagram (from poster or docs/architecture.md)
-- Highlight: planner → policy → executor → memory pipeline
+- Show the architecture diagram (from the poster or docs/architecture.md)
+- Highlight: planner → policy → executor → observation loop, with memory and audit around it
 
 ---
 
@@ -108,7 +108,7 @@
 
 - Open `apps/api/skills/list_files.py` briefly to show the structure
 - Navigate to `http://localhost:8000/api/tools` in the browser
-- Show all 7 registered tools in the JSON response
+- Show all 13 registered tools in the JSON response
 
 > "The skill registry auto-discovers tools at startup. The planner sees them automatically."
 

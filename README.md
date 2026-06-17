@@ -24,11 +24,11 @@ Key features:
 - **Real-time SSE streaming** — run status, plans, and approvals pushed to the frontend instantly via Server-Sent Events (no polling)
 - **User-friendly status announcements** — the agent narrates what it's doing in plain language ("Let me search your files…") instead of showing raw tool names, with full tool traceability preserved in expandable details
 - **Hybrid semantic memory** — 70% vector similarity + 30% keyword matching, powered by local sentence-transformers embeddings (no API cost)
-- **Three memory layers** — durable facts, episodic task history, and auto-generated conversation summaries
+- **Five memory layers** — durable facts, episodic task history, auto-generated conversation summaries, dream-derived workflow strategies, and inferred user preferences
 - **Agent Dreams** — post-run memory consolidation that mines episodes for workflow strategies and user preferences, proposed for user review before influencing future planning
 - **Saga compensation** — reject a step and all previous write operations are automatically rolled back
 - **Budget-aware planning** — the agent sees its iteration budget, prefers batch operations, and works more strategically when budget is low; a live progress bar in the UI shows budget consumption
-- **Token tracking & cost dashboard** — every LLM call captures real token usage from the provider SDK (not estimates). Per-step, per-run, per-phase, and session-level cost breakdowns in the UI. Centralized pricing config (`pricing.json`) covering 45 models across Anthropic, Gemini, OpenAI, DeepSeek, and local Ollama. Dreamer background cycles tracked separately. "Estimated" badge when usage data is unavailable. Pricing verification date shown alongside all dollar figures
+- **Token tracking & cost dashboard** — every LLM call captures real token usage from the provider SDK (not estimates). Per-step, per-run, per-phase, and session-level cost breakdowns in the UI. Centralized pricing config (`pricing.json`) covering 50 models across Anthropic, Gemini, OpenAI, DeepSeek, and local Ollama. Dreamer background cycles tracked separately. "Estimated" badge when usage data is unavailable. Pricing verification date shown alongside all dollar figures
 - **Graceful max-iterations degradation** — when the agent exhausts its iteration budget, it synthesizes a direct answer from collected evidence instead of just summarizing what actions were taken; the run completes successfully if evidence is sufficient
 - **Error classification** — transient errors are retried with backoff, permanent errors go straight to the LLM, side-effect errors are surfaced to the user
 - **Self-reflection quality gate** — optional critique step where the agent scores its own final answer (completeness, accuracy, clarity). When the score is below threshold and iteration budget remains, the agent re-enters the ReAct loop to take corrective action (re-read files, run additional searches, etc.). Falls back to a text-only rewrite if no budget remains. Live "Reviewing…" status and expandable score breakdown in the UI
@@ -976,7 +976,7 @@ Every LLM call in Mini-OpenClaw captures **real token usage** from the provider'
 
 ### Pricing configuration
 
-Pricing is loaded from `pricing.json` at the repo root — edit the JSON to update prices, no Python changes needed. The file covers 45 models across 5 providers:
+Pricing is loaded from `pricing.json` at the repo root — edit the JSON to update prices, no Python changes needed. The file covers 50 models across 5 providers:
 
 | Provider | Models | Input price range (per MTok) |
 |----------|--------|------------------------------|

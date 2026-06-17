@@ -19,8 +19,12 @@ apps/api/providers/
 ├── errors.py             # provider-agnostic exception hierarchy
 ├── factory.py            # build_provider(settings) + ProviderType enum
 ├── anthropic_provider.py # AnthropicProvider — wraps AsyncAnthropic
-└── gemini_provider.py    # GeminiProvider — wraps google-genai
+├── gemini_provider.py    # GeminiProvider — wraps google-genai (AI Studio or Vertex AI)
+└── ollama_provider.py    # OllamaProvider — local models via the Ollama HTTP API ($0)
 ```
+
+Three providers ship today — **Anthropic**, **Gemini**, and **Ollama** — all
+behind the same interface. The agent doesn't know which is active.
 
 ## The four key types
 
@@ -49,6 +53,11 @@ ANTHROPIC_API_KEY=sk-ant-...
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=AI...
 # GEMINI_MODEL=gemini-2.5-flash               # optional override
+
+# OR use a local Ollama model (no API key, $0)
+# LLM_PROVIDER=ollama
+# OLLAMA_BASE_URL=http://localhost:11434
+# OLLAMA_MODEL=llama3.2
 ```
 
 Restart the backend. `GET /api/health` reports the active provider and
@@ -96,8 +105,10 @@ which touch the planner, orchestrator, executor, or any tool:
    ```
 5. **Document** the new value in `.env.example` and the README.
 
-Same recipe applies to Ollama, Groq, DeepSeek, or any local model — the
-interface doesn't change.
+Same recipe applies to Groq, DeepSeek, or any other vendor — the interface
+doesn't change. (**Ollama is already implemented** the same way for local,
+zero-cost models; see `ollama_provider.py` and `ProviderType.OLLAMA` in
+`factory.py`.)
 
 ## Exception mapping
 
@@ -171,6 +182,14 @@ classDiagram
         -_to_gemini_tools(...)
     }
 
+    class OllamaProvider {
+        +name = "ollama"
+        -str _base_url
+        -str _model
+        -_to_ollama_messages(...)
+        -_to_ollama_tools(...)
+    }
+
     class LLMMessage {
         +role: "system" | "user" | "assistant"
         +content: str
@@ -202,6 +221,7 @@ classDiagram
 
     LLMProvider <|-- AnthropicProvider
     LLMProvider <|-- GeminiProvider
+    LLMProvider <|-- OllamaProvider
     LLMProvider ..> LLMMessage : consumes
     LLMProvider ..> LLMToolSchema : consumes
     LLMProvider ..> LLMResponse : produces
@@ -218,7 +238,7 @@ sequenceDiagram
     participant API as FastAPI /api/chat
     participant O as Orchestrator
     participant PL as Planner
-    participant FP as LLMProvider (Anthropic|Gemini)
+    participant FP as LLMProvider (Anthropic|Gemini|Ollama)
     participant SDK as Vendor SDK
     participant PE as PolicyEngine
     participant EX as Executor

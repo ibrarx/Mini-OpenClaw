@@ -1,5 +1,53 @@
 # Tool Contracts
-See project knowledge document 03-tool-contracts.md for full details.
+
+Tools (skills) are registered through a manifest-driven registry so the agent can
+gain capabilities without changing core orchestration logic. Each tool declares a
+name, description, risk level, approval flag, and JSON input/output schemas; the
+planner only ever sees registered tools, and adding one is a new module — no core
+changes.
+
+The authoritative contract for each tool is its manifest in
+`apps/api/skills/<tool>.py` (validated by the tests in `tests/test_tools.py` and
+`tests/test_new_tools.py`). This file summarizes the tool set and documents the
+MCP proxy/exposure behavior in detail.
+
+## Tool set (13 registered by default)
+
+| Tool | Risk | Approval |
+|------|------|----------|
+| `list_files` | safe | no |
+| `read_file` | safe | no |
+| `search_in_files` | safe | no |
+| `search_memory` | safe | no |
+| `remember_fact` | safe | no |
+| `get_datetime` | safe | no |
+| `calculator` | safe | no |
+| `system_info` | safe | no |
+| `write_file` | medium | yes |
+| `run_shell_safe` | medium/high | yes |
+| `fetch_url` | high | yes |
+| `delegate_task` | medium | yes |
+| `schedule_task` | medium | yes (config) |
+
+Plus two non-planner tools: `explain_run` (invoked via `GET /api/runs/{id}/explain`)
+and `mcp_tool` (the dynamic proxy used for external MCP tools, below).
+
+`delegate_task`, `schedule_task`, `fetch_url`, and MCP proxy tools are
+registered conditionally based on `.env` flags and are excluded from child/
+delegated runs.
+
+## Structured result envelope
+
+Every tool returns a normalized `ToolResult` (tool name, status, risk level,
+input, output, error, timing, artifacts) so all executions are observable and
+auditable.
+
+## Adding a new tool
+
+1. Create a module in `apps/api/skills/` implementing the `BaseTool` interface.
+2. Define its manifest (name, schemas, risk level, approval flag).
+3. The registry auto-discovers it at startup; the planner sees it automatically.
+   No changes to orchestrator, policy, or executor.
 
 ## MCP Proxy Tools
 
