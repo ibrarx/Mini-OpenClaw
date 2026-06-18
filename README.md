@@ -1136,4 +1136,4 @@ mini-openclaw/
 
 ## License
 
-Course project — not licensed for production use.
+This project was developed as part of a university course and is provided for educational purposes only. It has not been tested, audited, or maintained for production use.
